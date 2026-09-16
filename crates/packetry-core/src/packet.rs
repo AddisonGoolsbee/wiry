@@ -307,6 +307,15 @@ impl Packet {
         }
     }
 
+    /// Names a length field too narrow to describe this packet, when
+    /// serialising would have to write one. A packet read from a capture and
+    /// left alone keeps the lengths the wire gave, so it is never rejected.
+    pub fn oversize(&self) -> Option<String> {
+        (self.dirty != 0)
+            .then(|| crate::compute::oversize(self))
+            .flatten()
+    }
+
     pub fn to_bytes(&mut self) -> &[u8] {
         if self.dirty != 0 {
             self.refresh_totals();

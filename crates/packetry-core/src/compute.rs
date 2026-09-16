@@ -46,6 +46,32 @@ fn content_end(pkt: &Packet) -> usize {
         .map_or(pkt.buf.len(), |s| (s.off as usize).min(pkt.buf.len()))
 }
 
+/// Names the field that cannot describe this packet, when one cannot. Every
+/// length recomputed here is sixteen bits wide (RFC 791 §3.1, RFC 8200 §3,
+/// RFC 768) and so is the length in TCP's and UDP's pseudo-header, so a larger
+/// frame has no representation and emitting it modulo 65536 would be a lie.
+/// Nothing is recomputed on a clipped capture, so nothing there can wrap.
+pub fn oversize(pkt: &Packet) -> Option<String> {
+    if pkt.len() <= u16::MAX as usize || is_clipped(pkt) {
+        return None;
+    }
+    let end = content_end(pkt);
+    for s in pkt.spans.iter() {
+        let n = end.saturating_sub(s.off as usize);
+        let (what, n) = match s.proto {
+            ProtoId::Ipv4 => ("IP.len", n),
+            ProtoId::Ipv6 => ("IPv6.plen", n.saturating_sub(40)),
+            ProtoId::Udp => ("UDP.len", n),
+            ProtoId::Tcp => ("the TCP pseudo-header length", n),
+            _ => continue,
+        };
+        if n > u16::MAX as usize {
+            return Some(format!("{what} cannot hold {n} bytes"));
+        }
+    }
+    None
+}
+
 fn span_bounds(pkt: &Packet, i: usize) -> (usize, usize, usize) {
     let s = pkt.spans[i];
     let off = s.off as usize;
@@ -237,6 +263,28 @@ mod tests {
         assert_eq!(back.to_bytes().len(), 46);
         assert_eq!(back.get(0, "len").unwrap(), FieldValue::Uint(28));
         assert_eq!(back.get(1, "len").unwrap(), FieldValue::Uint(8));
+    }
+
+    #[test]
+    fn a_length_field_too_narrow_is_reported_rather_than_wrapped() {
+        let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Udp]);
+        p.set_payload(1, &[0u8; 65507]);
+        assert_eq!(p.oversize(), None);
+        assert_eq!(p.to_bytes().len(), 65535);
+
+        let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Udp]);
+        p.set_payload(1, &[0u8; 65508]);
+        assert_eq!(
+            p.oversize().as_deref(),
+            Some("IP.len cannot hold 65536 bytes")
+        );
+    }
+
+    #[test]
+    fn a_capture_larger_than_a_length_field_still_round_trips_untouched() {
+        let mut p = Packet::dissect(vec![0u8; 70000], ProtoId::Raw);
+        assert_eq!(p.oversize(), None);
+        assert_eq!(p.to_bytes().len(), 70000);
     }
 
     #[test]

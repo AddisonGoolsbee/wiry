@@ -404,8 +404,11 @@ impl PyPkt {
 
     // &mut self is required: CorePacket::to_bytes caches computed checksums in place.
     #[allow(clippy::wrong_self_convention)]
-    fn to_bytes<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new_bound(py, self.inner.to_bytes())
+    fn to_bytes<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        if let Some(e) = self.inner.oversize() {
+            return Err(PyValueError::new_err(e));
+        }
+        Ok(PyBytes::new_bound(py, self.inner.to_bytes()))
     }
 
     fn show(&self) -> String {
@@ -880,6 +883,9 @@ fn build_and_serialize<'py>(
     }
     apply_all_fields(&mut pkt, &ints, &strs, &raws)?;
     pkt.mark_all_dirty();
+    if let Some(e) = pkt.oversize() {
+        return Err(PyValueError::new_err(e));
+    }
     Ok(PyBytes::new_bound(py, pkt.to_bytes()))
 }
 

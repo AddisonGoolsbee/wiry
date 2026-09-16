@@ -249,3 +249,30 @@ def test_explicit_field_values_survive_serialisation():
 def test_bad_construction_values_are_reported(kwargs, exc):
     with pytest.raises(exc):
         bytes(Ether() / IP(**kwargs))
+
+
+def test_a_maximal_datagram_still_serialises():
+    # RFC 791 §3.1: 65,535 is exactly what the total length field holds.
+    pkt = Ether() / IP() / Raw(load=b"\x00" * 65515)
+    assert Ether(bytes(pkt))[IP].len == 65535
+
+
+@pytest.mark.parametrize(
+    "pkt,field",
+    [
+        (Ether() / IP() / Raw(load=b"\x00" * 65516), "IP.len"),
+        (Ether() / IPv6() / Raw(load=b"\x00" * 65536), "IPv6.plen"),
+        (UDP() / Raw(load=b"\x00" * 70000), "UDP.len"),
+        (TCP() / Raw(load=b"\x00" * 70000), "TCP pseudo-header"),
+    ],
+)
+def test_a_length_field_too_narrow_is_an_error_not_a_wrapped_value(pkt, field):
+    with pytest.raises(ValueError, match=field.replace(".", r"\.")):
+        bytes(pkt)
+
+
+def test_growing_a_payload_past_the_length_field_is_an_error():
+    pkt = Ether(bytes(Ether() / IP() / UDP() / Raw(load=b"1234")))
+    pkt[Raw].load = b"\x00" * 70000
+    with pytest.raises(ValueError, match="IP.len"):
+        bytes(pkt)
