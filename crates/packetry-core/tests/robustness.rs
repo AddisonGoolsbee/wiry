@@ -300,6 +300,28 @@ fn valid_frames() -> Vec<(&'static str, Vec<u8>)> {
 }
 
 #[test]
+fn a_layer_index_past_the_stack_is_empty_not_a_panic() {
+    let mut pkt = Packet::dissect(eth_ip_tcp(), ProtoId::Ether);
+    let past = pkt.layers().len();
+    for i in [past, past + 7, usize::MAX] {
+        assert!(pkt.header(i).is_empty());
+        assert!(pkt.payload(i).is_empty());
+        assert!(pkt.layer_bytes(i).is_empty());
+        assert!(pkt.get(i, "src").is_none());
+        assert!(!pkt.set_uint(i, "ttl", 1));
+        assert!(!pkt.set_bytes(i, "src", b"\x01\x02\x03\x04"));
+        assert!(!pkt.set_payload(i, b"x"));
+        assert!(pkt.options(i).is_none());
+        for f in desc(ProtoId::Ipv4).fields {
+            let _ = pkt.get_desc(i, f);
+        }
+    }
+    let empty = Packet::dissect(Vec::new(), ProtoId::Ether);
+    assert!(empty.header(0).is_empty());
+    assert!(empty.payload(0).is_empty());
+}
+
+#[test]
 fn random_bytes_dissect_at_every_entry_point() {
     let mut rng = Rng::new(SEED);
     let start = Instant::now();

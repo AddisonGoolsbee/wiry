@@ -142,9 +142,12 @@ impl Packet {
         self.spans.iter().any(|s| s.proto == proto)
     }
 
+    /// Empty for a layer index past the stack, as every other accessor is.
     #[inline]
     pub fn header(&self, layer: usize) -> &[u8] {
-        let s = self.spans[layer];
+        let Some(s) = self.spans.get(layer) else {
+            return &[];
+        };
         let a = s.off as usize;
         let b = (a + s.hlen as usize).min(self.buf.len());
         &self.buf[a..b]
@@ -153,14 +156,18 @@ impl Packet {
     /// Everything from this layer to the end of the packet.
     #[inline]
     pub fn layer_bytes(&self, layer: usize) -> &[u8] {
-        let s = self.spans[layer];
+        let Some(s) = self.spans.get(layer) else {
+            return &[];
+        };
         let a = (s.off as usize).min(self.buf.len());
         &self.buf[a..]
     }
 
     #[inline]
     pub fn payload(&self, layer: usize) -> &[u8] {
-        let s = self.spans[layer];
+        let Some(s) = self.spans.get(layer) else {
+            return &[];
+        };
         let a = ((s.off + s.hlen) as usize).min(self.buf.len());
         &self.buf[a..]
     }
@@ -173,13 +180,11 @@ impl Packet {
         Some(self.get_desc(layer, f))
     }
 
+    /// VarBytes fields run to the end of the header, not the buffer, which is
+    /// exactly the extent `header` reports.
     #[inline]
     pub fn get_desc(&self, layer: usize, f: &FieldDesc) -> FieldValue {
-        let s = self.spans[layer];
-        let a = s.off as usize;
-        // VarBytes fields run to the end of the header, not the buffer.
-        let b = (a + s.hlen as usize).min(self.buf.len());
-        field::decode(&self.buf[a..b], f)
+        field::decode(self.header(layer), f)
     }
 
     /// False when the field is unknown for this layer, or conditional and
@@ -254,8 +259,11 @@ impl Packet {
         self.refresh_totals();
     }
 
-    pub fn set_payload(&mut self, layer: usize, data: &[u8]) {
-        let s = self.spans[layer];
+    /// False when there is no such layer.
+    pub fn set_payload(&mut self, layer: usize, data: &[u8]) -> bool {
+        let Some(s) = self.spans.get(layer).copied() else {
+            return false;
+        };
         let cut = (s.off + s.hlen) as usize;
         self.buf.truncate(cut.min(self.buf.len()));
         self.buf.extend_from_slice(data);
@@ -263,6 +271,7 @@ impl Packet {
         self.spans = spans_of(&self.buf, link, false);
         self.dirty = u32::MAX;
         self.resized = true;
+        true
     }
 
     /// Construction lays down the fixed part first, so a header whose length

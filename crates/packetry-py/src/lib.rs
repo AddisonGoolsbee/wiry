@@ -295,8 +295,11 @@ impl PyPkt {
         Ok(())
     }
 
-    fn set_payload(&mut self, layer: usize, data: &[u8]) {
-        self.inner.set_payload(layer, data);
+    fn set_payload(&mut self, layer: usize, data: &[u8]) -> PyResult<()> {
+        if !self.inner.set_payload(layer, data) {
+            return Err(PyIndexError::new_err("layer out of range"));
+        }
+        Ok(())
     }
 
     /// `None` means the protocol has no option region at all, unlike an empty
@@ -398,8 +401,11 @@ impl PyPkt {
         Ok(Some(out.into()))
     }
 
-    fn payload<'py>(&self, py: Python<'py>, layer: usize) -> Bound<'py, PyBytes> {
-        PyBytes::new_bound(py, self.inner.payload(layer))
+    fn payload<'py>(&self, py: Python<'py>, layer: usize) -> PyResult<Bound<'py, PyBytes>> {
+        if layer >= self.inner.layers().len() {
+            return Err(PyIndexError::new_err("layer out of range"));
+        }
+        Ok(PyBytes::new_bound(py, self.inner.payload(layer)))
     }
 
     // &mut self is required: CorePacket::to_bytes caches computed checksums in place.
@@ -773,6 +779,9 @@ fn make_stack(
     names: &[String],
     opts: &[(usize, Vec<u8>)],
 ) -> PyResult<Vec<(ProtoId, Option<Vec<u8>>)>> {
+    if names.is_empty() {
+        return Err(PyValueError::new_err("empty packet"));
+    }
     let mut stack = Vec::with_capacity(names.len());
     for (i, n) in names.iter().enumerate() {
         let o = opts
