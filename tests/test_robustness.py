@@ -39,6 +39,20 @@ def test_building_with_no_layers_raises(fn):
         fn([], [], [], [], b"x", [])
 
 
+@pytest.mark.parametrize(
+    "load", [2**31, 0, 5, True, [1, 2, 3], range(5), 1.5]
+)
+@pytest.mark.parametrize("layer", [packetry.Raw, packetry.Padding])
+def test_a_non_bytes_load_is_refused_not_allocated(layer, load):
+    with pytest.raises(TypeError):
+        bytes(IP() / layer(load=load))
+
+
+@pytest.mark.parametrize("load", [b"ab", bytearray(b"ab"), memoryview(b"ab"), "ab"])
+def test_a_bytes_like_load_still_builds(load):
+    assert bytes(packetry.Raw(load=load)) == b"ab"
+
+
 def dns_bomb() -> bytes:
     """2.75 MB claiming 65,535 records in every section, each a two-octet
     pointer to one maximal name of octets that decode three bytes wide."""

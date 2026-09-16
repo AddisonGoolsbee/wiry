@@ -28,12 +28,15 @@ def _is_bytes(x: Any) -> bool:
     return isinstance(x, (bytes, bytearray, memoryview))
 
 
-def _to_bytes(x: Any) -> bytes:
+def _to_bytes(x: Any, what: str = "value") -> bytes:
     """Byte-oriented strings encode as latin-1, so every code point below 256
-    survives as the octet of the same value."""
+    survives as the octet of the same value. Anything else is refused, because
+    `bytes(n)` would allocate n zero octets instead of failing."""
     if isinstance(x, str):
         return x.encode("latin-1")
-    return bytes(x)
+    if _is_bytes(x):
+        return bytes(x)
+    raise TypeError(f"{what} must be bytes or str, not {type(x).__name__}")
 
 
 _FLAG_NAMES: dict[tuple[str, str], tuple[str, ...] | None] = {}
@@ -588,16 +591,16 @@ class Packet(metaclass=_PacketMeta):
         for i, (lname, fields) in enumerate(self._stack):
             if lname in ("Raw", "Padding"):
                 load = fields.get("load")
-                if load:
-                    out.append((i, bytes(load)))
+                if load is not None:
+                    blob = _to_bytes(load, f"{lname}.load")
+                    if blob:
+                        out.append((i, blob))
                 continue
             var = _VAR_FIELD.get(lname)
             if var is not None:
                 blob = fields.get(var[0], var[1]) or b""
-                if isinstance(blob, str):
-                    blob = blob.encode()
                 if blob:
-                    out.append((i, bytes(blob)))
+                    out.append((i, _to_bytes(blob, f"{lname}.{var[0]}")))
                 continue
             v = fields.get("options")
             if v is None or _is_bytes(v):
