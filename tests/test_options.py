@@ -175,8 +175,10 @@ def test_dhcp_address_option_decodes():
     assert names["server_id"] == ["10.0.0.1"]
 
 
-def test_bootp_layer_has_no_option_region():
+def test_bootp_option_field_is_the_magic_cookie():
+    # RFC 2131 3: the cookie ends the BOOTP header and introduces the DHCP
+    # options, so it is what BOOTP's own option field holds.
     pkt = UDP(_dhcp_frame(bytes([255])))
     assert BOOTP in pkt
-    with pytest.raises(AttributeError):
-        _ = pkt[BOOTP].options
+    assert pkt[BOOTP].options == bytes([99, 130, 83, 99])
+    assert pkt[DHCP].raw_options() == bytes([255])

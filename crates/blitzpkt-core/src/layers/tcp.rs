@@ -135,6 +135,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     parse_options: Some(parse_options),
     set_hlen: Some(set_hlen),
     bind_next: None,
+    bind_next_bytes: None,
 };
 
 #[cfg(test)]

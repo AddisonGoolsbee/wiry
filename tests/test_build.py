@@ -29,7 +29,7 @@ def test_slash_groups_the_same_either_way():
     [
         ("Ether", 14), ("Dot1Q", 4), ("ARP", 28), ("IP", 20), ("IPv6", 40),
         ("TCP", 20), ("UDP", 8), ("ICMP", 8), ("ICMPv6", 4), ("DNS", 12),
-        ("BOOTP", 236), ("DHCP", 4), ("Raw", 0), ("Padding", 0),
+        ("BOOTP", 236), ("DHCP", 0), ("Raw", 0), ("Padding", 0),
     ],
 )
 def test_single_layer_serialises_to_its_header_size(name, size):
@@ -224,8 +224,10 @@ def test_computed_fields_are_filled_in_by_serialisation():
 
 def test_bootp_stack_reaches_dhcp():
     pkt = Ether() / IP() / UDP(sport=68, dport=67) / BOOTP() / DHCP()
+    # Stacking DHCP appends the magic cookie, which RFC 2131 puts at the end of
+    # the BOOTP header rather than in DHCP itself.
     assert len(bytes(pkt)) == 14 + 20 + 8 + 236 + 4
-    assert pkt[DHCP].magic == 0x63825363
+    assert pkt[BOOTP].options == bytes([99, 130, 83, 99])
 
 
 def test_explicit_field_values_survive_serialisation():

@@ -66,6 +66,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     parse_options: None,
     set_hlen: None,
     bind_next: None,
+    bind_next_bytes: None,
 };
 
 /// TYPE values from the IANA "Resource Record (RR) TYPEs" registry. The first

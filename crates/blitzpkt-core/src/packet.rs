@@ -60,6 +60,15 @@ impl Packet {
         for (i, (p, opts)) in stack.iter().enumerate() {
             let p = *p;
             let d = desc(p);
+            // A layer can gain header bytes from what is stacked under it, so
+            // the previous header is finished only now.
+            if i > 0 {
+                let prev = spans[i - 1];
+                if let Some(extra) = desc(prev.proto).bind_next_bytes.map(|f| f(p)) {
+                    buf.extend_from_slice(extra);
+                    spans[i - 1].hlen += extra.len() as u32;
+                }
+            }
             let off = buf.len();
             buf.resize(off + d.build_len, 0);
             let mut hlen = d.build_len;

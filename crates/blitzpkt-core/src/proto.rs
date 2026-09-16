@@ -66,6 +66,10 @@ pub struct ProtoDesc {
     /// Set this header's demultiplexing field so it points at `next`.
     /// Mirrors the automatic binding that happens when layers are stacked.
     pub bind_next: Option<fn(&mut [u8], ProtoId)>,
+    /// Header bytes this layer gains when `next` is stacked under it, appended
+    /// during construction. BOOTP's magic cookie is the only user: RFC 2131 §3
+    /// makes it the start of the option area, not part of DHCP itself.
+    pub bind_next_bytes: Option<fn(ProtoId) -> &'static [u8]>,
 }
 
 const fn fixed_len(n: usize) -> fn(&[u8]) -> usize {
