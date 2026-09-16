@@ -437,11 +437,12 @@ _OPAQUE = ("Raw", "Padding")
 def _float_padding(stack: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
     """Padding is assembled after every other payload, wherever it was stacked,
     so that it lands at the end of the frame the way a pad does on the wire."""
-    if not any(n == "Padding" for n, _ in stack):
-        return stack
-    return [s for s in stack if s[0] != "Padding"] + [
-        s for s in stack if s[0] == "Padding"
-    ]
+    for name, _ in stack:
+        if name == "Padding":
+            return [s for s in stack if s[0] != "Padding"] + [
+                s for s in stack if s[0] == "Padding"
+            ]
+    return stack
 
 
 def _layer_init(name: str):
@@ -659,12 +660,14 @@ class Packet(metaclass=_PacketMeta):
         """The `nb`-th layer of this kind whose every named field matches, or
         the layer at that position when `layer` is an integer."""
         names = self.layers()
-        if isinstance(layer, int) and not isinstance(layer, bool):
+        if type(layer) is int:
             if not -len(names) <= layer < len(names):
                 return None
             layer %= len(names)
             return _LayerView(self, layer, names[layer])
         name = _layer_name(layer)
+        if nb == 1 and not flt:
+            return _LayerView(self, names.index(name), name) if name in names else None
         seen = 0
         for i, n in enumerate(names):
             if n != name:
@@ -681,12 +684,14 @@ class Packet(metaclass=_PacketMeta):
         return self.haslayer(layer)
 
     def __getitem__(self, layer: Any) -> _LayerView:
-        nb, flt = 1, {}
         # pkt[IP:2] is the second IP layer; pkt[IP::{"ttl": 3}] filters on
         # field values, which is the shape scapy's own suite uses.
-        if isinstance(layer, slice):
-            layer, nb, flt = layer.start, layer.stop or 1, layer.step or {}
-        view = self.getlayer(layer, nb, **flt)
+        if type(layer) is slice:
+            view = self.getlayer(
+                layer.start, layer.stop or 1, **(layer.step or {})
+            )
+        else:
+            view = self.getlayer(layer)
         if view is None:
             raise IndexError(f"no matching layer {layer!r} in packet")
         return view
