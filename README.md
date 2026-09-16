@@ -75,11 +75,15 @@ Beyond the fixed headers:
   gives `[('MSS', 1460), ('SAckOK', None), ('WScale', 7)]`.
 - **DNS question and record sections**, including name compression, via
   `pkt[DNS].qd` and `pkt[DNS].an`.
+- **ICMP's type-dependent fields**: a redirect has `gw`, a timestamp has
+  `ts_ori`/`ts_rx`/`ts_tx`, an unreachable has `nexthopmtu`, and asking a message
+  for a field its type does not define is an error rather than a wrong answer.
 - **pcap and pcapng** both read, dispatched on the file's own magic.
 
 Verified against scapy 2.7.0 on a real 14,261-packet capture: 3,000 of 3,000
 layer chains agree, 32,982 of 32,982 field comparisons are equal, and 3,000 of
-3,000 packets round-trip byte-identical. 128 Rust and 304 Python tests pass.
+3,000 packets round-trip byte-identical, and every field name scapy defines for
+these layers exists here. 150 Rust and 380 Python tests pass.
 
 Offline only for now. There is no `sniff()` or `send()` yet; see
 [DEVIATIONS.md](DEVIATIONS.md) S2 for why and what the plan is.
