@@ -1,9 +1,6 @@
-//! IEEE 802.1Q VLAN tag. Layout from IEEE Std 802.1Q clause 9 (VLAN Tag):
-//! a 16-bit Tag Protocol Identifier, carried in the frame as the EtherType
-//! 0x8100, followed by the 16-bit Tag Control Information — 3-bit Priority Code
-//! Point, 1-bit Drop Eligible Indicator (the Canonical Format Indicator of
-//! 802.1Q-1998), and 12-bit VLAN Identifier. The inner EtherType follows.
-//! EtherType values from the IANA "ETHER TYPES" registry.
+//! IEEE Std 802.1Q clause 9 (VLAN Tag): 16-bit TPID, then a 16-bit TCI of
+//! 3-bit PCP, 1-bit DEI and 12-bit VID, then the inner EtherType. EtherType
+//! values from the IANA "ETHER TYPES" registry.
 //!
 //! The TPID belongs to the enclosing Ethernet header's type field, so this
 //! layer starts at the TCI and is 4 bytes long: TCI plus inner EtherType.
@@ -15,7 +12,6 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("prio", 0, 3, 0),
     FieldDesc::uint("dei", 3, 1, 0),
     FieldDesc::uint("vlan", 4, 12, 1),
-    // Zero until a layer is stacked under the tag, which rewrites it.
     FieldDesc::uint("type", 16, 16, 0),
 ];
 
@@ -31,13 +27,12 @@ fn next(hdr: &[u8]) -> Next {
         ethertype::IPV4 => Next::Proto(ProtoId::Ipv4),
         ethertype::IPV6 => Next::Proto(ProtoId::Ipv6),
         ethertype::ARP => Next::Proto(ProtoId::Arp),
-        // 0x8100 inside a tag is a second tag: QinQ / 802.1ad stacking.
+        // QinQ: a tag inside a tag.
         ethertype::DOT1Q => Next::Proto(ProtoId::Dot1Q),
         _ => Next::Raw,
     }
 }
 
-/// Stacking a layer under a VLAN tag sets the inner EtherType to match it.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
     let t = match p {
         ProtoId::Ipv4 => ethertype::IPV4,
@@ -71,16 +66,14 @@ mod tests {
     use crate::field::FieldValue;
     use crate::packet::Packet;
 
-    /// Ethernet frame carrying one VLAN tag: PCP 3, DEI 0, VID 100, inner IPv4.
-    /// TCI = 011 0 0000 0110 0100 = 0x6064.
+    /// PCP 3, DEI 0, VID 100, inner IPv4: TCI = 011 0 0000 0110 0100 = 0x6064.
     fn tagged() -> Vec<u8> {
         let mut v = Vec::new();
-        v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]); // dst mac
-        v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]); // src mac
-        v.extend_from_slice(&[0x81, 0x00]); // TPID
-        v.extend_from_slice(&[0x60, 0x64]); // TCI
-        v.extend_from_slice(&[0x08, 0x00]); // inner EtherType: IPv4
-                                            // Minimal IPv4 header, 20 bytes, ihl 5.
+        v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]);
+        v.extend_from_slice(&[0x81, 0x00]);
+        v.extend_from_slice(&[0x60, 0x64]);
+        v.extend_from_slice(&[0x08, 0x00]);
         v.extend_from_slice(&[0x45, 0x00, 0x00, 0x14]);
         v.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
         v.extend_from_slice(&[0x40, 0x06, 0x00, 0x00]);
@@ -113,7 +106,7 @@ mod tests {
         assert!(p.set_uint(1, "vlan", 4095));
 
         let bytes = p.to_bytes().to_vec();
-        assert_eq!(bytes[14..16], [0xff, 0xff]); // 111 1 1111 1111 1111
+        assert_eq!(bytes[14..16], [0xff, 0xff]);
         let q = Packet::dissect(bytes, ProtoId::Ether);
         assert_eq!(q.get(1, "prio").unwrap(), FieldValue::Uint(7));
         assert_eq!(q.get(1, "dei").unwrap(), FieldValue::Uint(1));
@@ -128,7 +121,7 @@ mod tests {
         assert_eq!(next(&hdr([0x86, 0xdd])), Next::Proto(ProtoId::Ipv6));
         assert_eq!(next(&hdr([0x08, 0x06])), Next::Proto(ProtoId::Arp));
         assert_eq!(next(&hdr([0x81, 0x00])), Next::Proto(ProtoId::Dot1Q));
-        assert_eq!(next(&hdr([0x88, 0x47])), Next::Raw); // MPLS: unimplemented
+        assert_eq!(next(&hdr([0x88, 0x47])), Next::Raw);
     }
 
     #[test]
@@ -137,9 +130,9 @@ mod tests {
         v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
         v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]);
         v.extend_from_slice(&[0x81, 0x00]);
-        v.extend_from_slice(&[0x20, 0x0a, 0x81, 0x00]); // outer: PCP 1, VID 10
-        v.extend_from_slice(&[0x00, 0x14, 0x08, 0x06]); // inner: PCP 0, VID 20
-        v.extend_from_slice(&[0u8; 28]); // ARP body, contents irrelevant here
+        v.extend_from_slice(&[0x20, 0x0a, 0x81, 0x00]);
+        v.extend_from_slice(&[0x00, 0x14, 0x08, 0x06]);
+        v.extend_from_slice(&[0u8; 28]);
         let p = Packet::dissect(v, ProtoId::Ether);
         let got: Vec<_> = p.layers().iter().map(|s| s.proto).collect();
         assert_eq!(

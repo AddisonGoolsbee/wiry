@@ -4,11 +4,10 @@
 use crate::field::FieldDesc;
 use crate::proto::{ipproto, Next, ProtoDesc, ProtoId};
 
-/// Next Header value meaning the payload ends here (RFC 8200 §4.7).
+/// RFC 8200 §4.7: the payload ends here.
 pub const NO_NEXT_HEADER: u8 = 59;
 
-/// Extension headers are not walked (DEVIATIONS.md E6); they dissect as `Raw`
-/// rather than being mis-read as a transport header.
+/// Extension headers are not walked (DEVIATIONS.md E6); they dissect as `Raw`.
 const EXT_HOP_BY_HOP: u8 = 0;
 const EXT_ROUTING: u8 = 43;
 const EXT_FRAGMENT: u8 = 44;
@@ -25,12 +24,10 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::ipv6("dst", 192).defaulting_to(&LOOPBACK),
 ];
 
-/// `::1` (RFC 4291 §2.5.3). Both addresses default to it, so a header built with
-/// nothing specified describes traffic that goes nowhere.
+/// `::1`, RFC 4291 §2.5.3.
 const LOOPBACK: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
 
-/// RFC 8200 §3: the IPv6 header is a fixed 40 octets. Anything further is an
-/// extension header and belongs to the payload, not to this layer.
+/// RFC 8200 §3: a fixed 40 octets. Extension headers belong to the payload.
 fn header_len(_: &[u8]) -> usize {
     40
 }
@@ -48,7 +45,6 @@ fn next(hdr: &[u8]) -> Next {
     }
 }
 
-/// Stacking a transport layer under IPv6 sets the Next Header field to match it.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
     let v = match p {
         ProtoId::Tcp => ipproto::TCP,
@@ -89,13 +85,13 @@ mod tests {
         0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02,
     ];
 
-    /// Hand-built from the RFC 8200 §3 field order:
-    /// version 6, tc 0x12, fl 0x34567 packs as 0110 00010010 00110100010101100111.
+    /// Hand-built from the RFC 8200 §3 field order: version 6, tc 0x12,
+    /// fl 0x34567 packs as 0110 00010010 00110100010101100111.
     fn header() -> Vec<u8> {
         let mut v = vec![0x61, 0x23, 0x45, 0x67];
-        v.extend_from_slice(&[0x00, 0x08]); // plen = 8
-        v.push(ipproto::IPV6_ICMP); // nh = 58
-        v.push(0x40); // hlim = 64
+        v.extend_from_slice(&[0x00, 0x08]);
+        v.push(ipproto::IPV6_ICMP);
+        v.push(0x40);
         v.extend_from_slice(&SRC);
         v.extend_from_slice(&DST);
         v
@@ -135,7 +131,6 @@ mod tests {
         assert!(p.set_uint(ip, "fl", 0xfffff));
         assert_eq!(p.get(ip, "hlim").unwrap(), FieldValue::Uint(255));
         assert_eq!(p.get(ip, "fl").unwrap(), FieldValue::Uint(0xfffff));
-        // Writing a sub-byte field must not disturb its neighbours.
         assert_eq!(p.get(ip, "version").unwrap(), FieldValue::Uint(6));
         assert_eq!(p.get(ip, "tc").unwrap(), FieldValue::Uint(0x12));
     }
@@ -148,7 +143,6 @@ mod tests {
             assert_eq!(next(&header()[..n]), Next::Raw);
             assert_eq!(header_len(&header()[..n]), 40);
         }
-        // A full header with a truncated payload still dissects cleanly.
         let mut short = header();
         short.extend_from_slice(&[0x80, 0x00]);
         let p = Packet::dissect(short, ProtoId::Ipv6);
@@ -201,7 +195,6 @@ mod tests {
         p.set_payload(1, b"abcdefghij");
         let _ = p.to_bytes();
         let ip = p.find_layer(ProtoId::Ipv6).unwrap();
-        // 4-byte ICMPv6 header + 10 payload bytes.
         assert_eq!(p.get(ip, "plen").unwrap(), FieldValue::Uint(14));
     }
 }

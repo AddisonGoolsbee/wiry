@@ -1,25 +1,21 @@
-//! BOOTP and DHCP.
-//!
-//! BOOTP header layout from RFC 951 section 3 ("Packet Format"), with the field
-//! interpretation of RFC 2131 section 2 ("Protocol Summary") and figure 1: the
-//! 16-bit field at offset 10, unused in RFC 951, carries the BROADCAST flag.
-//! Hardware type values come from the IANA "Hardware Types" registry.
-//!
-//! DHCP options follow RFC 2132. The four-octet magic cookie 99.130.83.99 that
-//! introduces them is specified in RFC 2131 section 3 and RFC 1497.
+//! BOOTP header layout from RFC 951 §3, with the field interpretation of
+//! RFC 2131 §2 and figure 1: the 16-bit field at offset 10, unused in RFC 951,
+//! carries the BROADCAST flag. Hardware types from the IANA "Hardware Types"
+//! registry. DHCP options follow RFC 2132; the magic cookie that introduces
+//! them is RFC 2131 §3 and RFC 1497.
 
 use crate::field::FieldDesc;
 use crate::options::{be, Item, ItemValue};
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
-/// Fixed BOOTP header size in bytes: `file` ends at 108 + 128 (RFC 951 §3).
+/// RFC 951 §3: `file` ends at 108 + 128.
 const BOOTP_LEN: usize = 236;
 
 /// RFC 2131 §3 / RFC 1497: 99.130.83.99 in network order.
 pub const MAGIC_COOKIE: [u8; 4] = [99, 130, 83, 99];
 
-/// RFC 2131 figure 2, least significant bit first. Only the most significant
-/// bit of the 16-bit field is assigned (BROADCAST); the rest are MBZ.
+/// RFC 2131 figure 2, least significant bit first. Only the top bit of the
+/// 16-bit field is assigned (BROADCAST); the rest are MBZ.
 pub static FLAG_NAMES: &[&str] = &[
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "B",
 ];
@@ -64,7 +60,6 @@ fn next(hdr: &[u8]) -> Next {
     }
 }
 
-/// Stacking DHCP appends the cookie, exactly as it appears on the wire.
 fn bind_next_bytes(p: ProtoId) -> &'static [u8] {
     match p {
         ProtoId::Dhcp => &MAGIC_COOKIE,
@@ -88,7 +83,6 @@ pub static DESC: ProtoDesc = ProtoDesc {
 
 pub static DHCP_FIELDS: &[FieldDesc] = &[FieldDesc::var_bytes("options", 0)];
 
-/// The options blob runs to the end of the packet.
 fn dhcp_header_len(hdr: &[u8]) -> usize {
     hdr.len()
 }
@@ -97,7 +91,7 @@ fn dhcp_next(_: &[u8]) -> Next {
     Next::End
 }
 
-/// DHCP message types, RFC 2132 §9.6 (option 53).
+/// RFC 2132 §9.6, option 53.
 pub mod msgtype {
     pub const DISCOVER: u64 = 1;
     pub const OFFER: u64 = 2;
@@ -113,7 +107,7 @@ pub mod msgtype {
 const PAD: u8 = 0;
 const END: u8 = 255;
 
-/// RFC 2132 gives address options a length that is a multiple of four, so a
+/// RFC 2132 address options have a length that is a multiple of four, so a
 /// trailing partial address is malformed and dropped.
 fn addrs(p: &[u8]) -> Vec<[u8; 4]> {
     p.chunks_exact(4)
@@ -141,8 +135,6 @@ fn decode(code: u8, p: &[u8]) -> Item {
     match code {
         PAD => Item::flag("pad", 0),
         END => Item::flag("end", 255),
-        // Single-address options use Ipv4List with one entry, so every option
-        // carrying addresses has the same shape.
         1 => ipv4("subnet_mask", 1, p),
         3 => ipv4("router", 3, p),
         6 => ipv4("name_server", 6, p),
@@ -163,11 +155,9 @@ fn decode(code: u8, p: &[u8]) -> Item {
     }
 }
 
-/// Parse the option region of a DHCP layer (RFC 2132). `hdr` is the option
-/// area itself: the cookie that precedes it belongs to BOOTP.
-///
 /// Not `options::walk_tlv`: there the length octet counts the code and length
-/// octets themselves (TCP/IPv4), whereas RFC 2132 §2 counts only the option data.
+/// octets themselves (TCP/IPv4), whereas RFC 2132 §2 counts only the option
+/// data. `data` is the option area itself; the cookie belongs to BOOTP.
 fn parse_options(data: &[u8]) -> Vec<Item> {
     let mut out = Vec::new();
     let mut i = 0usize;
@@ -219,7 +209,7 @@ mod tests {
 
     const CHADDR: [u8; 6] = [0x00, 0x0c, 0x29, 0x1a, 0x2b, 0x3c];
 
-    /// UDP header, client to server (ports 68 -> 67), length left at zero.
+    /// Client to server, ports 68 -> 67.
     fn udp_bootpc_to_bootps() -> Vec<u8> {
         vec![0x00, 0x44, 0x00, 0x43, 0x00, 0x00, 0x00, 0x00]
     }
@@ -227,23 +217,22 @@ mod tests {
     /// A BOOTREQUEST built by hand from the RFC 951 §3 layout.
     fn bootp_header() -> Vec<u8> {
         let mut v = vec![0u8; BOOTP_LEN];
-        v[0] = 1; // op = BOOTREQUEST
-        v[1] = 1; // htype = Ethernet
-        v[2] = 6; // hlen
-        v[3] = 0; // hops
-        v[4..8].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]); // xid
-        v[8..10].copy_from_slice(&[0x00, 0x04]); // secs
-        v[10..12].copy_from_slice(&[0x80, 0x00]); // flags: BROADCAST
-        v[12..16].copy_from_slice(&[0, 0, 0, 0]); // ciaddr
-        v[16..20].copy_from_slice(&[192, 168, 1, 50]); // yiaddr
-        v[20..24].copy_from_slice(&[192, 168, 1, 1]); // siaddr
-        v[24..28].copy_from_slice(&[0, 0, 0, 0]); // giaddr
-        v[28..34].copy_from_slice(&CHADDR); // chaddr, padded to 16
+        v[0] = 1;
+        v[1] = 1;
+        v[2] = 6;
+        v[3] = 0;
+        v[4..8].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        v[8..10].copy_from_slice(&[0x00, 0x04]);
+        v[10..12].copy_from_slice(&[0x80, 0x00]);
+        v[12..16].copy_from_slice(&[0, 0, 0, 0]);
+        v[16..20].copy_from_slice(&[192, 168, 1, 50]);
+        v[20..24].copy_from_slice(&[192, 168, 1, 1]);
+        v[24..28].copy_from_slice(&[0, 0, 0, 0]);
+        v[28..34].copy_from_slice(&CHADDR);
         v
     }
 
-    /// Cookie plus a minimal RFC 2132 option list: 53 (message type) = 1
-    /// DISCOVER, then END.
+    /// Cookie plus a minimal RFC 2132 option list: DISCOVER, then END.
     fn dhcp_options() -> Vec<u8> {
         let mut v = MAGIC_COOKIE.to_vec();
         v.extend_from_slice(&[53, 1, 1, 255]);
@@ -282,7 +271,6 @@ mod tests {
         want[..6].copy_from_slice(&CHADDR);
         assert_eq!(p.get(b, "chaddr").unwrap(), FieldValue::Bytes(want));
 
-        // Broadcast flag is the most significant bit of the 16-bit field.
         match p.get(b, "flags").unwrap() {
             FieldValue::Flags { bits, .. } => assert_eq!(bits, 0x8000),
             other => panic!("expected flags, got {other:?}"),
@@ -295,8 +283,8 @@ mod tests {
         let got: Vec<_> = p.layers().iter().map(|s| s.proto).collect();
         assert_eq!(got, vec![ProtoId::Udp, ProtoId::Bootp, ProtoId::Dhcp]);
 
-        // The cookie closes the BOOTP option area; DHCP starts at the first
-        // option (RFC 2131 §3).
+        // RFC 2131 §3: the cookie closes the BOOTP option area and DHCP starts
+        // at the first option.
         let b = p.find_layer(ProtoId::Bootp).unwrap();
         assert_eq!(
             p.get(b, "options").unwrap(),
@@ -311,7 +299,6 @@ mod tests {
 
     #[test]
     fn without_cookie_there_is_no_dhcp_layer() {
-        // Trailing bytes that are not the cookie must stay opaque.
         let mut buf = udp_bootp(false);
         buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 53, 1, 1, 255]);
         let p = Packet::dissect(buf, ProtoId::Udp);
@@ -319,7 +306,6 @@ mod tests {
         let got: Vec<_> = p.layers().iter().map(|s| s.proto).collect();
         assert_eq!(got, vec![ProtoId::Udp, ProtoId::Bootp, ProtoId::Raw]);
 
-        // A bare 236-byte BOOTP with nothing after it ends at BOOTP.
         let p = Packet::dissect(udp_bootp(false), ProtoId::Udp);
         assert!(!p.has_layer(ProtoId::Dhcp));
         assert_eq!(p.layers().len(), 2);
@@ -330,14 +316,12 @@ mod tests {
         for cut in [0usize, 1, 8, 9, 100, 235, 236, 237, 239] {
             let full = udp_bootp(true);
             let p = Packet::dissect(full[..cut.min(full.len())].to_vec(), ProtoId::Udp);
-            // Reading every field of every layer must stay in bounds.
             for (i, s) in p.layers().iter().enumerate() {
                 for f in crate::proto::desc(s.proto).fields {
                     let _ = p.get_desc(i, f);
                 }
             }
         }
-        // Short header bytes handed straight to the dispatch helpers.
         assert_eq!(next(&[]), Next::Raw);
         assert_eq!(next(&[0u8; 238]), Next::Raw);
         assert_eq!(header_len(&[]), BOOTP_LEN);
@@ -363,9 +347,8 @@ mod tests {
         items.iter().map(|i| i.name.as_ref()).collect()
     }
 
-    /// The option block a client sends in a DISCOVER: message type,
-    /// a type-1 client identifier holding the MAC, a parameter request list and
-    /// End (RFC 2132 §9.6, §9.14, §9.8).
+    /// RFC 2132 §9.6, §9.14, §9.8: message type, type-1 client identifier
+    /// holding the MAC, parameter request list, End.
     fn discover_block() -> Vec<u8> {
         let mut v: Vec<u8> = Vec::new();
         v.extend_from_slice(&[53, 1, 1]);
@@ -376,7 +359,7 @@ mod tests {
         v
     }
 
-    /// A server ACK: mask, two routers, two name servers, lease time, server id.
+    /// A server ACK: mask, router, two name servers, lease time, server id.
     fn ack_block() -> Vec<u8> {
         let mut v: Vec<u8> = Vec::new();
         v.extend_from_slice(&[53, 1, 5]);
@@ -445,8 +428,6 @@ mod tests {
         assert_eq!(items[0], Item::uint("message-type", 53, msgtype::DISCOVER));
         assert_eq!(items.last().unwrap().name, "end");
 
-        // BOOTP has no parsed option list of its own; its option field is the
-        // cookie that introduces DHCP's.
         let b = p.find_layer(ProtoId::Bootp).unwrap();
         assert!(p.options(b).is_none());
     }
@@ -456,7 +437,6 @@ mod tests {
         let full = ack_block();
         for cut in 0..=full.len() {
             let items = parse_options(&full[..cut]);
-            // Whatever survives must be a prefix of the complete parse.
             let whole = parse_options(&full);
             assert!(items.len() <= whole.len(), "cut {cut} produced extra items");
             for (a, b) in items.iter().zip(whole.iter()) {
@@ -470,7 +450,7 @@ mod tests {
     fn unknown_code_does_not_stop_the_walk() {
         let mut v: Vec<u8> = Vec::new();
         v.extend_from_slice(&[53, 1, 3]);
-        v.extend_from_slice(&[224, 1, 0xaa]); // 224: unassigned in RFC 2132
+        v.extend_from_slice(&[224, 1, 0xaa]); // unassigned in RFC 2132
         v.extend_from_slice(&[51, 4, 0, 0, 0x0e, 0x10]);
         v.push(255);
         let items = parse_options(&v);
@@ -491,7 +471,7 @@ mod tests {
         v.extend_from_slice(&[58, 4, 0, 0, 0x07, 0x08]);
         v.extend_from_slice(&[59, 4, 0, 0, 0x0c, 0x4e]);
         v.push(255);
-        v.extend_from_slice(&[0, 0, 0]); // padding to the minimum BOOTP size
+        v.extend_from_slice(&[0, 0, 0]);
         let items = parse_options(&v);
         assert_eq!(
             names(&items),
@@ -535,7 +515,6 @@ mod tests {
 
     #[test]
     fn address_lists_drop_a_trailing_partial_address() {
-        // Length 6 is not a multiple of four: the stray two octets are ignored.
         let mut v: Vec<u8> = Vec::new();
         v.extend_from_slice(&[3, 6, 10, 0, 0, 1, 10, 0]);
         v.extend_from_slice(&[15, 7, b'l', b'a', b'n', b'.', b'c', b'o', b'm']);

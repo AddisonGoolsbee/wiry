@@ -1,20 +1,18 @@
-//! ARP. Packet format from RFC 826 ("An Ethernet Address Resolution Protocol"),
-//! "Packet format" section: ar$hrd, ar$pro, ar$hln, ar$pln, ar$op, ar$sha,
-//! ar$spa, ar$tha, ar$tpa. Hardware type values from the IANA "Address
+//! ARP packet format from RFC 826. Hardware type values from the IANA "Address
 //! Resolution Protocol (ARP) Parameters" registry; ptype shares the EtherType
 //! space.
 
 use crate::field::FieldDesc;
 use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
 
-/// Hardware type 1 = Ethernet (10Mb), IANA ARP Parameters.
+/// IANA ARP Parameters: 1 = Ethernet (10Mb).
 pub const HWTYPE_ETHER: u64 = 1;
-/// Opcodes from RFC 826: 1 = REQUEST (who-has), 2 = REPLY (is-at).
+/// RFC 826 opcodes.
 pub const OP_WHO_HAS: u64 = 1;
 pub const OP_IS_AT: u64 = 2;
 
-/// The address fields are sized by hwlen/plen, so the offsets below hold for
-/// the IPv4-over-Ethernet case (hwlen 6, plen 4) that the field table describes.
+/// The address fields are sized by hwlen/plen, so these offsets hold only for
+/// the IPv4-over-Ethernet case (hwlen 6, plen 4).
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("hwtype", 0, 16, HWTYPE_ETHER),
     FieldDesc::uint("ptype", 16, 16, ethertype::IPV4 as u64),
@@ -31,7 +29,6 @@ fn header_len(_: &[u8]) -> usize {
     28
 }
 
-/// ARP carries no payload; the message ends with ar$tpa.
 fn next(_: &[u8]) -> Next {
     Next::End
 }
@@ -56,19 +53,18 @@ mod tests {
     use crate::field::FieldValue;
     use crate::packet::Packet;
 
-    /// Who-has 10.0.0.2, tell 10.0.0.1. Laid out by hand from the RFC 826
-    /// packet format; the target hardware address is zero in a request.
+    /// Who-has 10.0.0.2, tell 10.0.0.1, laid out by hand from RFC 826.
     fn who_has() -> Vec<u8> {
         let mut v = Vec::new();
-        v.extend_from_slice(&[0x00, 0x01]); // hwtype: Ethernet
-        v.extend_from_slice(&[0x08, 0x00]); // ptype: IPv4
-        v.push(6); // hwlen
-        v.push(4); // plen
-        v.extend_from_slice(&[0x00, 0x01]); // op: request
-        v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]); // hwsrc
-        v.extend_from_slice(&[10, 0, 0, 1]); // psrc
-        v.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // hwdst
-        v.extend_from_slice(&[10, 0, 0, 2]); // pdst
+        v.extend_from_slice(&[0x00, 0x01]);
+        v.extend_from_slice(&[0x08, 0x00]);
+        v.push(6);
+        v.push(4);
+        v.extend_from_slice(&[0x00, 0x01]);
+        v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        v.extend_from_slice(&[10, 0, 0, 1]);
+        v.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+        v.extend_from_slice(&[10, 0, 0, 2]);
         v
     }
 
@@ -139,8 +135,7 @@ mod tests {
     #[test]
     fn carries_no_payload() {
         assert_eq!(next(&who_has()), Next::End);
-        // Ethernet pads short frames to 60 bytes; the padding must not be
-        // dissected as an ARP payload.
+        // Ethernet frame padding must not dissect as an ARP payload.
         let mut framed = who_has();
         framed.extend_from_slice(&[0u8; 18]);
         let p = Packet::dissect(framed, ProtoId::Arp);

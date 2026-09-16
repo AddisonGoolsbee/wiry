@@ -5,23 +5,10 @@ use crate::field::FieldDesc;
 use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
 
 pub static FIELDS: &[FieldDesc] = &[
-    // Defaults to the broadcast address. `src` stays zero: filling it from the
-    // host interface would need interface introspection, which is out of scope
-    // for the offline build (see DEVIATIONS.md S2).
-    FieldDesc {
-        name: "dst",
-        bit_off: 0,
-        bit_len: 48,
-        kind: crate::field::FieldKind::MacAddr,
-        default: 0xffff_ffff_ffff,
-        flags: &[],
-        computed: false,
-        cond: None,
-        default_bytes: None,
-    },
+    FieldDesc::mac("dst", 0).defaulting_to(&[0xff; 6]),
+    // `src` stays zero: filling it from the host interface needs interface
+    // introspection, out of scope for the offline build (DEVIATIONS.md S2).
     FieldDesc::mac("src", 48),
-    // Stacking a layer rewrites this. The default names no payload protocol, so
-    // a frame with nothing under it does not claim to carry IPv4.
     FieldDesc::uint("type", 96, 16, ethertype::LOOP as u64),
 ];
 
@@ -42,7 +29,6 @@ fn next(hdr: &[u8]) -> Next {
     }
 }
 
-/// Stacking a layer under Ethernet sets the EtherType to match it.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
     let t = match p {
         ProtoId::Ipv4 => ethertype::IPV4,

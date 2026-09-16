@@ -1,5 +1,4 @@
-//! Opaque payload. Anything the dissector does not recognise lands here, which
-//! is how unimplemented protocols still round-trip byte-for-byte.
+//! Opaque payload: how unrecognised protocols still round-trip byte-for-byte.
 
 use crate::field::FieldDesc;
 use crate::proto::{Next, ProtoDesc, ProtoId};

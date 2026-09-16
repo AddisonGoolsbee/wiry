@@ -41,8 +41,7 @@ fn msg_type(hdr: &[u8]) -> u8 {
     hdr.first().copied().unwrap_or(ECHO_REQUEST)
 }
 
-/// Query messages: the ones RFC 792 and its successors give an identifier and a
-/// sequence number so a reply can be matched to its request.
+/// Types RFC 792 and its successors give an identifier and sequence number.
 const QUERY_TYPES: &[u8] = &[
     ECHO_REPLY,
     ECHO_REQUEST,
@@ -76,8 +75,7 @@ fn is_param_problem(hdr: &[u8]) -> bool {
     msg_type(hdr) == PARAM_PROBLEM
 }
 
-/// The two error messages that reserve octet 4 (RFC 792) and use octet 5 as the
-/// RFC 4884 extension length.
+/// Reserve octet 4 (RFC 792) and use octet 5 as the RFC 4884 extension length.
 fn is_error(hdr: &[u8]) -> bool {
     matches!(msg_type(hdr), DEST_UNREACH | TIME_EXCEEDED)
 }
@@ -90,14 +88,12 @@ fn is_unreach(hdr: &[u8]) -> bool {
     msg_type(hdr) == DEST_UNREACH
 }
 
-/// Types that give octets 4..8 no meaning at all.
 fn is_unstructured(hdr: &[u8]) -> bool {
     !(has_id_seq(hdr) || is_redirect(hdr) || is_param_problem(hdr) || is_error(hdr))
 }
 
-/// RFC 4884 §7 puts the extension structure after the quoted datagram, inside
-/// what this model treats as the ICMP payload rather than its header. The names
-/// exist because they are part of the interface; they never decode as fields.
+/// RFC 4884 §7 puts the extension structure after the quoted datagram, which
+/// this model treats as payload. The names are interface only; they never decode.
 fn never(_: &[u8]) -> bool {
     false
 }
@@ -122,8 +118,8 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::var_bytes("ext", 64).when(never),
 ];
 
-/// Only the timestamp and address-mask messages carry more than the eight
-/// octets every ICMP message has (RFC 792 §3, RFC 950 §2).
+/// RFC 792 §3 and RFC 950 §2: only timestamp and address-mask messages carry
+/// more than the common eight octets.
 fn header_len(hdr: &[u8]) -> usize {
     match msg_type(hdr) {
         TIMESTAMP | TIMESTAMP_REPLY => 20,
@@ -132,9 +128,8 @@ fn header_len(hdr: &[u8]) -> usize {
     }
 }
 
+/// Error messages quote the offending datagram, which is not dissected.
 fn next(_: &[u8]) -> Next {
-    // Error messages quote the offending datagram; quoted-packet dissection is
-    // out of scope, so every payload stays opaque.
     Next::Raw
 }
 
@@ -158,15 +153,10 @@ mod tests {
     use crate::field::FieldValue;
     use crate::packet::Packet;
 
-    /// Echo Request, id 0x1234, seq 1, with a 4-byte payload. Hand-built from the
-    /// RFC 792 Echo message diagram.
+    /// Hand-built from the RFC 792 Echo diagram: id 0x1234, seq 1, 4-byte payload.
     fn echo_request() -> Vec<u8> {
         vec![
-            0x08, 0x00, // type 8, code 0
-            0x48, 0x2d, // checksum over the whole message
-            0x12, 0x34, // identifier
-            0x00, 0x01, // sequence number
-            0xde, 0xad, 0xbe, 0xef, // payload
+            0x08, 0x00, 0x48, 0x2d, 0x12, 0x34, 0x00, 0x01, 0xde, 0xad, 0xbe, 0xef,
         ]
     }
 
@@ -177,7 +167,6 @@ mod tests {
         assert_eq!(p.get(i, "type").unwrap(), FieldValue::Uint(8));
         assert_eq!(p.get(i, "code").unwrap(), FieldValue::Uint(0));
         assert_eq!(p.get(i, "chksum").unwrap(), FieldValue::Uint(0x482d));
-        // The hand-computed vector is a valid ICMP message.
         assert_eq!(crate::checksum::ones_complement(p.layer_bytes(i)), 0);
         assert_eq!(p.get(i, "id").unwrap(), FieldValue::Uint(0x1234));
         assert_eq!(p.get(i, "seq").unwrap(), FieldValue::Uint(1));
@@ -206,7 +195,6 @@ mod tests {
         assert_eq!(p.get(i, "id").unwrap(), FieldValue::Uint(0x1234));
     }
 
-    /// Field names present for a message, in table order.
     fn active(p: &Packet, layer: usize) -> Vec<&'static str> {
         crate::proto::active_fields(ProtoId::Icmp, p.header(layer))
             .map(|f| f.name)
@@ -233,8 +221,7 @@ mod tests {
 
     #[test]
     fn redirect_names_the_gateway() {
-        // RFC 792 Redirect: the four octets after the checksum are the gateway
-        // internet address. Code 1 is "redirect for host".
+        // RFC 792 Redirect, code 1.
         let bytes = vec![0x05, 0x01, 0x00, 0x00, 10, 0, 0, 1];
         let p = Packet::dissect(bytes, ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
@@ -247,8 +234,8 @@ mod tests {
 
     #[test]
     fn dest_unreach_names_length_and_nexthopmtu() {
-        // Code 4, fragmentation needed: RFC 1191 puts the next-hop MTU in
-        // octets 6..8, and RFC 4884 makes octet 5 the extension length.
+        // Code 4: RFC 1191 puts the next-hop MTU in octets 6..8, RFC 4884 makes
+        // octet 5 the extension length.
         let bytes = vec![0x03, 0x04, 0x00, 0x00, 0x00, 0x05, 0x05, 0xdc];
         let p = Packet::dissect(bytes, ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
@@ -315,7 +302,7 @@ mod tests {
 
     #[test]
     fn address_mask_message_carries_a_mask() {
-        // RFC 950 §2: the mask follows the identifier and sequence number.
+        // RFC 950 §2.
         let bytes = vec![
             0x11, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0xff, 0xff, 0xff, 0x00,
         ];
@@ -331,8 +318,7 @@ mod tests {
 
     #[test]
     fn unstructured_type_names_the_four_octets_unused() {
-        // Type 9, router advertisement, is not one of the types this layer
-        // gives a structured meaning to.
+        // Type 9, router advertisement, has no structured layout here.
         let bytes = vec![0x09, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04];
         let p = Packet::dissect(bytes, ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
@@ -354,7 +340,6 @@ mod tests {
         let mut p = Packet::dissect(echo_request(), ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
         assert!(!p.set_uint(i, "gw", 0x0a00_0001));
-        // The refused write left the id/seq octets alone.
         assert_eq!(p.get(i, "id").unwrap(), FieldValue::Uint(0x1234));
     }
 
@@ -385,7 +370,6 @@ mod tests {
     fn short_input_does_not_panic() {
         for n in 0..8usize {
             let p = Packet::dissect(echo_request()[..n].to_vec(), ProtoId::Icmp);
-            // Below min_len the bytes fall back to Raw rather than being decoded.
             assert!(p.layers().iter().all(|s| s.proto == ProtoId::Raw));
             assert_eq!(p.get(0, "type"), None);
         }
@@ -409,7 +393,7 @@ mod tests {
         let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Icmp]);
         p.set_payload(1, b"abcdefgh");
         let bytes = p.to_bytes().to_vec();
-        // A correct ICMP message sums to zero over header plus payload (RFC 792).
+        // RFC 792: a correct message sums to zero over header plus payload.
         assert_eq!(crate::checksum::ones_complement(&bytes[20..]), 0);
         assert_eq!(bytes[20], types::ECHO_REQUEST);
     }

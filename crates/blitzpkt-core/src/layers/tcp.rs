@@ -3,9 +3,9 @@
 
 use crate::field::FieldDesc;
 use crate::options::{be, walk_tlv, Item};
-use crate::proto::{ports, Next, ProtoDesc, ProtoId};
+use crate::proto::{Next, ProtoDesc, ProtoId};
 
-/// Control bits, least significant first: FIN, SYN, RST, PSH, ACK, URG, ECE, CWR.
+/// Control bits, least significant first.
 pub static FLAG_NAMES: &[&str] = &["F", "S", "R", "P", "A", "U", "E", "C"];
 
 pub static FIELDS: &[FieldDesc] = &[
@@ -15,8 +15,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("ack", 64, 32, 0),
     FieldDesc::uint("dataofs", 96, 4, 5),
     FieldDesc::uint("reserved", 100, 4, 0),
-    // Defaults to SYN, matching the long-standing convention for a freshly
-    // constructed TCP header in packet-crafting tools.
+    // Defaults to SYN, as packet-crafting tools conventionally do.
     FieldDesc {
         name: "flags",
         bit_off: 104,
@@ -38,25 +37,17 @@ fn header_len(hdr: &[u8]) -> usize {
     if hdr.len() < 13 {
         return 20;
     }
-    // Data Offset counts 32-bit words and must be at least 5 (RFC 9293 §3.1).
+    // RFC 9293 §3.1: Data Offset counts 32-bit words and is at least 5.
     (((hdr[12] >> 4) & 0x0f) as usize * 4).max(20)
 }
 
-fn next(hdr: &[u8]) -> Next {
-    if hdr.len() < 4 {
-        return Next::Raw;
-    }
-    let sport = u16::from_be_bytes([hdr[0], hdr[1]]);
-    let dport = u16::from_be_bytes([hdr[2], hdr[3]]);
-    if sport == ports::DNS || dport == ports::DNS {
-        // DNS over TCP is length-prefixed, which the DNS layer does not yet
-        // handle, so leave it opaque rather than mis-dissect it.
-        return Next::Raw;
-    }
+/// Always opaque: DNS over TCP is length-prefixed, which the DNS layer does not
+/// handle, and nothing else is dispatched on a TCP port.
+fn next(_: &[u8]) -> Next {
     Next::Raw
 }
 
-/// Option kinds from the IANA "TCP Option Kind Numbers" registry.
+/// IANA "TCP Option Kind Numbers" registry.
 pub mod optkind {
     pub const EOL: u8 = 0;
     pub const NOP: u8 = 1;
@@ -70,11 +61,10 @@ pub mod optkind {
     pub const TFO: u8 = 34;
 }
 
-/// Kinds 0 and 1 are a single octet with no length field (RFC 9293 §3.1).
+/// RFC 9293 §3.1: kinds 0 and 1 are a single octet with no length field.
 const SINGLE_BYTE: &[u8] = &[optkind::EOL, optkind::NOP];
 
-/// An option whose registry length is fixed: decode as an integer at that width,
-/// and fall back to the raw payload when the capture disagrees with the registry.
+/// Falls back to the raw payload when the capture disagrees with the registry.
 fn fixed_uint(name: &'static str, kind: u8, payload: &[u8], width: usize) -> Item {
     if payload.len() == width {
         Item::uint(name, kind as u32, be(payload))
@@ -85,14 +75,13 @@ fn fixed_uint(name: &'static str, kind: u8, payload: &[u8], width: usize) -> Ite
 
 fn decode(kind: u8, payload: &[u8]) -> Item {
     match kind {
-        // Unreachable while EOL is the walk's end code; kept so the decoder is
-        // total over the kinds it names.
+        // Unreachable while EOL is the walk's end code.
         optkind::EOL => Item::flag("EOL", optkind::EOL as u32),
         optkind::NOP => Item::flag("NOP", optkind::NOP as u32),
         optkind::MSS => fixed_uint("MSS", kind, payload, 2),
         optkind::WSCALE => fixed_uint("WScale", kind, payload, 1),
         optkind::SACKOK => Item::flag("SAckOK", optkind::SACKOK as u32),
-        // A run of 32-bit edge pairs (RFC 2018 §3); left unstructured.
+        // RFC 2018 §3 edge pairs, left unstructured.
         optkind::SACK => Item::bytes("SAck", kind as u32, payload),
         optkind::TIMESTAMP if payload.len() == 8 => Item::pair(
             "Timestamp",
@@ -108,7 +97,6 @@ fn decode(kind: u8, payload: &[u8]) -> Item {
     }
 }
 
-/// Options occupy the header past the fixed 20 bytes, up to Data Offset * 4.
 fn parse_options(hdr: &[u8]) -> Vec<Item> {
     let end = header_len(hdr).min(hdr.len());
     if end <= 20 {
@@ -117,7 +105,7 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
     walk_tlv(&hdr[20..end], SINGLE_BYTE, Some(optkind::EOL), decode)
 }
 
-/// Write the Data Offset field, which counts 32-bit words (RFC 9293 s3.1).
+/// RFC 9293 §3.1: Data Offset counts 32-bit words.
 fn set_hlen(hdr: &mut [u8], len: usize) {
     if hdr.len() > 12 {
         hdr[12] = (hdr[12] & 0x0f) | ((((len / 4) as u8) & 0x0f) << 4);
@@ -145,33 +133,28 @@ mod tests {
     use crate::options::ItemValue;
     use crate::packet::Packet;
 
-    /// The option block a typical SYN carries: MSS, SAckOK, Timestamp, NOP,
-    /// Window Scale. Hand-built from RFC 9293 §3.1, RFC 2018 §2, RFC 7323 §3-4.
+    /// MSS, SAckOK, Timestamp, NOP, Window Scale, hand-built from RFC 9293
+    /// §3.1, RFC 2018 §2 and RFC 7323 §3-4.
     const SYN_OPTS: &[u8] = &[
-        0x02, 0x04, 0x05, 0xb4, // MSS 1460
-        0x04, 0x02, // SAckOK
-        0x08, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, // TS 1 / 2
-        0x01, // NOP
-        0x03, 0x03, 0x07, // WScale 7
+        0x02, 0x04, 0x05, 0xb4, 0x04, 0x02, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x02, 0x01, 0x03, 0x03, 0x07,
     ];
 
-    /// A TCP header carrying `opts`, with Data Offset set to match.
     fn tcp_hdr(opts: &[u8]) -> Vec<u8> {
         assert_eq!(opts.len() % 4, 0, "option block must fill whole words");
         let dataofs = ((20 + opts.len()) / 4) as u8;
-        let mut v = vec![0x1f, 0x90, 0x00, 0x50]; // sport 8080, dport 80
-        v.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]); // seq
-        v.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // ack
+        let mut v = vec![0x1f, 0x90, 0x00, 0x50];
+        v.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        v.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
         v.push(dataofs << 4);
-        v.push(0x02); // SYN
-        v.extend_from_slice(&[0x20, 0x00]); // window
-        v.extend_from_slice(&[0x00, 0x00]); // chksum
-        v.extend_from_slice(&[0x00, 0x00]); // urgptr
+        v.push(0x02);
+        v.extend_from_slice(&[0x20, 0x00]);
+        v.extend_from_slice(&[0x00, 0x00]);
+        v.extend_from_slice(&[0x00, 0x00]);
         v.extend_from_slice(opts);
         v
     }
 
-    /// Ether / IPv4 / TCP, with the TCP header carrying `opts`.
     fn frame(opts: &[u8]) -> Vec<u8> {
         let tcp = tcp_hdr(opts);
         let mut v = Vec::new();
@@ -214,7 +197,6 @@ mod tests {
     fn dissects_options_end_to_end() {
         let p = Packet::dissect(frame(SYN_OPTS), ProtoId::Ether);
         let t = p.find_layer(ProtoId::Tcp).expect("tcp layer");
-        // Data Offset of 10 words means a 40-byte header, options included.
         assert_eq!(p.get(t, "dataofs").unwrap(), FieldValue::Uint(10));
         assert_eq!(p.header(t).len(), 40);
         assert_eq!(p.layers()[t].hlen, 40);
@@ -223,7 +205,6 @@ mod tests {
         assert_eq!(items.len(), 5);
         assert_eq!(items[0].value, ItemValue::Uint(1460));
         assert_eq!(items[4].value, ItemValue::Uint(7));
-        // The option bytes also remain readable as the flat `options` field.
         assert_eq!(
             p.get(t, "options").unwrap(),
             FieldValue::Bytes(SYN_OPTS.to_vec())
@@ -237,15 +218,14 @@ mod tests {
             let p = Packet::dissect(full[..cut].to_vec(), ProtoId::Ether);
             if let Some(t) = p.find_layer(ProtoId::Tcp) {
                 let items = p.options(t).expect("tcp has an option region");
-                // Never invents options, and never exceeds the full decode.
                 assert!(items.len() <= 5, "cut {cut} produced {items:?}");
             }
         }
-        // Directly, on a header whose Data Offset over-claims the bytes present.
+        // Data Offset over-claims the bytes present.
         let mut hdr = tcp_hdr(&[0x02, 0x04, 0x05, 0xb4]);
         hdr.truncate(22);
         assert!(parse_options(&hdr).is_empty());
-        // And on an option whose length octet runs past the option region.
+        // Length octet runs past the option region.
         let bad = tcp_hdr(&[0x02, 0x08, 0x05, 0xb4]);
         assert!(parse_options(&bad).is_empty());
     }
@@ -253,11 +233,7 @@ mod tests {
     #[test]
     fn unknown_kind_does_not_abort_the_walk() {
         // Kind 253 is an RFC 3692 experiment code, deliberately unnamed here.
-        let opts = &[
-            0xfd, 0x04, 0xde, 0xad, // unknown, 2 payload bytes
-            0x03, 0x03, 0x07, // WScale 7
-            0x01, // NOP pad to a word boundary
-        ];
+        let opts = &[0xfd, 0x04, 0xde, 0xad, 0x03, 0x03, 0x07, 0x01];
         let items = parse_options(&tcp_hdr(opts));
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].code, 253);
@@ -273,20 +249,18 @@ mod tests {
         let t = p.find_layer(ProtoId::Tcp).unwrap();
         assert_eq!(p.header(t).len(), 20);
         assert_eq!(p.options(t), Some(Vec::new()));
-        // A header built from defaults has Data Offset 5 and so no option region.
         let built = Packet::build(&[ProtoId::Ipv4, ProtoId::Tcp]);
         assert_eq!(built.options(1), Some(Vec::new()));
     }
 
     #[test]
     fn eol_ends_the_walk_and_short_dataofs_yields_nothing() {
-        // EOL terminates; the padding after it is not decoded (RFC 9293 §3.1).
+        // RFC 9293 §3.1: EOL terminates and the padding after it is not decoded.
         let opts = &[0x03, 0x03, 0x07, 0x00, 0x02, 0x04, 0x05, 0xb4];
         let items = parse_options(&tcp_hdr(opts));
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name.as_ref(), "WScale");
 
-        // Data Offset below the legal minimum of 5 leaves no option region.
         let mut hdr = tcp_hdr(SYN_OPTS);
         hdr[12] = 0x40;
         assert!(parse_options(&hdr).is_empty());
@@ -297,11 +271,8 @@ mod tests {
     #[test]
     fn decodes_the_remaining_named_kinds() {
         let opts = &[
-            0x05, 0x0a, 0, 0, 0, 1, 0, 0, 0, 2, // SAck, one edge pair
-            0x1c, 0x04, 0x80, 0x0a, // UTO
-            0x1d, 0x04, 0xaa, 0xbb, // AO
-            0x22, 0x04, 0xc0, 0xff, // TFO
-            0x00, 0x00, // EOL, then padding to a word boundary
+            0x05, 0x0a, 0, 0, 0, 1, 0, 0, 0, 2, 0x1c, 0x04, 0x80, 0x0a, 0x1d, 0x04, 0xaa, 0xbb,
+            0x22, 0x04, 0xc0, 0xff, 0x00, 0x00,
         ];
         let items = parse_options(&tcp_hdr(opts));
         assert_eq!(items.len(), 4);
