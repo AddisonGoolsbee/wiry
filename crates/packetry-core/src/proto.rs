@@ -264,13 +264,19 @@ fn binds() -> impl Iterator<Item = &'static Bind> {
     BINDS[..n].iter().filter_map(|slot| slot.get())
 }
 
-/// The child a declared binding selects for this header, if any. Costs one
-/// relaxed load until something is actually bound.
+/// The child a declared binding selects for this header, if any. The search
+/// itself is kept out of line so that a dissection with nothing bound pays one
+/// relaxed load and a branch.
 #[inline]
 pub fn bound_next(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
     if BOUND.load(Ordering::Relaxed) == 0 {
         return None;
     }
+    search_binds(parent, hdr)
+}
+
+#[inline(never)]
+fn search_binds(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
     binds()
         .find(|b| {
             b.parent == parent

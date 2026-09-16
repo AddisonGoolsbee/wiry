@@ -10,7 +10,8 @@ __version__ = _b.__version__
 
 __all__ = [
     "Packet", "PacketList", "rdpcap", "wrpcap", "PcapReader", "raw", "hexdump",
-    "hexdump_str", "ls", "known_layers", "to_arrow", "to_polars", "to_pandas",
+    "hexdump_str", "ls", "known_layers", "bind_layers", "to_arrow", "to_polars",
+    "to_pandas",
 ]
 
 _COLUMNAR = ("to_arrow", "to_polars", "to_pandas")
@@ -267,7 +268,44 @@ def _layer_name(x: Any) -> str:
     raise TypeError(f"not a layer: {x!r}")
 
 
-class Packet:
+# Layer name -> (field name, default) of a trailing variable-length field. Its
+# value is appended to the header at build time rather than written into a
+# fixed-width slot, which is the same path the option regions take.
+_VAR_FIELD: dict[str, tuple[str, Any]] = {}
+
+
+def _layer_init(name: str):
+    def __init__(self, _data: Any = None, **kw: Any) -> None:
+        if _data is not None and _is_bytes(_data):
+            Packet.__init__(self, _rust=_b.dissect(bytes(_data), name))
+            return
+        Packet.__init__(self, _stack=[(name, dict(kw))])
+
+    return __init__
+
+
+class _PacketMeta(type):
+    """Registers a subclass that declares ``fields_desc`` as a real layer, so
+    it behaves exactly like a generated built-in one."""
+
+    def __new__(mcls, cname, bases, ns):
+        desc = ns.get("fields_desc")
+        if desc is None:
+            return super().__new__(mcls, cname, bases, ns)
+        from .fields import specs
+
+        lname = ns.get("name", cname)
+        _b.register_layer(lname, specs(desc))
+        var = [f for f in desc if getattr(f, "kind", None) == "varbytes"]
+        if var:
+            _VAR_FIELD[lname] = (var[-1].name, var[-1].default)
+        ns.setdefault("__slots__", ())
+        ns["_name"] = lname
+        ns["__init__"] = _layer_init(lname)
+        return super().__new__(mcls, cname, bases, ns)
+
+
+class Packet(metaclass=_PacketMeta):
     """A packet: either a stack you are building, or one you dissected."""
 
     _name: str | None = None
@@ -325,12 +363,15 @@ class Packet:
         strs: list[tuple[int, str, str]] = []
         raws: list[tuple[int, str, bytes]] = []
         for i, (lname, fields) in enumerate(self._stack):
+            var = _VAR_FIELD.get(lname)
             for k, v in fields.items():
                 # A list of options is encoded and appended to the header rather
                 # than written into a fixed-width field.
                 if k == "options" and not _is_bytes(v):
                     continue
                 if k == "load" and lname in ("Raw", "Padding"):
+                    continue
+                if var is not None and k == var[0]:
                     continue
                 if isinstance(v, bool):
                     ints.append((i, k, int(v)))
@@ -354,6 +395,14 @@ class Packet:
                 load = fields.get("load")
                 if load:
                     out.append((i, bytes(load)))
+                continue
+            var = _VAR_FIELD.get(lname)
+            if var is not None:
+                blob = fields.get(var[0], var[1]) or b""
+                if isinstance(blob, str):
+                    blob = blob.encode()
+                if blob:
+                    out.append((i, bytes(blob)))
                 continue
             v = fields.get("options")
             if v is None or _is_bytes(v):
@@ -489,31 +538,30 @@ class Packet:
 
 
 def _make_layer(name: str) -> type:
-    def __init__(self, _data: Any = None, **kw: Any) -> None:
-        if _data is not None and _is_bytes(_data):
-            Packet.__init__(self, _rust=_b.dissect(bytes(_data), name))
-            return
-        Packet.__init__(self, _stack=[(name, dict(kw))])
-
-    return type(name, (Packet,), {
-        "__init__": __init__,
+    return _PacketMeta(name, (Packet,), {
+        "__init__": _layer_init(name),
         "_name": name,
         "__doc__": f"{name} layer.",
         "__slots__": (),
     })
 
 
-_LAYER_NAMES = list(_b.known_layers())
 _LAYERS: dict[str, type] = {}
-for _n in _LAYER_NAMES:
+for _n in _b.known_layers():
     _LAYERS[_n] = _make_layer(_n)
     globals()[_n] = _LAYERS[_n]
     __all__.append(_n)
 
 
 def known_layers() -> list[str]:
-    """Every layer this build can dissect."""
-    return list(_LAYER_NAMES)
+    """Every layer this build can dissect, custom ones included."""
+    return list(_b.known_layers())
+
+
+def bind_layers(lower: Any, upper: Any, **conds: Any) -> None:
+    """Make dissection reach `upper` from `lower` when every named field of
+    `lower` holds the given value, and stacking write those values back."""
+    _b.bind_layer(_layer_name(lower), _layer_name(upper), list(conds.items()))
 
 
 class PacketList:
@@ -652,7 +700,7 @@ def hexdump_str(pkt: Any, width: int = 16) -> str:
 def ls(layer: Any = None) -> None:
     """List known layers, or the fields of one."""
     if layer is None:
-        for n in _LAYER_NAMES:
+        for n in _b.known_layers():
             print(n)
         return
     name = _layer_name(layer)
