@@ -1,15 +1,12 @@
-//! pcap file format (libpcap savefile). Layout per the libpcap-savefile(5)
-//! description: a 24-byte file header followed by 16-byte record headers.
-//!
-//! The reader borrows from one buffer and never copies packet bytes, which is
-//! what makes bulk reading cheap.
+//! pcap savefile layout per libpcap-savefile(5): a 24-byte file header followed
+//! by 16-byte record headers.
 
 use crate::proto::ProtoId;
 
 pub const MAGIC_LE_USEC: u32 = 0xa1b2c3d4;
 pub const MAGIC_LE_NSEC: u32 = 0xa1b23c4d;
 
-/// LINKTYPE_ values from the tcpdump.org link-layer header type registry.
+/// tcpdump.org link-layer header type registry.
 pub mod linktype {
     pub const NULL: u32 = 0;
     pub const ETHERNET: u32 = 1;
@@ -47,7 +44,6 @@ pub struct Record<'a> {
 }
 
 impl Record<'_> {
-    /// Timestamp as floating seconds, matching the conventional pcap reader API.
     pub fn time(&self, nanos: bool) -> f64 {
         let div = if nanos { 1e9 } else { 1e6 };
         self.ts_sec as f64 + self.ts_frac as f64 / div
@@ -99,7 +95,7 @@ pub fn parse_header(buf: &[u8]) -> Result<FileHeader, PcapError> {
     })
 }
 
-/// Zero-copy iterator over the records in a pcap buffer.
+/// Borrows from the buffer; packet bytes are never copied.
 pub struct Reader<'a> {
     buf: &'a [u8],
     off: usize,
@@ -160,23 +156,21 @@ impl<'a> Iterator for Reader<'a> {
     }
 }
 
-/// Count records without dissecting. Useful as a benchmark floor.
+/// Count records without dissecting.
 pub fn count(buf: &[u8]) -> Result<usize, PcapError> {
     Ok(Reader::new(buf)?.count())
 }
 
-/// Serialise a pcap file header.
 pub fn write_header(out: &mut Vec<u8>, linktype: u32, snaplen: u32) {
     out.extend_from_slice(&MAGIC_LE_USEC.to_le_bytes());
-    out.extend_from_slice(&2u16.to_le_bytes()); // version major
-    out.extend_from_slice(&4u16.to_le_bytes()); // version minor
-    out.extend_from_slice(&0i32.to_le_bytes()); // thiszone
-    out.extend_from_slice(&0u32.to_le_bytes()); // sigfigs
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&4u16.to_le_bytes());
+    out.extend_from_slice(&0i32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
     out.extend_from_slice(&snaplen.to_le_bytes());
     out.extend_from_slice(&linktype.to_le_bytes());
 }
 
-/// Append one record.
 pub fn write_record(out: &mut Vec<u8>, ts_sec: u32, ts_usec: u32, data: &[u8], origlen: u32) {
     out.extend_from_slice(&ts_sec.to_le_bytes());
     out.extend_from_slice(&ts_usec.to_le_bytes());

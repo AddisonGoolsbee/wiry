@@ -1,32 +1,21 @@
-//! pcapng (PCAP Next Generation) capture file reading.
-//!
-//! Layout derived from the IETF draft "PCAP Next Generation (pcapng) Capture File
-//! Format" (draft-ietf-opsawg-pcapng), also published at github.com/pcapng/pcapng.
-//! Written from the specification only; see CONTRIBUTING.md.
+//! Layout from the IETF draft "PCAP Next Generation (pcapng) Capture File
+//! Format" (draft-ietf-opsawg-pcapng); see CONTRIBUTING.md.
 //!
 //! Every block is `block type (4) | total length (4) | body | total length (4)`,
-//! total length includes all four parts and is a multiple of 4. The trailing copy
-//! exists so a file can be walked backwards; here it is used as a cheap integrity
-//! check, and a mismatch stops the walk rather than being trusted.
-//!
-//! The reader borrows from one buffer and never copies packet bytes, mirroring
-//! [`crate::pcap::Reader`] so the two are interchangeable.
+//! total length covering all four parts and a multiple of 4. The trailing copy
+//! is used here as an integrity check, and a mismatch stops the walk.
 
 pub use crate::pcap::{link_to_proto, Record};
 
-/// Block type of a Section Header Block. Byte-order independent by design: the
-/// byte sequence 0A 0D 0D 0A is a palindrome, so it reads the same either way.
+/// A palindrome, so it reads the same in either byte order.
 pub const BLOCK_SHB: u32 = 0x0A0D_0D0A;
 pub const BLOCK_IDB: u32 = 0x0000_0001;
 pub const BLOCK_SPB: u32 = 0x0000_0003;
 pub const BLOCK_EPB: u32 = 0x0000_0006;
 
-/// Byte-Order Magic inside a Section Header Block.
 pub const BYTE_ORDER_MAGIC: u32 = 0x1A2B_3C4D;
 
-/// `if_tsresol`, the interface timestamp resolution option.
 const OPT_IF_TSRESOL: u16 = 9;
-/// `opt_endofopt`.
 const OPT_END: u16 = 0;
 
 const DEFAULT_TSRESOL: u64 = 1_000_000;
@@ -52,7 +41,6 @@ impl std::fmt::Display for PcapngError {
 
 impl std::error::Error for PcapngError {}
 
-/// Cheap magic check on the first four bytes.
 pub fn is_pcapng(buf: &[u8]) -> bool {
     matches!(rd32(buf, 0, false), Some(BLOCK_SHB))
 }
@@ -61,13 +49,12 @@ pub fn is_pcapng(buf: &[u8]) -> bool {
 pub struct FileHeader {
     pub swapped: bool,
     pub linktype: u32,
-    /// Timestamp ticks per second, from `if_tsresol` (default 10^6).
+    /// Ticks per second, from `if_tsresol`.
     pub tsresol: u64,
 }
 
 impl FileHeader {
-    /// Whether [`Record::ts_frac`] carries nanoseconds rather than microseconds,
-    /// for feeding [`Record::time`].
+    /// Whether [`Record::ts_frac`] carries nanoseconds rather than microseconds.
     pub fn nanos(&self) -> bool {
         self.tsresol == 1_000_000_000
     }
@@ -109,9 +96,8 @@ fn pad4(n: usize) -> usize {
     (n + 3) & !3
 }
 
-/// Decode an `if_tsresol` byte: high bit clear means 10^value ticks per second,
-/// high bit set means 2^(value & 0x7f). An exponent that overflows u64 is not
-/// representable, so it falls back to the default microsecond resolution.
+/// High bit clear means 10^value ticks per second, set means 2^(value & 0x7f).
+/// An exponent that overflows u64 falls back to microsecond resolution.
 fn decode_tsresol(v: u8) -> u64 {
     let (base, exp) = if v & 0x80 != 0 {
         (2u64, (v & 0x7f) as u32)
@@ -121,12 +107,12 @@ fn decode_tsresol(v: u8) -> u64 {
     base.checked_pow(exp).unwrap_or(DEFAULT_TSRESOL)
 }
 
-/// Zero-copy iterator over the packet blocks in a pcapng buffer.
+/// Borrows from the buffer; packet bytes are never copied.
 pub struct Reader<'a> {
     buf: &'a [u8],
     off: usize,
-    /// End of the current section: the buffer end, or the section length if the
-    /// section header declared one (a length of -1 means unknown).
+    /// Buffer end, or the section length when the section header declared one
+    /// (a length of -1 means unknown).
     end: usize,
     swapped: bool,
     ifaces: Vec<Iface>,
@@ -165,8 +151,8 @@ impl<'a> Reader<'a> {
         };
         r.off = r.enter_section(0).ok_or(PcapngError::BadSectionHeader)?;
 
-        // Consume the interface descriptions that lead the section so the file
-        // header can report a link type before the first packet is read.
+        // Consume the leading interface descriptions so the file header can
+        // report a link type before the first packet is read.
         while let Some((btype, total)) = r.read_block_at(r.off) {
             if btype != BLOCK_IDB {
                 break;
@@ -182,8 +168,8 @@ impl<'a> Reader<'a> {
         Ok(r)
     }
 
-    /// Validate the section header block at `off`, adopt its endianness and
-    /// section length, and return the offset just past it.
+    /// Adopts the block's endianness and section length; returns the offset
+    /// just past it.
     fn enter_section(&mut self, off: usize) -> Option<usize> {
         let raw_magic = rd32(self.buf, off + 8, false)?;
         self.swapped = match raw_magic {
@@ -191,8 +177,8 @@ impl<'a> Reader<'a> {
             x if x.swap_bytes() == BYTE_ORDER_MAGIC => true,
             _ => return None,
         };
-        // The total length must be read with this section's endianness, so the
-        // generic block check runs only after the magic has been decoded.
+        // The total length needs this section's endianness, so the generic
+        // block check runs only after the magic is decoded.
         self.end = self.buf.len();
         let (btype, total) = self.read_block_at(off)?;
         if btype != BLOCK_SHB || total < 28 {
@@ -210,7 +196,6 @@ impl<'a> Reader<'a> {
         Some(next)
     }
 
-    /// Read and validate one block header at `off`, returning `(type, total length)`.
     fn read_block_at(&self, off: usize) -> Option<(u32, usize)> {
         if off + 12 > self.end {
             return None;
@@ -266,13 +251,9 @@ impl<'a> Reader<'a> {
             .unwrap_or(self.header.tsresol)
     }
 
-    /// Split a 64-bit tick count into the `(ts_sec, ts_frac)` pair `Record` uses.
-    ///
-    /// `Record::ts_frac` is microseconds, or nanoseconds when the resolution is
-    /// exactly 10^-9 (matching the two resolutions classic pcap can express).
-    /// Any other resolution — 10^-3, the power-of-two encodings, anything finer
-    /// than a nanosecond — is rescaled to microseconds by truncation, so the
-    /// sub-microsecond part of such a timestamp is lost rather than misreported.
+    /// `ts_frac` is microseconds, or nanoseconds at exactly 10^-9 resolution —
+    /// the two classic pcap can express. Every other resolution is truncated to
+    /// microseconds, losing the sub-microsecond part rather than misreporting it.
     fn split_ts(&self, ticks: u64, tsresol: u64) -> (u32, u32) {
         if tsresol == 0 {
             return (0, 0);
@@ -292,8 +273,8 @@ impl<'a> Iterator for Reader<'a> {
     type Item = Record<'a>;
 
     fn next(&mut self) -> Option<Record<'a>> {
-        // Each pass advances `off` by at least 12 bytes or stops, so the walk is
-        // bounded by the buffer length.
+        // Each pass advances `off` by at least 12 bytes or stops, so the walk
+        // is bounded by the buffer length.
         while !self.done {
             if self.off + 12 > self.end {
                 self.done = true;
@@ -347,8 +328,8 @@ impl<'a> Iterator for Reader<'a> {
                         return None;
                     };
                     let n = caplen as usize;
-                    // Packet data is padded out to a 4-byte boundary, and options
-                    // may follow it, so the body only has to be big enough.
+                    // Data is padded to 4 bytes and options may follow, so the
+                    // body only has to be big enough.
                     if pad4(n) > total - 32 {
                         self.done = true;
                         return None;
@@ -404,7 +385,6 @@ impl<'a> Iterator for Reader<'a> {
     }
 }
 
-/// Count packet blocks without dissecting.
 pub fn count(buf: &[u8]) -> Result<usize, PcapngError> {
     Ok(Reader::new(buf)?.count())
 }
@@ -438,8 +418,6 @@ mod tests {
         }
     }
 
-    /// Wrap a body in the `type / length / body / length` envelope, padding the
-    /// body to a 4-byte boundary.
     fn block(btype: u32, body: &[u8], be: bool) -> Vec<u8> {
         let padded = pad4(body.len());
         let total = 12 + padded;
@@ -455,8 +433,8 @@ mod tests {
     fn shb(be: bool) -> Vec<u8> {
         let mut b = Vec::new();
         b.extend_from_slice(&w32(BYTE_ORDER_MAGIC, be));
-        b.extend_from_slice(&w16(1, be)); // major
-        b.extend_from_slice(&w16(0, be)); // minor
+        b.extend_from_slice(&w16(1, be));
+        b.extend_from_slice(&w16(0, be));
         b.extend_from_slice(&w64(u64::MAX, be)); // section length -1 (unknown)
         block(BLOCK_SHB, &b, be)
     }
@@ -464,8 +442,8 @@ mod tests {
     fn idb(lt: u32, tsresol: Option<u8>, be: bool) -> Vec<u8> {
         let mut b = Vec::new();
         b.extend_from_slice(&w16(lt as u16, be));
-        b.extend_from_slice(&w16(0, be)); // reserved
-        b.extend_from_slice(&w32(65535, be)); // snaplen
+        b.extend_from_slice(&w16(0, be));
+        b.extend_from_slice(&w32(65535, be));
         if let Some(r) = tsresol {
             b.extend_from_slice(&w16(OPT_IF_TSRESOL, be));
             b.extend_from_slice(&w16(1, be));
@@ -505,7 +483,6 @@ mod tests {
 
     #[test]
     fn reads_minimal_little_endian_file() {
-        // 1_000_002 ticks at the default 10^-6 resolution == 1.000002 s.
         let data = minimal(false, None, 1_000_002);
         let r = Reader::new(&data).unwrap();
         assert!(!r.header.swapped);
@@ -558,7 +535,7 @@ mod tests {
 
     #[test]
     fn power_of_two_tsresol_rescales_to_microseconds() {
-        // 0x80 | 10 => 1024 ticks per second. 512 ticks == 0.5 s == 500000 us.
+        // 0x80 | 10 => 1024 ticks per second.
         let data = minimal(false, Some(0x8a), 1024 + 512);
         let r = Reader::new(&data).unwrap();
         assert_eq!(r.header.tsresol, 1024);
@@ -572,7 +549,7 @@ mod tests {
     fn packet_data_padding_is_handled() {
         let mut v = shb(false);
         v.extend_from_slice(&idb(linktype::ETHERNET, None, false));
-        // 13 bytes of data: padded to 16, so a second block must still be found.
+        // 13 bytes padded to 16, so a second block must still be found.
         v.extend_from_slice(&epb(0, 0, &[0x11; 13], 13, false));
         v.extend_from_slice(&epb(0, 0, &[0x22; 7], 9, false));
         let recs: Vec<_> = Reader::new(&v).unwrap().collect();
@@ -589,7 +566,7 @@ mod tests {
         let mut v = shb(false);
         v.extend_from_slice(&idb(linktype::ETHERNET, None, false));
         v.extend_from_slice(&epb(0, 1_000_000, &[0x01; 4], 4, false));
-        // Name Resolution Block (4) and an entirely made-up type.
+        // Name Resolution Block (4) and a made-up type.
         v.extend_from_slice(&block(0x0000_0004, &[0xde; 20], false));
         v.extend_from_slice(&block(0x0000_BEEF, &[0xad; 9], false));
         v.extend_from_slice(&epb(0, 2_000_000, &[0x02; 4], 4, false));
@@ -628,7 +605,6 @@ mod tests {
         let recs: Vec<_> = Reader::new(&v).unwrap().collect();
         assert_eq!(recs.len(), 2);
 
-        // Corrupt only the trailing length of the first packet block.
         let tail = first + good.len() - 4;
         v[tail..tail + 4].copy_from_slice(&w32(0xffff_fff0, false));
         let recs: Vec<_> = Reader::new(&v).unwrap().collect();
@@ -683,8 +659,8 @@ mod tests {
     #[test]
     fn multiple_interfaces_use_their_own_resolution() {
         let mut v = shb(false);
-        v.extend_from_slice(&idb(linktype::ETHERNET, None, false)); // 10^-6
-        v.extend_from_slice(&idb(linktype::RAW, Some(9), false)); // 10^-9
+        v.extend_from_slice(&idb(linktype::ETHERNET, None, false));
+        v.extend_from_slice(&idb(linktype::RAW, Some(9), false));
         v.extend_from_slice(&epb(0, 2_000_500, &[0xa1; 4], 4, false));
         v.extend_from_slice(&epb(1, 2_000_000_500, &[0xa2; 4], 4, false));
         // An interface id nobody described falls back to the file resolution.
@@ -704,7 +680,6 @@ mod tests {
     #[test]
     fn second_section_header_is_followed() {
         let mut v = minimal(false, None, 1_000_000);
-        // A second section, big-endian, with its own interface and packet.
         v.extend_from_slice(&shb(true));
         v.extend_from_slice(&idb(linktype::ETHERNET, None, true));
         v.extend_from_slice(&epb(0, 7_000_000, &[0x5a; 8], 8, true));
