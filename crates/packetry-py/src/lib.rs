@@ -6,7 +6,7 @@
 // as useless_conversion at each function's span.
 #![allow(clippy::useless_conversion)]
 
-use packetry_core::field::{self, FieldDesc, FieldValue};
+use packetry_core::field::{self, FieldDesc, FieldKind, FieldValue};
 use packetry_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use packetry_core::pcap;
 use packetry_core::proto::{self, ProtoId};
@@ -930,23 +930,108 @@ fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
 
 #[pyfunction]
 fn known_layers() -> Vec<&'static str> {
-    const ALL: &[ProtoId] = &[
-        ProtoId::Ether,
-        ProtoId::Dot1Q,
-        ProtoId::Arp,
-        ProtoId::Ipv4,
-        ProtoId::Ipv6,
-        ProtoId::Tcp,
-        ProtoId::Udp,
-        ProtoId::Icmp,
-        ProtoId::Icmpv6,
-        ProtoId::Dns,
-        ProtoId::Bootp,
-        ProtoId::Dhcp,
-        ProtoId::Raw,
-        ProtoId::Padding,
-    ];
-    ALL.iter().map(|p| p.name()).collect()
+    proto::known_layers()
+}
+
+fn leak(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
+/// One field of a layer being declared: name, width in bits, kind, integer
+/// default, wide default, and flag names.
+type FieldSpec = (String, u16, String, u64, Option<Vec<u8>>, Vec<String>);
+
+fn kind_of(k: &str) -> PyResult<FieldKind> {
+    Ok(match k {
+        "uint" => FieldKind::Uint,
+        "le_uint" => FieldKind::LeUint,
+        "ipv4" => FieldKind::Ipv4Addr,
+        "ipv6" => FieldKind::Ipv6Addr,
+        "mac" => FieldKind::MacAddr,
+        "flags" => FieldKind::Flags,
+        "bytes" => FieldKind::Bytes,
+        "varbytes" => FieldKind::VarBytes,
+        _ => return Err(PyValueError::new_err(format!("unknown field kind {k:?}"))),
+    })
+}
+
+/// Declares a layer the Rust dissector can then execute without ever calling
+/// back into Python. Bit offsets follow declaration order.
+#[pyfunction]
+fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
+    let mut descs = Vec::with_capacity(fields.len());
+    let mut bit_off = 0u16;
+    for (fname, bit_len, kind, default, default_bytes, flag_names) in fields {
+        let kind = kind_of(&kind)?;
+        descs.push(FieldDesc {
+            name: leak(fname),
+            bit_off,
+            bit_len,
+            kind,
+            default,
+            flags: Box::leak(
+                flag_names
+                    .into_iter()
+                    .map(leak)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            ),
+            computed: false,
+            cond: None,
+            default_bytes: default_bytes
+                .map(|b| &*Box::leak(b.into_boxed_slice()) as &'static [u8]),
+        });
+        bit_off += bit_len;
+    }
+    let build_len = (bit_off / 8) as usize;
+    if build_len * 8 != bit_off as usize {
+        return Err(PyValueError::new_err(format!(
+            "{name} fields total {bit_off} bits, which is not a whole number of bytes"
+        )));
+    }
+    proto::register(name, descs, build_len)
+        .map(|id| id.0)
+        .map_err(PyValueError::new_err)
+}
+
+/// Makes dissection reach `child` from `parent`, and stacking `child` under
+/// `parent` write the values back.
+#[pyfunction]
+fn bind_layer(
+    py: Python<'_>,
+    parent: &str,
+    child: &str,
+    conds: Vec<(String, PyObject)>,
+) -> PyResult<()> {
+    let p = proto_by_name(parent)?;
+    let c = proto_by_name(child)?;
+    let mut out = Vec::with_capacity(conds.len());
+    for (fname, val) in conds {
+        let f = proto::field_of(p, &fname)
+            .ok_or_else(|| PyKeyError::new_err(format!("no field {fname:?} on {parent}")))?;
+        let v = val.bind(py);
+        let n = if let Ok(n) = v.extract::<u64>() {
+            n
+        } else if let Ok(s) = v.extract::<String>() {
+            match packetry_core::parse::value_for(f, &s) {
+                Some(packetry_core::parse::ValueBits::Uint(n)) => n,
+                Some(packetry_core::parse::ValueBits::Bytes(b)) if b.len() <= 8 => {
+                    b.iter().fold(0u64, |acc, x| (acc << 8) | *x as u64)
+                }
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "cannot bind {parent}.{fname} to {s:?}"
+                    )))
+                }
+            }
+        } else {
+            return Err(PyValueError::new_err(format!(
+                "unsupported bind value for {parent}.{fname}"
+            )));
+        };
+        out.push((f, n));
+    }
+    proto::bind(p, c, out).map_err(PyValueError::new_err)
 }
 
 #[pymodule]
@@ -961,6 +1046,8 @@ fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_and_serialize, m)?)?;
     m.add_function(wrap_pyfunction!(layer_fields, m)?)?;
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
+    m.add_function(wrap_pyfunction!(register_layer, m)?)?;
+    m.add_function(wrap_pyfunction!(bind_layer, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
