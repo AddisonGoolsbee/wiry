@@ -454,13 +454,17 @@ impl PyPkt {
     }
 }
 
+/// (offset, caplen, ts_sec, ts_frac). The offset is a `usize` because
+/// `fs::read` has no size limit: past 4 GiB a `u32` wrapped, and the wrapped
+/// slice stayed in bounds, so a read returned another packet's bytes.
+type Record = (usize, u32, u32, u32);
+
 /// One buffer plus a record index. Indexing mints a Python object for that
 /// packet only.
 #[pyclass(name = "PktList")]
 pub struct PyPktList {
     buf: Arc<Vec<u8>>,
-    /// (offset, caplen, ts_sec, ts_frac) per record.
-    index: Vec<(u32, u32, u32, u32)>,
+    index: Vec<Record>,
     link: ProtoId,
     nanos: bool,
     /// Positions in the original capture, set when this list is a filtered view.
@@ -483,7 +487,7 @@ impl PyPktList {
             idx.iter()
                 .enumerate()
                 .filter(|(_, (off, len, _, _))| {
-                    let a = *off as usize;
+                    let a = *off;
                     let bytes = &buf[a..a + *len as usize];
                     q.matches(bytes, &dissect_spans(bytes, link))
                 })
@@ -494,7 +498,7 @@ impl PyPktList {
 
     fn dissect_at(&self, i: usize) -> PyPkt {
         let (off, len, sec, frac) = self.index[i];
-        let a = off as usize;
+        let a = off;
         let b = a + len as usize;
         let bytes = self.buf[a..b].to_vec();
         let div = if self.nanos { 1e9 } else { 1e6 };
@@ -528,7 +532,7 @@ impl PyPktList {
         Ok(py.allow_threads(move || {
             idx.iter()
                 .filter(|(off, len, _, _)| {
-                    let a = *off as usize;
+                    let a = *off;
                     let b = a + *len as usize;
                     packetry_core::packet::dissect_spans(&buf[a..b], link)
                         .iter()
@@ -554,7 +558,7 @@ impl PyPktList {
         let collected: Vec<Option<FieldValue>> = py.allow_threads(move || {
             idx.iter()
                 .map(|(off, len, _, _)| {
-                    let a = *off as usize;
+                    let a = *off;
                     let b = a + *len as usize;
                     let pkt = CorePacket::dissect(buf[a..b].to_vec(), link);
                     pkt.find_layer(id).and_then(|l| pkt.get(l, &fname))
@@ -602,7 +606,7 @@ impl PyPktList {
                 .map(|_| Vec::with_capacity(idx.len()))
                 .collect();
             for (row, (off, len, sec, frac)) in idx.iter().enumerate() {
-                let a = *off as usize;
+                let a = *off;
                 let bytes = &buf[a..a + *len as usize];
                 let spans = if dissect {
                     dissect_spans(bytes, link)
@@ -704,7 +708,7 @@ impl PyPktList {
             .index
             .get(i)
             .ok_or_else(|| PyIndexError::new_err("packet index out of range"))?;
-        let a = off as usize;
+        let a = off;
         Ok(PyBytes::new_bound(py, &self.buf[a..a + len as usize]))
     }
 
@@ -728,7 +732,7 @@ fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
                 let link = pcap::link_to_proto(r.header.linktype);
                 let nanos = r.header.nanos();
                 for rec in packetry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())? {
-                    let off = (rec.data.as_ptr() as usize - base) as u32;
+                    let off = rec.data.as_ptr() as usize - base;
                     index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
                 }
                 Ok((index, link, nanos))
@@ -737,7 +741,7 @@ fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
                 let link = pcap::link_to_proto(r.header.linktype);
                 let nanos = r.header.nanos;
                 for rec in pcap::Reader::new(&data).map_err(|e| e.to_string())? {
-                    let off = (rec.data.as_ptr() as usize - base) as u32;
+                    let off = rec.data.as_ptr() as usize - base;
                     index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
                 }
                 Ok((index, link, nanos))
@@ -1098,4 +1102,22 @@ fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bind_layer, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Record;
+
+    /// A capture is read whole and `fs::read` has no size limit, so a record
+    /// past 4 GiB must survive the index: as a `u32` its offset wrapped, and
+    /// the wrapped slice stayed in bounds, so the read silently returned
+    /// another packet's bytes.
+    #[test]
+    fn a_record_offset_past_four_gibibytes_is_not_truncated() {
+        let off = u32::MAX as usize + 4096;
+        let index: Vec<Record> = vec![(off, 64, 0, 0)];
+        let (a, len, _, _) = index[0];
+        assert_eq!(a, off);
+        assert_eq!(a + len as usize, off + 64);
+    }
 }
