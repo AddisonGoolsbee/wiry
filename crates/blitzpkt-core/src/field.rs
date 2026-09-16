@@ -1,65 +1,47 @@
-//! Field model: a protocol header is described by a static table of field
-//! descriptors, and values are decoded lazily from the still-borrowed packet
-//! bytes. Nothing is materialised until somebody asks for it.
-
-/// How a field's bits are interpreted once extracted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldKind {
-    /// Unsigned integer, big-endian, `bit_len` wide (1..=64).
     Uint,
-    /// 4-byte IPv4 address, rendered as dotted quad.
     Ipv4Addr,
-    /// 16-byte IPv6 address, rendered in RFC 5952 form.
+    /// Rendered in RFC 5952 form.
     Ipv6Addr,
-    /// 6-byte MAC address, rendered as colon-separated hex.
     MacAddr,
-    /// Bitfield rendered as a flag string (e.g. TCP "SA").
     Flags,
-    /// Raw bytes of fixed length.
     Bytes,
-    /// Raw bytes running to the end of the header (options, padding).
+    /// Raw bytes running to the end of the header.
     VarBytes,
 }
 
-/// A single named field within a protocol header.
 #[derive(Clone, Copy, Debug)]
 pub struct FieldDesc {
     pub name: &'static str,
     /// Bit offset from the first byte of this layer's header.
     pub bit_off: u16,
-    /// Width in bits. Ignored for `VarBytes`.
+    /// Ignored for `VarBytes`.
     pub bit_len: u16,
     pub kind: FieldKind,
-    /// Value used when the field is not supplied during construction.
     pub default: u64,
-    /// Flag names, least-significant bit first. Only used by `FieldKind::Flags`.
+    /// Least-significant bit first. Only used by `FieldKind::Flags`.
     pub flags: &'static [&'static str],
-    /// True when the engine recomputes this field during serialisation
-    /// (checksums, lengths) unless the user pinned it explicitly.
+    /// Recomputed during serialisation unless the user pinned it explicitly.
     pub computed: bool,
-    /// When set, the field exists only in headers this predicate accepts. It is
-    /// given the layer's header bytes, so a field can be gated on an earlier
+    /// Given the layer's header bytes, so a field can be gated on an earlier
     /// field of the same header, such as ICMP's type.
     pub cond: Option<fn(&[u8]) -> bool>,
-    /// Default for fields wider than the 64 bits `default` holds. Written
-    /// verbatim at `bit_off` during construction.
+    /// Default for fields wider than the 64 bits `default` holds.
     pub default_bytes: Option<&'static [u8]>,
 }
 
 impl FieldDesc {
-    /// Restrict this field to headers `c` accepts.
     pub const fn when(mut self, c: fn(&[u8]) -> bool) -> Self {
         self.cond = Some(c);
         self
     }
 
-    /// Give this field a default too wide for `default`.
     pub const fn defaulting_to(mut self, b: &'static [u8]) -> Self {
         self.default_bytes = Some(b);
         self
     }
 
-    /// Whether this field is present in a header with these bytes.
     #[inline]
     pub fn is_active(&self, hdr: &[u8]) -> bool {
         match self.cond {
@@ -179,7 +161,6 @@ impl FieldDesc {
     }
 }
 
-/// A decoded field value. Crosses to Python at most once per field actually read.
 #[derive(Clone, Debug, PartialEq)]
 pub enum FieldValue {
     Uint(u64),
@@ -210,8 +191,7 @@ impl FieldValue {
     }
 }
 
-/// Read `bit_len` bits starting at `bit_off` from `buf`, big-endian.
-/// Returns 0 when the read would run past the end of the buffer.
+/// Big-endian. Returns 0 when the read would run past the end of `buf`.
 #[inline]
 pub fn read_bits(buf: &[u8], bit_off: u16, bit_len: u16) -> u64 {
     debug_assert!(bit_len <= 64);
@@ -220,7 +200,6 @@ pub fn read_bits(buf: &[u8], bit_off: u16, bit_len: u16) -> u64 {
     if bit_len == 0 || end > buf.len() * 8 {
         return 0;
     }
-    // Fast path: byte-aligned and a whole number of bytes, up to 8 bytes.
     if start % 8 == 0 && bit_len % 8 == 0 && bit_len <= 64 {
         let b0 = start / 8;
         let n = (bit_len / 8) as usize;
@@ -230,7 +209,6 @@ pub fn read_bits(buf: &[u8], bit_off: u16, bit_len: u16) -> u64 {
         }
         return v;
     }
-    // General path: walk bit by bit. Only used for sub-byte fields.
     let mut v = 0u64;
     for i in start..end {
         let byte = buf[i / 8];
@@ -240,7 +218,7 @@ pub fn read_bits(buf: &[u8], bit_off: u16, bit_len: u16) -> u64 {
     v
 }
 
-/// Write `bit_len` bits of `val` at `bit_off` into `buf`, big-endian.
+/// Big-endian. A write that would run past the end of `buf` is a no-op.
 #[inline]
 pub fn write_bits(buf: &mut [u8], bit_off: u16, bit_len: u16, val: u64) {
     let start = bit_off as usize;
@@ -268,7 +246,15 @@ pub fn write_bits(buf: &mut [u8], bit_off: u16, bit_len: u16, val: u64) {
     }
 }
 
-/// Decode one field from a layer's header bytes.
+fn fixed_bytes<const N: usize>(hdr: &[u8], bit_off: u16) -> [u8; N] {
+    let b = (bit_off / 8) as usize;
+    let mut out = [0u8; N];
+    if let Some(src) = hdr.get(b..b + N) {
+        out.copy_from_slice(src);
+    }
+    out
+}
+
 pub fn decode(hdr: &[u8], f: &FieldDesc) -> FieldValue {
     match f.kind {
         FieldKind::Uint => FieldValue::Uint(read_bits(hdr, f.bit_off, f.bit_len)),
@@ -276,30 +262,9 @@ pub fn decode(hdr: &[u8], f: &FieldDesc) -> FieldValue {
             bits: read_bits(hdr, f.bit_off, f.bit_len),
             names: f.flags,
         },
-        FieldKind::Ipv4Addr => {
-            let b = (f.bit_off / 8) as usize;
-            let mut out = [0u8; 4];
-            if b + 4 <= hdr.len() {
-                out.copy_from_slice(&hdr[b..b + 4]);
-            }
-            FieldValue::Ipv4(out)
-        }
-        FieldKind::Ipv6Addr => {
-            let b = (f.bit_off / 8) as usize;
-            let mut out = [0u8; 16];
-            if b + 16 <= hdr.len() {
-                out.copy_from_slice(&hdr[b..b + 16]);
-            }
-            FieldValue::Ipv6(out)
-        }
-        FieldKind::MacAddr => {
-            let b = (f.bit_off / 8) as usize;
-            let mut out = [0u8; 6];
-            if b + 6 <= hdr.len() {
-                out.copy_from_slice(&hdr[b..b + 6]);
-            }
-            FieldValue::Mac(out)
-        }
+        FieldKind::Ipv4Addr => FieldValue::Ipv4(fixed_bytes(hdr, f.bit_off)),
+        FieldKind::Ipv6Addr => FieldValue::Ipv6(fixed_bytes(hdr, f.bit_off)),
+        FieldKind::MacAddr => FieldValue::Mac(fixed_bytes(hdr, f.bit_off)),
         FieldKind::Bytes => {
             let b = (f.bit_off / 8) as usize;
             let n = (f.bit_len / 8) as usize;
@@ -327,7 +292,6 @@ mod tests {
 
     #[test]
     fn sub_byte_reads() {
-        // 0x45 = version 4, ihl 5
         let b = [0x45u8];
         assert_eq!(read_bits(&b, 0, 4), 4);
         assert_eq!(read_bits(&b, 4, 4), 5);

@@ -1,26 +1,16 @@
-//! Structured sub-elements of a header: TCP and IPv4 options, DHCP options.
-//!
-//! These are the variable-length, type-length-value regions that a flat field
-//! table cannot describe. Each protocol that has one supplies a parser; the
-//! result is a uniform list so the Python facade can render them the same way.
-
 use std::borrow::Cow;
 
-/// The payload of one option, shaped to match how the option is normally read.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ItemValue {
     /// Present with no payload (NOP, SAckOK, End of List).
     Flag,
     Uint(u64),
-    /// Two values in one option, such as a TCP timestamp.
     Pair(u64, u64),
     Bytes(Vec<u8>),
-    /// A list of addresses, as several DHCP options carry.
     Ipv4List(Vec<[u8; 4]>),
     Text(String),
 }
 
-/// One parsed option.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     /// Conventional name where the code is known, otherwise a numeric label.
@@ -58,7 +48,6 @@ impl Item {
             value: ItemValue::Bytes(b.to_vec()),
         }
     }
-    /// An option whose code has no conventional name.
     pub fn unknown(code: u32, b: &[u8]) -> Self {
         Self {
             name: Cow::Owned(code.to_string()),
@@ -68,7 +57,6 @@ impl Item {
     }
 }
 
-/// Read a big-endian unsigned integer of 1, 2, 4 or 8 bytes.
 pub(crate) fn be(b: &[u8]) -> u64 {
     let mut v = 0u64;
     for x in b.iter().take(8) {
@@ -77,24 +65,14 @@ pub(crate) fn be(b: &[u8]) -> u64 {
     v
 }
 
-/// Walk a type-length-value region.
+/// TCP/IPv4 length convention: the length octet counts the code and length
+/// octets themselves, so the payload is `len - 2` bytes. DHCP (RFC 2132 §2)
+/// counts only the option data and so does NOT use this function — using the
+/// wrong convention silently mis-decodes every option. `layers/bootp.rs` has
+/// its own walker.
 ///
-/// IMPORTANT — length conventions differ between protocols, and getting this
-/// wrong silently mis-decodes every option. This function implements the
-/// TCP/IPv4 convention, where the length octet counts the code and length
-/// octets themselves, so the payload is `len - 2` bytes.
-///
-/// DHCP (RFC 2132 s2) uses the other convention: its length octet counts only
-/// the option data, so the total advance is `len + 2`. DHCP therefore does NOT
-/// use this function; `layers/bootp.rs` has its own walker. Check which
-/// convention your RFC specifies before reaching for this.
-///
-/// `single_byte` names the codes that occupy one byte with no length octet
-/// (TCP/IPv4 End-of-List and NOP, DHCP pad and end). `emit_end` decides whether
-/// the terminating code is reported or swallowed.
-///
-/// Returns the parsed items. Malformed input stops the walk rather than
-/// panicking: a truncated option is the normal case on a snaplen-clipped
+/// `single_byte` names the codes that occupy one byte with no length octet.
+/// Malformed input stops the walk: truncation is normal on a snaplen-clipped
 /// capture, not an error.
 pub fn walk_tlv<F>(
     data: &[u8],
@@ -120,8 +98,6 @@ where
             i += 1;
             continue;
         }
-        // Every other option is code, length, then length-2 bytes of payload,
-        // where the length octet counts the code and length octets themselves.
         if i + 1 >= data.len() {
             break;
         }
@@ -141,7 +117,6 @@ mod tests {
 
     #[test]
     fn walks_a_simple_tlv_run() {
-        // code 2 len 4 payload 0x05b4, then a single-byte NOP (1), then code 3 len 3.
         let data = [2u8, 4, 0x05, 0xb4, 1, 3, 3, 7];
         let items = walk_tlv(&data, &[1], Some(0), |c, p| match c {
             1 => Item::flag("NOP", 1),
@@ -164,7 +139,6 @@ mod tests {
 
     #[test]
     fn truncated_option_stops_cleanly() {
-        // Claims length 8 but only 4 bytes remain.
         let data = [2u8, 8, 0x05, 0xb4];
         let items = walk_tlv(&data, &[1], Some(0), |c, p| {
             Item::uint("o", c as u32, be(p))

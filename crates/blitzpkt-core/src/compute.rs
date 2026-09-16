@@ -1,12 +1,7 @@
-//! Recomputation of derived fields (lengths, checksums) during serialisation.
-//! Runs innermost layer outward, because a transport checksum depends on the
-//! payload beneath it and the addresses above it.
-
 use crate::checksum as ck;
 use crate::packet::Packet;
 use crate::proto::{ipproto, ProtoId};
 
-/// Recompute every derived field that the user has not pinned.
 pub fn recompute(pkt: &mut Packet) {
     let n = pkt.spans.len();
     if n == 0 {
@@ -26,9 +21,8 @@ pub fn recompute(pkt: &mut Packet) {
     }
 }
 
-/// Trailing `Padding` is not part of any enclosing length or checksum: it is
-/// what fills a frame out to its minimum size, so every computation stops where
-/// it starts.
+/// Trailing `Padding` counts towards no enclosing length or checksum, so every
+/// computation stops where it starts.
 fn content_end(pkt: &Packet) -> usize {
     pkt.spans
         .iter()
@@ -48,12 +42,12 @@ fn fix_ipv4(pkt: &mut Packet, i: usize) {
     if off + 20 > end {
         return;
     }
-    // Total Length: this header plus everything after it (RFC 791 §3.1).
+    // RFC 791 §3.1: header plus everything after it.
     let total = (end - off) as u16;
     pkt.buf[off + 2] = (total >> 8) as u8;
     pkt.buf[off + 3] = (total & 0xff) as u8;
 
-    // Header Checksum is computed with the field zeroed.
+    // Computed with the field zeroed.
     pkt.buf[off + 10] = 0;
     pkt.buf[off + 11] = 0;
     let c = ck::ones_complement(&pkt.buf[off..off + hlen]);
@@ -66,13 +60,12 @@ fn fix_ipv6(pkt: &mut Packet, i: usize) {
     if off + 40 > end {
         return;
     }
-    // Payload Length excludes the fixed 40-octet header (RFC 8200 §3).
+    // RFC 8200 §3: excludes the fixed 40-octet header.
     let plen = (end - off - 40) as u16;
     pkt.buf[off + 4] = (plen >> 8) as u8;
     pkt.buf[off + 5] = (plen & 0xff) as u8;
 }
 
-/// Find the IPv4/IPv6 addresses enclosing layer `i`, if any.
 fn enclosing_addrs(pkt: &Packet, i: usize) -> Option<(Vec<u8>, Vec<u8>, bool)> {
     for j in (0..i).rev() {
         let s = pkt.spans[j];
@@ -117,7 +110,7 @@ fn fix_udp(pkt: &mut Packet, i: usize) {
         return;
     }
     let tlen = end - off;
-    // Length covers header plus data (RFC 768).
+    // RFC 768: header plus data.
     pkt.buf[off + 4] = (tlen >> 8) as u8;
     pkt.buf[off + 5] = (tlen & 0xff) as u8;
 
@@ -158,7 +151,7 @@ fn fix_icmp(pkt: &mut Packet, i: usize) {
     if off + 4 > end {
         return;
     }
-    // ICMPv4 has no pseudo-header (RFC 792).
+    // RFC 792: no pseudo-header.
     pkt.buf[off + 2] = 0;
     pkt.buf[off + 3] = 0;
     let c = ck::ones_complement(&pkt.buf[off..end]);
@@ -174,8 +167,8 @@ fn fix_icmpv6(pkt: &mut Packet, i: usize) {
     let tlen = end - off;
     pkt.buf[off + 2] = 0;
     pkt.buf[off + 3] = 0;
-    // Unlike ICMPv4, ICMPv6 covers the IPv6 pseudo-header (RFC 4443 §2.3),
-    // so without an enclosing IPv6 layer the checksum is left zeroed.
+    // RFC 4443 §2.3: unlike ICMPv4 this covers the IPv6 pseudo-header, so with
+    // no enclosing IPv6 layer the checksum stays zeroed.
     let Some(seed) = transport_seed(pkt, i, ipproto::IPV6_ICMP, tlen) else {
         return;
     };
@@ -194,7 +187,6 @@ mod tests {
         let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Tcp]);
         p.mark_all_dirty();
         let bytes = p.to_bytes().to_vec();
-        // A correct IPv4 header checksums to zero when summed including the field.
         assert_eq!(ck::ones_complement(&bytes[0..20]), 0);
     }
 

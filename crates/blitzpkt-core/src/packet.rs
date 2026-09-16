@@ -1,38 +1,31 @@
-//! The packet representation: one contiguous byte buffer plus a small table of
-//! layer spans. Fields are decoded on demand; nothing is materialised eagerly.
-//! This is the design that buys the speedup, so keep the hot paths allocation-free.
-
 use crate::field::{self, FieldDesc, FieldValue};
 use crate::proto::{desc, Next, ProtoId};
 use smallvec::SmallVec;
 
-/// Where one protocol header sits inside the packet buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LayerSpan {
     pub proto: ProtoId,
     /// Byte offset of the header from the start of the buffer.
     pub off: u32,
-    /// Header length in bytes.
     pub hlen: u32,
-    /// Total length of this layer including its payload.
+    /// Header plus payload.
     pub total: u32,
 }
 
 pub type Spans = SmallVec<[LayerSpan; 8]>;
 
-/// Upper bound on nesting, to stop malformed input causing unbounded work.
+/// Bounds the dissection walk on malformed input.
 const MAX_LAYERS: usize = 32;
 
 #[derive(Clone, Debug)]
 pub struct Packet {
     pub buf: Vec<u8>,
     pub spans: Spans,
-    /// Layers whose computed fields (checksums, lengths) need recomputing.
+    /// Bitmask of layers whose computed fields need recomputing.
     dirty: u32,
 }
 
 impl Packet {
-    /// Dissect raw bytes starting from a known link-layer protocol.
     pub fn dissect(buf: Vec<u8>, link: ProtoId) -> Self {
         let spans = dissect_spans(&buf, link);
         Self {
@@ -42,15 +35,11 @@ impl Packet {
         }
     }
 
-    /// Build a packet from a stack of protocols using each field's default value.
     pub fn build(stack: &[ProtoId]) -> Self {
         let owned: Vec<(ProtoId, Option<Vec<u8>>)> = stack.iter().map(|p| (*p, None)).collect();
         Self::build_with(&owned)
     }
 
-    /// Build a stack where some layers carry extra header bytes: IPv4/TCP
-    /// options, a DHCP option region, a `Raw` load.
-    ///
     /// Only a layer with a header-length field pads its extra bytes to a 4-byte
     /// boundary; DHCP (RFC 2132) and `Raw` take theirs verbatim, and padding
     /// them would corrupt the option walk or the payload.
@@ -96,8 +85,6 @@ impl Packet {
                     field::write_bits(&mut buf[off..hdr_end], f.bit_off, f.bit_len, f.default);
                 }
             }
-            // Point the previous layer's demux field at this one, the way
-            // stacking layers does automatically.
             if i > 0 {
                 let prev = spans[i - 1];
                 if let Some(bind) = desc(prev.proto).bind_next {
@@ -138,7 +125,6 @@ impl Packet {
         self.buf.is_empty()
     }
 
-    /// Index of the first layer matching `proto`, searching outward in.
     #[inline]
     pub fn find_layer(&self, proto: ProtoId) -> Option<usize> {
         self.spans.iter().position(|s| s.proto == proto)
@@ -149,7 +135,6 @@ impl Packet {
         self.spans.iter().any(|s| s.proto == proto)
     }
 
-    /// Header bytes of one layer.
     #[inline]
     pub fn header(&self, layer: usize) -> &[u8] {
         let s = self.spans[layer];
@@ -166,7 +151,6 @@ impl Packet {
         &self.buf[a..]
     }
 
-    /// Payload of a layer: bytes after its header.
     #[inline]
     pub fn payload(&self, layer: usize) -> &[u8] {
         let s = self.spans[layer];
@@ -174,9 +158,8 @@ impl Packet {
         &self.buf[a..]
     }
 
-    /// Read a field from a layer. Decodes only this field. Returns `None` when
-    /// the layer has no such field, including a conditional field this header
-    /// does not carry.
+    /// `None` when the layer has no such field, including a conditional field
+    /// this header does not carry.
     pub fn get(&self, layer: usize, name: &str) -> Option<FieldValue> {
         let proto = self.spans.get(layer)?.proto;
         let f = crate::proto::active_field_of(proto, self.header(layer), name)?;
@@ -192,9 +175,8 @@ impl Packet {
         field::decode(&self.buf[a..b], f)
     }
 
-    /// Write a field in place. Widths are preserved, so this never reallocates.
-    /// Returns false when the field is unknown for this layer, or conditional
-    /// and absent from this header.
+    /// False when the field is unknown for this layer, or conditional and
+    /// absent from this header.
     pub fn set_uint(&mut self, layer: usize, name: &str, val: u64) -> bool {
         let Some(s) = self.spans.get(layer).copied() else {
             return false;
@@ -223,23 +205,19 @@ impl Packet {
         true
     }
 
-    /// Replace everything after `layer`'s header with `data`.
     pub fn set_payload(&mut self, layer: usize, data: &[u8]) {
         let s = self.spans[layer];
         let cut = (s.off + s.hlen) as usize;
         self.buf.truncate(cut.min(self.buf.len()));
         self.buf.extend_from_slice(data);
-        // Payload shape changed, so re-dissect from this layer down.
         let link = self.spans[0].proto;
         self.spans = dissect_spans(&self.buf, link);
         self.dirty = u32::MAX;
     }
 
-    /// Grow any header that is shorter than its own bytes say it should be.
     /// Construction lays down the fixed part first, so a header whose length
-    /// depends on one of its own fields (ICMP, by type) is short until that
-    /// field has been written. Protocols that write their own length field are
-    /// already consistent and are left alone.
+    /// depends on one of its own fields (ICMP, by type) stays short until that
+    /// field is written. Grow those to their real length.
     pub fn refit_headers(&mut self) {
         for i in 0..self.spans.len() {
             let s = self.spans[i];
@@ -266,14 +244,12 @@ impl Packet {
 
     #[inline]
     fn mark_dirty(&mut self, layer: usize) {
-        // Any change invalidates computed fields at this layer and every layer
-        // enclosing it, since lengths and checksums propagate outward.
+        // Lengths and checksums propagate outward, so every enclosing layer goes too.
         for i in 0..=layer.min(31) {
             self.dirty |= 1 << i;
         }
     }
 
-    /// Recompute `total` for every span from the buffer length inward.
     fn refresh_totals(&mut self) {
         let end = self.buf.len() as u32;
         for s in self.spans.iter_mut() {
@@ -281,7 +257,6 @@ impl Packet {
         }
     }
 
-    /// Serialise to bytes, recomputing lengths and checksums for dirty layers.
     pub fn to_bytes(&mut self) -> &[u8] {
         if self.dirty != 0 {
             self.refresh_totals();
@@ -291,10 +266,8 @@ impl Packet {
         &self.buf
     }
 
-    /// Serialise without recomputation, for callers that know nothing changed.
-    /// Parse a layer's variable-length option region, when it has one.
-    /// Returns `None` for protocols with no options, which is different from
-    /// `Some(vec![])` meaning "has an option region, and it is empty".
+    /// `None` means the protocol has no option region at all, unlike
+    /// `Some(vec![])`, which means it has an empty one.
     pub fn options(&self, layer: usize) -> Option<Vec<crate::options::Item>> {
         let s = self.spans.get(layer)?;
         let parse = desc(s.proto).parse_options?;
@@ -312,8 +285,6 @@ impl Packet {
     }
 }
 
-/// Walk the layer chain, recording spans. This is the hot loop for pcap reading:
-/// it touches only the bytes needed to find each next header.
 pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
     let mut spans = Spans::new();
     let mut off = 0usize;
@@ -323,7 +294,6 @@ pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
         let d = desc(proto);
         let remaining = buf.len().saturating_sub(off);
 
-        // Too short to be this protocol: record what is left as opaque bytes.
         if remaining < d.min_len {
             if remaining > 0 {
                 spans.push(LayerSpan {
@@ -363,20 +333,18 @@ pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
 mod tests {
     use super::*;
 
-    // Minimal Ether/IPv4/TCP frame, hand-built from RFC 791 and RFC 9293 layouts.
+    // Ether/IPv4/TCP frame hand-built from RFC 791 and RFC 9293 layouts.
     fn sample() -> Vec<u8> {
         let mut v = Vec::new();
-        v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]); // dst mac
-        v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]); // src mac
-        v.extend_from_slice(&[0x08, 0x00]); // ethertype ipv4
-                                            // IPv4, ihl=5, total len 40
+        v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]);
+        v.extend_from_slice(&[0x08, 0x00]);
         v.extend_from_slice(&[0x45, 0x00, 0x00, 0x28]);
         v.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
-        v.extend_from_slice(&[0x40, 0x06, 0x00, 0x00]); // ttl 64, proto tcp
-        v.extend_from_slice(&[10, 0, 0, 1]); // src
-        v.extend_from_slice(&[10, 0, 0, 2]); // dst
-                                             // TCP, data offset 5
-        v.extend_from_slice(&[0x1f, 0x90, 0x00, 0x50]); // sport 8080 dport 80
+        v.extend_from_slice(&[0x40, 0x06, 0x00, 0x00]);
+        v.extend_from_slice(&[10, 0, 0, 1]);
+        v.extend_from_slice(&[10, 0, 0, 2]);
+        v.extend_from_slice(&[0x1f, 0x90, 0x00, 0x50]);
         v.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 0]);
         v.extend_from_slice(&[0x50, 0x02, 0x20, 0x00]);
         v.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);

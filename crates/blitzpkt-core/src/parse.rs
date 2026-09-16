@@ -1,6 +1,3 @@
-//! Parsing of human-written field values: addresses and flag strings.
-//! Kept in the core so it is testable without Python in the loop.
-
 use crate::field::{FieldDesc, FieldKind};
 
 pub fn ipv4(s: &str) -> Option<[u8; 4]> {
@@ -37,7 +34,6 @@ pub fn mac(s: &str) -> Option<[u8; 6]> {
     }
 }
 
-/// IPv6 textual form including `::` elision and trailing IPv4 form.
 pub fn ipv6(s: &str) -> Option<[u8; 16]> {
     if s == "::" {
         return Some([0u8; 16]);
@@ -54,7 +50,6 @@ pub fn ipv6(s: &str) -> Option<[u8; 16]> {
         let mut out = Vec::new();
         let chunks: Vec<&str> = part.split(':').collect();
         for (i, c) in chunks.iter().enumerate() {
-            // A trailing dotted-quad stands for the last two groups.
             if i == chunks.len() - 1 && c.contains('.') {
                 let v4 = ipv4(c)?;
                 out.push(u16::from_be_bytes([v4[0], v4[1]]));
@@ -96,7 +91,6 @@ pub fn ipv6(s: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
-/// Flag letters (e.g. TCP "SA") to their bit value.
 pub fn flags(s: &str, names: &[&str]) -> u64 {
     let mut v = 0u64;
     for (i, n) in names.iter().enumerate() {
@@ -107,7 +101,6 @@ pub fn flags(s: &str, names: &[&str]) -> u64 {
     v
 }
 
-/// Convert a textual value into the raw bits for a field.
 pub fn value_for(f: &FieldDesc, s: &str) -> Option<ValueBits> {
     match f.kind {
         FieldKind::Ipv4Addr => ipv4(s).map(|b| ValueBits::Bytes(b.to_vec())),

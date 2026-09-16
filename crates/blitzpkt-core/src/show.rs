@@ -1,5 +1,3 @@
-//! Human-readable rendering of field values and packet summaries.
-
 use crate::field::FieldValue;
 use crate::packet::Packet;
 
@@ -27,7 +25,7 @@ pub fn render_flags(bits: u64, names: &[&str]) -> String {
     s
 }
 
-/// RFC 5952 textual form: lowercase hex, longest run of zero groups elided once.
+/// RFC 5952 form.
 pub fn render_ipv6(b: &[u8; 16]) -> String {
     let g: Vec<u16> = (0..8)
         .map(|i| u16::from_be_bytes([b[i * 2], b[i * 2 + 1]]))
@@ -48,7 +46,7 @@ pub fn render_ipv6(b: &[u8; 16]) -> String {
             cur_len = 0;
         }
     }
-    // A single zero group is written out rather than elided (RFC 5952 §4.2.2).
+    // RFC 5952 §4.2.2: a lone zero group is written out, not elided.
     if best_len < 2 {
         return g
             .iter()
@@ -64,7 +62,6 @@ pub fn render_ipv6(b: &[u8; 16]) -> String {
     format!("{}::{}", head.join(":"), tail.join(":"))
 }
 
-/// One-line description, in the style of a packet summary.
 pub fn summary(pkt: &Packet) -> String {
     pkt.layers()
         .iter()
@@ -73,7 +70,6 @@ pub fn summary(pkt: &Packet) -> String {
         .join(" / ")
 }
 
-/// Multi-line field dump.
 pub fn show(pkt: &Packet) -> String {
     let mut out = String::new();
     for (i, s) in pkt.layers().iter().enumerate() {
@@ -116,7 +112,7 @@ mod tests {
         for i in 0..8 {
             b[i * 2 + 1] = (i + 1) as u8;
         }
-        b[3] = 0; // group 1 becomes zero, a lone run
+        b[3] = 0;
         let s = render_ipv6(&b);
         assert!(!s.contains("::"), "single zero group should not elide: {s}");
     }
@@ -124,7 +120,6 @@ mod tests {
     #[test]
     fn flags_render_in_bit_order() {
         let names: &[&str] = &["F", "S", "R", "P", "A"];
-        // SYN|ACK = bit1 | bit4
         assert_eq!(render_flags(0b1_0010, names), "SA");
     }
 }
