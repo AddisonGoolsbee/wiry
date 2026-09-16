@@ -94,8 +94,8 @@ mod tests {
         0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02,
     ];
 
-    /// Hand-built from the RFC 8200 §3 field order: version 6, tc 0x12,
-    /// fl 0x34567 packs as 0110 00010010 00110100010101100111.
+    /// RFC 8200 §3 field order: version 6, tc 0x12, fl 0x34567 packs as
+    /// 0110 00010010 00110100010101100111.
     fn header() -> Vec<u8> {
         let mut v = vec![0x61, 0x23, 0x45, 0x67];
         v.extend_from_slice(&[0x00, 0x08]);

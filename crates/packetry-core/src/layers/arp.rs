@@ -54,7 +54,7 @@ mod tests {
     use crate::field::FieldValue;
     use crate::packet::Packet;
 
-    /// Who-has 10.0.0.2, tell 10.0.0.1, laid out by hand from RFC 826.
+    /// RFC 826 who-has 10.0.0.2, tell 10.0.0.1.
     fn who_has() -> Vec<u8> {
         let mut v = Vec::new();
         v.extend_from_slice(&[0x00, 0x01]);
@@ -136,7 +136,6 @@ mod tests {
     #[test]
     fn carries_no_payload() {
         assert_eq!(next(&who_has()), Next::End);
-        // Ethernet frame padding must not dissect as an ARP payload.
         let mut framed = who_has();
         framed.extend_from_slice(&[0u8; 18]);
         let p = Packet::dissect(framed, ProtoId::Arp);

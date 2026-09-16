@@ -42,6 +42,11 @@ impl FieldDesc {
         self
     }
 
+    pub const fn with_default(mut self, d: u64) -> Self {
+        self.default = d;
+        self
+    }
+
     pub const fn defaulting_to(mut self, b: &'static [u8]) -> Self {
         self.default_bytes = Some(b);
         self

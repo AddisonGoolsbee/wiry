@@ -52,9 +52,8 @@ mod tests {
         0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02,
     ];
 
-    /// Echo Request, id 0x1234, seq 1. Checksum 0x1213 is the one's complement
-    /// of the pseudo-header sum (0x5bb7) plus the message sum (0x9235), worked
-    /// by hand from RFC 4443 §2.3.
+    /// RFC 4443 §2.3 Echo Request, id 0x1234, seq 1. Checksum 0x1213 is the
+    /// one's complement of 0x5bb7 (pseudo-header) plus 0x9235 (message).
     fn echo() -> Vec<u8> {
         vec![0x80, 0x00, 0x12, 0x13, 0x12, 0x34, 0x00, 0x01]
     }
@@ -137,7 +136,6 @@ mod tests {
         let bytes = p.to_bytes().to_vec();
         assert_eq!(&bytes[40..], &echo()[..]);
 
-        // Self-verifying: with the field in place the sum is zero.
         let seed = ck::pseudo_v6(&SRC, &DST, 58, 8);
         assert_eq!(ck::finish(ck::sum16(&bytes[40..], seed)), 0);
     }

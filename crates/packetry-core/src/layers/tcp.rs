@@ -1,7 +1,7 @@
 //! TCP header layout from RFC 9293 §3.1.
 
 use crate::field::FieldDesc;
-use crate::options::{be, walk_tlv, Item};
+use crate::options::{be, fixed_uint, walk_tlv, Item};
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
 /// Control bits, least significant first. The ninth, NS (RFC 3540), takes the
@@ -16,18 +16,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("dataofs", 96, 4, 5),
     FieldDesc::uint("reserved", 100, 3, 0),
     // Defaults to SYN, as packet-crafting tools conventionally do.
-    FieldDesc {
-        name: "flags",
-        bit_off: 103,
-        bit_len: 9,
-        kind: crate::field::FieldKind::Flags,
-        default: 0b0000_0010,
-        flags: FLAG_NAMES,
-        computed: false,
-        cond: None,
-        default_bytes: None,
-        to_end: false,
-    },
+    FieldDesc::flags("flags", 103, 9, FLAG_NAMES).with_default(0b0000_0010),
     FieldDesc::uint("window", 112, 16, 8192),
     FieldDesc::computed_uint("chksum", 128, 16),
     FieldDesc::uint("urgptr", 144, 16, 0),
@@ -43,7 +32,7 @@ fn header_len(hdr: &[u8]) -> usize {
 }
 
 /// Always opaque: DNS over TCP is length-prefixed, which the DNS layer does not
-/// handle, and nothing else is dispatched on a TCP port.
+/// handle, and nothing else dispatches on a TCP port.
 fn next(_: &[u8]) -> Next {
     Next::Raw
 }
@@ -64,15 +53,6 @@ pub mod optkind {
 
 /// RFC 9293 §3.1: kinds 0 and 1 are a single octet with no length field.
 const SINGLE_BYTE: &[u8] = &[optkind::EOL, optkind::NOP];
-
-/// Falls back to the raw payload when the capture disagrees with the registry.
-fn fixed_uint(name: &'static str, kind: u8, payload: &[u8], width: usize) -> Item {
-    if payload.len() == width {
-        Item::uint(name, kind as u32, be(payload))
-    } else {
-        Item::bytes(name, kind as u32, payload)
-    }
-}
 
 fn decode(kind: u8, payload: &[u8]) -> Item {
     match kind {
@@ -135,8 +115,8 @@ mod tests {
     use crate::options::ItemValue;
     use crate::packet::Packet;
 
-    /// MSS, SAckOK, Timestamp, NOP, Window Scale, hand-built from RFC 9293
-    /// §3.1, RFC 2018 §2 and RFC 7323 §3-4.
+    /// MSS, SAckOK, Timestamp, NOP, Window Scale: RFC 9293 §3.1, RFC 2018 §2,
+    /// RFC 7323 §3-4.
     const SYN_OPTS: &[u8] = &[
         0x02, 0x04, 0x05, 0xb4, 0x04, 0x02, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
         0x02, 0x01, 0x03, 0x03, 0x07,
@@ -223,11 +203,9 @@ mod tests {
                 assert!(items.len() <= 5, "cut {cut} produced {items:?}");
             }
         }
-        // Data Offset over-claims the bytes present.
         let mut hdr = tcp_hdr(&[0x02, 0x04, 0x05, 0xb4]);
         hdr.truncate(22);
         assert!(parse_options(&hdr).is_empty());
-        // Length octet runs past the option region.
         let bad = tcp_hdr(&[0x02, 0x08, 0x05, 0xb4]);
         assert!(parse_options(&bad).is_empty());
     }
@@ -290,7 +268,6 @@ mod tests {
 
     #[test]
     fn wrong_length_keeps_the_name_and_the_bytes() {
-        // A 4-byte MSS is malformed; the option is still reported, unparsed.
         let opts = &[0x02, 0x06, 0x05, 0xb4, 0x00, 0x00, 0x01, 0x01];
         let items = parse_options(&tcp_hdr(opts));
         assert_eq!(items.len(), 3);

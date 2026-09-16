@@ -53,6 +53,15 @@ impl Item {
     }
 }
 
+/// Falls back to the raw payload when the capture disagrees with the registry.
+pub(crate) fn fixed_uint(name: &'static str, code: u8, payload: &[u8], width: usize) -> Item {
+    if payload.len() == width {
+        Item::uint(name, code as u32, be(payload))
+    } else {
+        Item::bytes(name, code as u32, payload)
+    }
+}
+
 pub(crate) fn be(b: &[u8]) -> u64 {
     let mut v = 0u64;
     for x in b.iter().take(8) {

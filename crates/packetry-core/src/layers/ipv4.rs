@@ -2,7 +2,7 @@
 //! "Protocol Numbers" registry.
 
 use crate::field::FieldDesc;
-use crate::options::{be, walk_tlv, Item};
+use crate::options::{fixed_uint, walk_tlv, Item};
 use crate::proto::{ipproto, Next, ProtoDesc, ProtoId};
 
 /// RFC 791 §3.1 lists the 3 bits most significant first; this table is
@@ -33,8 +33,8 @@ fn header_len(hdr: &[u8]) -> usize {
     ((hdr[0] & 0x0f) as usize * 4).max(20)
 }
 
-/// RFC 791 §3.1: Total Length covers the header and its data, so anything the
-/// frame carries beyond it is a trailer and not part of this datagram.
+/// RFC 791 §3.1: Total Length covers the header and its data, so anything
+/// beyond it is a trailer, not part of this datagram.
 fn content_len(hdr: &[u8]) -> usize {
     if hdr.len() < 4 {
         return 0;
@@ -88,14 +88,6 @@ pub mod opttype {
 
 /// RFC 791 §3.1: types 0 and 1 are a single octet with no length field.
 const SINGLE_BYTE: &[u8] = &[opttype::EOL, opttype::NOP];
-
-fn fixed_uint(name: &'static str, ty: u8, payload: &[u8], width: usize) -> Item {
-    if payload.len() == width {
-        Item::uint(name, ty as u32, be(payload))
-    } else {
-        Item::bytes(name, ty as u32, payload)
-    }
-}
 
 fn decode(ty: u8, payload: &[u8]) -> Item {
     match ty {
@@ -270,11 +262,9 @@ mod tests {
                 assert!(items.len() <= 1, "cut {cut} produced {items:?}");
             }
         }
-        // IHL claims more bytes than the buffer holds.
         let mut hdr = ip_hdr(RA_OPTS, 0);
         hdr.truncate(22);
         assert!(parse_options(&hdr).is_empty());
-        // An option whose length octet overruns the option region.
         let bad = ip_hdr(&[0x94, 0x08, 0x00, 0x00], 0);
         assert!(parse_options(&bad).is_empty());
     }

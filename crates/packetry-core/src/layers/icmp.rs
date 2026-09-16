@@ -93,7 +93,7 @@ fn is_unstructured(hdr: &[u8]) -> bool {
 }
 
 /// RFC 4884 §7 puts the extension structure after the quoted datagram, which
-/// this model treats as payload. The names are interface only; they never decode.
+/// this model treats as payload. The names are interface only.
 fn never(_: &[u8]) -> bool {
     false
 }
@@ -118,8 +118,8 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::var_bytes("ext", 64).when(never),
 ];
 
-/// RFC 792 §3 and RFC 950 §2: only timestamp and address-mask messages carry
-/// more than the common eight octets.
+/// RFC 792 §3, RFC 950 §2: only timestamp and address-mask messages carry more
+/// than the common eight octets.
 fn header_len(hdr: &[u8]) -> usize {
     match msg_type(hdr) {
         TIMESTAMP | TIMESTAMP_REPLY => 20,
@@ -154,7 +154,7 @@ mod tests {
     use crate::field::FieldValue;
     use crate::packet::Packet;
 
-    /// Hand-built from the RFC 792 Echo diagram: id 0x1234, seq 1, 4-byte payload.
+    /// RFC 792 Echo: id 0x1234, seq 1, 4-byte payload.
     fn echo_request() -> Vec<u8> {
         vec![
             0x08, 0x00, 0x48, 0x2d, 0x12, 0x34, 0x00, 0x01, 0xde, 0xad, 0xbe, 0xef,
@@ -319,7 +319,6 @@ mod tests {
 
     #[test]
     fn unstructured_type_names_the_four_octets_unused() {
-        // Type 9, router advertisement, has no structured layout here.
         let bytes = vec![0x09, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04];
         let p = Packet::dissect(bytes, ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
