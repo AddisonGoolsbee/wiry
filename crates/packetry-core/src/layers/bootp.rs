@@ -82,7 +82,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     content_len: None,
 };
 
-pub static DHCP_FIELDS: &[FieldDesc] = &[FieldDesc::var_bytes("options", 0)];
+pub static DHCP_FIELDS: &[FieldDesc] = &[FieldDesc::var_bytes_to_end("options", 0)];
 
 fn dhcp_header_len(hdr: &[u8]) -> usize {
     hdr.len()

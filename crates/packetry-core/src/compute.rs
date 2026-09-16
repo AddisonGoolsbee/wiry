@@ -25,13 +25,16 @@ pub fn recompute(pkt: &mut Packet) {
 
 /// True when a length field describes more bytes than the buffer holds, which
 /// is what a capture clipped by the snaplen looks like. Nothing derived from
-/// the missing bytes can be recomputed, so what the wire said stands.
+/// the missing bytes can be recomputed, so what the wire said stands. A packet
+/// deliberately resized is not clipped: its length fields describe the extent
+/// it had before the write, and they are exactly what is being recomputed.
 fn is_clipped(pkt: &Packet) -> bool {
-    pkt.spans.iter().enumerate().any(|(i, s)| {
-        crate::proto::desc(s.proto)
-            .content_len
-            .is_some_and(|f| s.off as usize + f(pkt.header(i)) > pkt.buf.len())
-    })
+    !pkt.resized
+        && pkt.spans.iter().enumerate().any(|(i, s)| {
+            crate::proto::desc(s.proto)
+                .content_len
+                .is_some_and(|f| s.off as usize + f(pkt.header(i)) > pkt.buf.len())
+        })
 }
 
 /// Trailing `Padding` counts towards no enclosing length or checksum, so every

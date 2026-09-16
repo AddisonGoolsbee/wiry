@@ -201,6 +201,17 @@ def test_a_trailing_string_field_takes_the_rest_of_the_packet():
     assert back[Trailer].data == b"hello world"
 
 
+@pytest.mark.parametrize("data", [b"much longer than before", b"hi"])
+def test_rewriting_a_trailing_string_field_resizes_the_packet(data):
+    pkt = IP(bytes(IP() / UDP(dport=8888) / Trailer(kind=9, data=b"hello world")))
+    pkt[Trailer].data = data
+
+    back = IP(bytes(pkt))
+    assert back[Trailer].data == data
+    assert back[Trailer].kind == 9
+    assert back[UDP].len == 8 + 1 + len(data)
+
+
 def test_show_and_summary_name_the_layer_and_its_fields():
     pkt = IP() / UDP(dport=9999) / MyProto(version=4)
     text = pkt.show_str()

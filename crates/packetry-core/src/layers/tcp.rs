@@ -26,6 +26,7 @@ pub static FIELDS: &[FieldDesc] = &[
         computed: false,
         cond: None,
         default_bytes: None,
+        to_end: false,
     },
     FieldDesc::uint("window", 112, 16, 8192),
     FieldDesc::computed_uint("chksum", 128, 16),

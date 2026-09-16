@@ -191,7 +191,11 @@ fn registered_next(_: &[u8]) -> Next {
 
 /// `fields` must already hold `'static` names, and `build_len` the width of the
 /// fixed part in bytes.
-pub fn register(name: String, fields: Vec<FieldDesc>, build_len: usize) -> Result<ProtoId, String> {
+pub fn register(
+    name: String,
+    mut fields: Vec<FieldDesc>,
+    build_len: usize,
+) -> Result<ProtoId, String> {
     if name.is_empty() {
         return Err("layer name must not be empty".into());
     }
@@ -208,6 +212,9 @@ pub fn register(name: String, fields: Vec<FieldDesc>, build_len: usize) -> Resul
         ));
     }
     let var_tail = fields.last().is_some_and(|f| f.kind == FieldKind::VarBytes);
+    if var_tail {
+        fields.last_mut().unwrap().to_end = true;
+    }
     let d: &'static ProtoDesc = Box::leak(Box::new(ProtoDesc {
         id: ProtoId(BUILTIN_COUNT + slot as u16),
         name: Box::leak(name.into_boxed_str()),

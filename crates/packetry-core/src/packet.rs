@@ -23,6 +23,9 @@ pub struct Packet {
     pub spans: Spans,
     /// Bitmask of layers whose computed fields need recomputing.
     dirty: u32,
+    /// Set when a write changed how many bytes the packet holds, so the length
+    /// fields still describe the old extent.
+    pub(crate) resized: bool,
 }
 
 impl Packet {
@@ -32,6 +35,7 @@ impl Packet {
             buf,
             spans,
             dirty: 0,
+            resized: false,
         }
     }
 
@@ -110,6 +114,7 @@ impl Packet {
             buf,
             spans,
             dirty: u32::MAX,
+            resized: false,
         };
         pkt.refresh_totals();
         pkt
@@ -202,6 +207,10 @@ impl Packet {
             return false;
         };
         let a = s.off as usize + (f.bit_off / 8) as usize;
+        if f.to_end {
+            self.replace_to_end(layer, a, val);
+            return true;
+        }
         let mut room = self.buf.len().saturating_sub(a);
         // An oversized value is truncated to the field, never spilled into the
         // next one. A variable-length field has no width of its own.
@@ -223,6 +232,24 @@ impl Packet {
         true
     }
 
+    /// A field with no end of its own takes the whole tail of its layer, so the
+    /// frame grows or shrinks with it and every enclosing length follows. What
+    /// comes after the layer, a trailing `Padding` included, stays put.
+    fn replace_to_end(&mut self, layer: usize, at: usize, val: &[u8]) {
+        let s = self.spans[layer];
+        let end = ((s.off + s.hlen) as usize).min(self.buf.len());
+        let at = at.min(end);
+        let delta = val.len() as isize - (end - at) as isize;
+        self.buf.splice(at..end, val.iter().copied());
+        self.spans[layer].hlen = (at + val.len() - s.off as usize) as u32;
+        for later in self.spans[layer + 1..].iter_mut() {
+            later.off = (later.off as isize + delta) as u32;
+        }
+        self.dirty = u32::MAX;
+        self.resized = true;
+        self.refresh_totals();
+    }
+
     pub fn set_payload(&mut self, layer: usize, data: &[u8]) {
         let s = self.spans[layer];
         let cut = (s.off + s.hlen) as usize;
@@ -231,6 +258,7 @@ impl Packet {
         let link = self.spans[0].proto;
         self.spans = spans_of(&self.buf, link, false);
         self.dirty = u32::MAX;
+        self.resized = true;
     }
 
     /// Construction lays down the fixed part first, so a header whose length
@@ -280,6 +308,7 @@ impl Packet {
             self.refresh_totals();
             crate::compute::recompute(self);
             self.dirty = 0;
+            self.resized = false;
         }
         &self.buf
     }
@@ -518,6 +547,32 @@ mod tests {
         assert_eq!(e.get(0, "src").unwrap(), FieldValue::Mac([0xaa; 6]));
         assert_eq!(e.get(0, "dst").unwrap(), dst);
         assert_eq!(e.get(0, "type").unwrap(), ty);
+    }
+
+    #[test]
+    fn a_field_running_to_the_end_of_its_layer_resizes_the_packet() {
+        let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Udp]);
+        p.set_payload(1, b"12345678");
+        let bytes = p.to_bytes().to_vec();
+
+        for (val, len) in [(&b"ABCDEFGHIJKLMNOP"[..], 16usize), (&b"XY"[..], 2)] {
+            let mut back = Packet::dissect(bytes.clone(), ProtoId::Ipv4);
+            let raw = back.find_layer(ProtoId::Raw).unwrap();
+            assert!(back.set_bytes(raw, "load", val));
+            assert_eq!(
+                back.get(raw, "load").unwrap(),
+                FieldValue::Bytes(val.into())
+            );
+            assert_eq!(back.to_bytes().len(), 28 + len);
+            assert_eq!(
+                back.get(0, "len").unwrap(),
+                FieldValue::Uint(28 + len as u64)
+            );
+            assert_eq!(
+                back.get(1, "len").unwrap(),
+                FieldValue::Uint(8 + len as u64)
+            );
+        }
     }
 
     #[test]

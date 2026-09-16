@@ -3,7 +3,7 @@
 use crate::field::FieldDesc;
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
-pub static FIELDS: &[FieldDesc] = &[FieldDesc::var_bytes("load", 0)];
+pub static FIELDS: &[FieldDesc] = &[FieldDesc::var_bytes_to_end("load", 0)];
 
 fn header_len(hdr: &[u8]) -> usize {
     hdr.len()

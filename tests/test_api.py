@@ -7,9 +7,10 @@ import pytest
 
 import packetry
 from packetry import (
-    ARP, Dot1Q, Ether, ICMP, IP, IPv6, TCP, UDP, hexdump_str, known_layers, ls, raw,
+    ARP, Dot1Q, Ether, ICMP, IP, IPv6, Padding, Raw, TCP, UDP, hexdump_str,
+    known_layers, ls, raw,
 )
-from helpers import ETHER_IP_TCP
+from helpers import ETHER_IP_TCP, checksum
 
 
 @pytest.fixture
@@ -112,6 +113,50 @@ def test_an_oversized_byte_value_is_truncated_to_its_field(pkt):
     assert pkt[Ether].src == "aa:aa:aa:aa:aa:aa"
     assert pkt[Ether].dst == "00:11:22:33:44:55"
     assert pkt[Ether].type == 0x0800
+
+
+@pytest.mark.parametrize("load", [b"ABCDEFGHIJKLMNOP", b"XY", b""])
+def test_writing_a_trailing_variable_length_field_resizes_the_frame(load):
+    # A port no layer is bound to, so the payload stays one Raw layer.
+    orig = bytes(Ether() / IP() / UDP(sport=4444, dport=4444) / Raw(load=b"12345678"))
+    pkt = Ether(orig)
+    pkt[Raw].load = load
+
+    out = Ether(bytes(pkt))
+    if load:
+        assert out[Raw].load == load
+    else:
+        assert Raw not in out
+    assert len(bytes(out)) == len(orig) - 8 + len(load)
+    assert out[IP].len == 28 + len(load)
+    assert out[UDP].len == 8 + len(load)
+    assert checksum(bytes(out)[14:34]) == 0
+
+
+def test_a_resized_payload_leaves_no_stale_octets():
+    orig = bytes(Ether() / IP() / UDP(sport=4444, dport=4444) / Raw(load=b"12345678"))
+    pkt = Ether(orig)
+    pkt[Raw].load = b"XY"
+    assert Ether(bytes(pkt))[Raw].load == b"XY"
+
+
+def test_a_trailing_pad_survives_a_payload_being_rewritten():
+    built = Ether() / IP() / UDP(sport=4444, dport=4444) / Raw(load=b"1234")
+    pkt = Ether(bytes(built / Padding(load=b"\x00" * 6)))
+    pkt[Raw].load = b"abcdefghij"
+
+    out = Ether(bytes(pkt))
+    assert out[Raw].load == b"abcdefghij"
+    assert out[Padding].load == b"\x00" * 6
+    # RFC 791 §3.1: the pad is not part of the datagram.
+    assert out[IP].len == 38
+
+
+def test_an_option_region_bounded_by_its_header_does_not_resize():
+    # TCP options end where the data offset says, not where the packet does.
+    pkt = Ether(ETHER_IP_TCP)
+    pkt[TCP].options = b"\x02\x04\x05\xb4"
+    assert len(bytes(pkt)) == len(ETHER_IP_TCP)
 
 
 @pytest.mark.parametrize(
@@ -331,3 +376,16 @@ def test_equality_and_hashing_follow_the_bytes(pkt):
 
 def test_dissected_packet_exposes_its_time():
     assert Ether(ETHER_IP_TCP).time == 0.0
+
+
+@pytest.mark.parametrize(
+    "layer,field,expected",
+    [
+        (IPv6, "src", "::1"),
+        (IPv6, "dst", "::1"),
+    ],
+)
+def test_an_integer_fills_the_low_order_bits_of_a_field_wider_than_64(layer, field, expected):
+    pkt = layer()
+    setattr(pkt[layer], field, 1)
+    assert getattr(pkt[layer], field) == expected

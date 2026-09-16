@@ -31,6 +31,9 @@ pub struct FieldDesc {
     pub cond: Option<fn(&[u8]) -> bool>,
     /// Default for fields wider than the 64 bits `default` holds.
     pub default_bytes: Option<&'static [u8]>,
+    /// `VarBytes` only: the field runs to the end of the whole layer, not just
+    /// to the end of its header, so writing it resizes the packet.
+    pub to_end: bool,
 }
 
 impl FieldDesc {
@@ -63,6 +66,7 @@ impl FieldDesc {
             computed: false,
             cond: None,
             default_bytes: None,
+            to_end: false,
         }
     }
     pub const fn computed_uint(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
@@ -76,6 +80,7 @@ impl FieldDesc {
             computed: true,
             cond: None,
             default_bytes: None,
+            to_end: false,
         }
     }
     pub const fn ipv4(name: &'static str, bit_off: u16, default: u64) -> Self {
@@ -89,6 +94,7 @@ impl FieldDesc {
             computed: false,
             cond: None,
             default_bytes: None,
+            to_end: false,
         }
     }
     pub const fn ipv6(name: &'static str, bit_off: u16) -> Self {
@@ -102,6 +108,7 @@ impl FieldDesc {
             computed: false,
             cond: None,
             default_bytes: None,
+            to_end: false,
         }
     }
     pub const fn mac(name: &'static str, bit_off: u16) -> Self {
@@ -115,6 +122,7 @@ impl FieldDesc {
             computed: false,
             cond: None,
             default_bytes: None,
+            to_end: false,
         }
     }
     pub const fn flags(
@@ -133,6 +141,7 @@ impl FieldDesc {
             computed: false,
             cond: None,
             default_bytes: None,
+            to_end: false,
         }
     }
     pub const fn var_bytes(name: &'static str, bit_off: u16) -> Self {
@@ -146,7 +155,15 @@ impl FieldDesc {
             computed: false,
             cond: None,
             default_bytes: None,
+            to_end: false,
         }
+    }
+    /// `var_bytes` for a layer whose header is the whole layer, so the field
+    /// has no end of its own and a write to it resizes the packet.
+    pub const fn var_bytes_to_end(name: &'static str, bit_off: u16) -> Self {
+        let mut f = Self::var_bytes(name, bit_off);
+        f.to_end = true;
+        f
     }
     pub const fn bytes(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
         Self {
@@ -159,6 +176,7 @@ impl FieldDesc {
             computed: false,
             cond: None,
             default_bytes: None,
+            to_end: false,
         }
     }
 }
