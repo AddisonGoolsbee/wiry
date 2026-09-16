@@ -117,19 +117,15 @@ fn addrs(p: &[u8]) -> Vec<[u8; 4]> {
 }
 
 fn ipv4(name: &'static str, code: u32, p: &[u8]) -> Item {
-    Item {
-        name: std::borrow::Cow::Borrowed(name),
-        code,
-        value: ItemValue::Ipv4List(addrs(p)),
-    }
+    Item::named(name, code, ItemValue::Ipv4List(addrs(p)))
 }
 
 fn text(name: &'static str, code: u32, p: &[u8]) -> Item {
-    Item {
-        name: std::borrow::Cow::Borrowed(name),
+    Item::named(
+        name,
         code,
-        value: ItemValue::Text(String::from_utf8_lossy(p).into_owned()),
-    }
+        ItemValue::Text(String::from_utf8_lossy(p).into_owned()),
+    )
 }
 
 fn decode(code: u8, p: &[u8]) -> Item {
@@ -216,7 +212,7 @@ mod tests {
         vec![0x00, 0x44, 0x00, 0x43, 0x00, 0x00, 0x00, 0x00]
     }
 
-    /// A BOOTREQUEST built by hand from the RFC 951 §3 layout.
+    /// RFC 951 §3 BOOTREQUEST.
     fn bootp_header() -> Vec<u8> {
         let mut v = vec![0u8; BOOTP_LEN];
         v[0] = 1;
@@ -234,7 +230,7 @@ mod tests {
         v
     }
 
-    /// Cookie plus a minimal RFC 2132 option list: DISCOVER, then END.
+    /// Cookie plus an RFC 2132 DISCOVER and END.
     fn dhcp_options() -> Vec<u8> {
         let mut v = MAGIC_COOKIE.to_vec();
         v.extend_from_slice(&[53, 1, 1, 255]);
@@ -336,7 +332,6 @@ mod tests {
         assert_eq!(DESC.build_len, 236);
         let last = FIELDS.last().unwrap();
         assert_eq!((last.bit_off as usize + last.bit_len as usize) / 8, 236);
-        // Fields tile the header with no gaps or overlaps.
         let mut bit = 0u32;
         for f in FIELDS {
             assert_eq!(f.bit_off as u32, bit, "gap or overlap before {}", f.name);

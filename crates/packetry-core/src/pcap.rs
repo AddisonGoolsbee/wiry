@@ -156,7 +156,6 @@ impl<'a> Iterator for Reader<'a> {
     }
 }
 
-/// Count records without dissecting.
 pub fn count(buf: &[u8]) -> Result<usize, PcapError> {
     Ok(Reader::new(buf)?.count())
 }

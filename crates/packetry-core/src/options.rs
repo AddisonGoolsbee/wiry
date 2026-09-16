@@ -20,7 +20,7 @@ pub struct Item {
 }
 
 impl Item {
-    fn named(name: &'static str, code: u32, value: ItemValue) -> Self {
+    pub(crate) fn named(name: &'static str, code: u32, value: ItemValue) -> Self {
         Self {
             name: Cow::Borrowed(name),
             code,
