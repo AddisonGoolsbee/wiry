@@ -268,9 +268,8 @@ def _layer_name(x: Any) -> str:
     raise TypeError(f"not a layer: {x!r}")
 
 
-# Layer name -> (field name, default) of a trailing variable-length field. Its
-# value is appended to the header at build time rather than written into a
-# fixed-width slot, which is the same path the option regions take.
+# Layer name -> (field, default) of a trailing variable-length field, which is
+# appended at build time like an option region, not written into a fixed slot.
 _VAR_FIELD: dict[str, tuple[str, Any]] = {}
 
 

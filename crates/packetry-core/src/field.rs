@@ -265,7 +265,7 @@ pub fn wire_uint(f: &FieldDesc, v: u64) -> u64 {
     if f.kind != FieldKind::LeUint {
         return v;
     }
-    let n = (f.bit_len / 8) as usize;
+    let n = ((f.bit_len / 8) as usize).min(8);
     v.to_be_bytes()[8 - n..]
         .iter()
         .rev()

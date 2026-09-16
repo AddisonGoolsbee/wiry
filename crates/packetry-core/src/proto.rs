@@ -289,10 +289,16 @@ fn search_binds(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
 
 /// The reverse of `bound_next`: stacking `child` under `parent` writes back the
 /// values that will make dissection find it again.
+#[inline]
 pub fn apply_bind(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if BOUND.load(Ordering::Relaxed) == 0 {
         return;
     }
+    write_bind(hdr, parent, child);
+}
+
+#[inline(never)]
+fn write_bind(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if let Some(b) = binds().find(|b| b.parent == parent && b.child == child) {
         for (f, v) in b.conds {
             field::write_bits(hdr, f.bit_off, f.bit_len, *v);

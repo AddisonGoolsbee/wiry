@@ -963,6 +963,17 @@ fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
     let mut bit_off = 0u16;
     for (fname, bit_len, kind, default, default_bytes, flag_names) in fields {
         let kind = kind_of(&kind)?;
+        let packed = matches!(kind, FieldKind::Uint | FieldKind::LeUint | FieldKind::Flags);
+        if packed && bit_len > 64 {
+            return Err(PyValueError::new_err(format!(
+                "{name}.{fname} is {bit_len} bits; an integer field holds at most 64"
+            )));
+        }
+        if kind == FieldKind::LeUint && bit_len / 8 * 8 != bit_len {
+            return Err(PyValueError::new_err(format!(
+                "{name}.{fname} is little-endian and must be a whole number of bytes"
+            )));
+        }
         descs.push(FieldDesc {
             name: leak(fname),
             bit_off,
@@ -981,7 +992,9 @@ fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
             default_bytes: default_bytes
                 .map(|b| &*Box::leak(b.into_boxed_slice()) as &'static [u8]),
         });
-        bit_off += bit_len;
+        bit_off = bit_off.checked_add(bit_len).ok_or_else(|| {
+            PyValueError::new_err(format!("{name} has too many bits to describe"))
+        })?;
     }
     let build_len = (bit_off / 8) as usize;
     if build_len * 8 != bit_off as usize {
