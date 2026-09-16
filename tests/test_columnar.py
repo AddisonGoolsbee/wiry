@@ -67,8 +67,9 @@ def test_many_fields_come_back_in_spec_order(capture):
 def test_columns_agree_exactly_with_a_per_packet_loop(capture):
     specs = [
         ("Ether", "src"), ("Ether", "dst"), ("IP", "src"), ("IP", "dst"),
-        ("IP", "ttl"), ("IP", "proto"), ("TCP", "sport"), ("TCP", "dport"),
-        ("TCP", "flags"), ("UDP", "sport"), ("ARP", "psrc"), ("IPv6", "src"),
+        ("IP", "ttl"), ("IP", "proto"), ("IP", "flags"), ("TCP", "sport"),
+        ("TCP", "dport"), ("TCP", "flags"), ("UDP", "sport"), ("ARP", "psrc"),
+        ("IPv6", "src"),
         ("Dot1Q", "vlan"),
     ]
     bulk = capture.columns(specs)

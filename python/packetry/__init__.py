@@ -139,7 +139,8 @@ class FlagValue:
         return self._bits != 0
 
     def __str__(self) -> str:
-        return "".join(n for i, n in enumerate(self._names) if self._bits >> i & 1)
+        sep = "+" if any(len(n) > 1 for n in self._names) else ""
+        return sep.join(self)
 
     def __repr__(self) -> str:
         return f"<Flag {self._bits} ({self})>"
@@ -654,21 +655,54 @@ class Packet(metaclass=_PacketMeta):
             return self._rust.haslayer(name)
         return any(n == name for n, _ in self._stack)
 
-    def getlayer(self, layer: Any) -> _LayerView | None:
-        name = _layer_name(layer)
+    def getlayer(self, layer: Any, nb: int = 1, **flt: Any) -> _LayerView | None:
+        """The `nb`-th layer of this kind whose every named field matches, or
+        the layer at that position when `layer` is an integer."""
         names = self.layers()
-        if name not in names:
-            return None
-        return _LayerView(self, names.index(name), name)
+        if isinstance(layer, int) and not isinstance(layer, bool):
+            if not -len(names) <= layer < len(names):
+                return None
+            layer %= len(names)
+            return _LayerView(self, layer, names[layer])
+        name = _layer_name(layer)
+        seen = 0
+        for i, n in enumerate(names):
+            if n != name:
+                continue
+            view = _LayerView(self, i, name)
+            if any(getattr(view, k, None) != v for k, v in flt.items()):
+                continue
+            seen += 1
+            if seen == nb:
+                return view
+        return None
 
     def __contains__(self, layer: Any) -> bool:
         return self.haslayer(layer)
 
     def __getitem__(self, layer: Any) -> _LayerView:
-        view = self.getlayer(layer)
+        nb, flt = 1, {}
+        # pkt[IP:2] is the second IP layer; pkt[IP::{"ttl": 3}] filters on
+        # field values, which is the shape scapy's own suite uses.
+        if isinstance(layer, slice):
+            layer, nb, flt = layer.start, layer.stop or 1, layer.step or {}
+        view = self.getlayer(layer, nb, **flt)
         if view is None:
-            raise IndexError(f"layer {_layer_name(layer)} not in packet")
+            raise IndexError(f"no matching layer {layer!r} in packet")
         return view
+
+    def __iter__(self) -> Iterator["Packet"]:
+        yield self.copy()
+
+    def copy(self) -> "Packet":
+        """An independent packet carrying the same layers and values."""
+        if self._rust is not None:
+            return Packet(_rust=self._rust.copy(), time=self.time)
+        return Packet(
+            _stack=[(n, dict(f)) for n, f in self._stack],
+            _payload=self._payload,
+            time=self.time,
+        )
 
     def __getattr__(self, field: str) -> Any:
         if field.startswith("_"):
@@ -887,12 +921,27 @@ def hexdump_str(pkt: Any, width: int = 16) -> str:
     return "".join(out)
 
 
-def ls(layer: Any = None) -> None:
-    """List known layers, or the fields of one."""
+def ls(layer: Any = None, verbose: bool = False) -> None:
+    """List known layers, the fields of one, or the fields of a packet.
+
+    `verbose` keeps the fields a header's own contents make inactive, which are
+    otherwise left out for a packet that has been built.
+    """
     if layer is None:
         for n in _b.known_layers():
             print(n)
         return
-    name = _layer_name(layer)
-    for f in _b.layer_fields(name):
+    if isinstance(layer, Packet):
+        for i, n in enumerate(layer.layers()):
+            print(f"###[ {n} ]###")
+            for f in _ls_fields(layer, i, n, verbose):
+                print(f"  {f}")
+        return
+    for f in _b.layer_fields(_layer_name(layer)):
         print(f"{f}")
+
+
+def _ls_fields(pkt: Packet, i: int, name: str, verbose: bool) -> Sequence[str]:
+    if verbose or pkt._rust is None:
+        return _b.layer_fields(name)
+    return pkt._rust.field_names(i)

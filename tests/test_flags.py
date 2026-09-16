@@ -97,6 +97,16 @@ def test_a_reassigned_field_still_reads_back_as_flags():
     assert pkt.flags == "S"
 
 
+def test_multi_letter_names_are_separated_when_rendered():
+    # Concatenating them would be ambiguous, so they are joined with "+".
+    pkt = IP(flags="MF+DF")
+    assert pkt.flags == 3
+    assert str(pkt.flags) == "MF+DF"
+    assert repr(pkt.flags) == "<Flag 3 (MF+DF)>"
+    assert pkt.flags == "MF+DF"
+    assert IP(bytes(pkt)).flags.MF
+
+
 def test_multi_letter_flag_names_match_whole():
     # RFC 791 §3.1 names the bits MF and DF, so a single letter is not a flag.
     pkt = IP(flags="DF")

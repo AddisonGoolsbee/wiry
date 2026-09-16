@@ -243,6 +243,61 @@ def test_ls_lists_layers_and_fields():
     assert out.getvalue().split()[:3] == ["sport", "dport", "seq"]
 
 
+def test_ls_of_a_packet_lists_each_layer(pkt):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        ls(pkt)
+    printed = out.getvalue()
+    assert "###[ Ether ]###" in printed and "###[ TCP ]###" in printed
+    assert "  sport" in printed
+
+
+def test_ls_verbose_keeps_the_fields_a_header_does_not_carry():
+    built = ICMP(bytes(ICMP(type=0)))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        ls(built)
+    terse = out.getvalue()
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        ls(built, verbose=True)
+    assert len(out.getvalue()) > len(terse)
+
+
+def test_layers_are_reachable_by_position(pkt):
+    assert pkt[0].name == "Ether"
+    assert pkt[1].name == "IP"
+    assert pkt[-1].name == "TCP"
+    assert pkt[1].ttl == pkt[IP].ttl
+    with pytest.raises(IndexError):
+        pkt[9]
+
+
+def test_getlayer_takes_field_filters():
+    stack = IP() / IP(ttl=3) / IP(ttl=9)
+    assert stack.getlayer(IP, ttl=3).ttl == 3
+    assert stack[IP::{"ttl": 9}].ttl == 9
+    assert stack.getlayer(IP, ttl=42) is None
+    assert stack.getlayer(IP, 2).ttl == 3
+    assert stack[IP:3].ttl == 9
+
+
+def test_iterating_a_packet_yields_an_independent_copy(pkt):
+    got = list(pkt)
+    assert len(got) == 1
+    got[0].ttl = 7
+    assert pkt[IP].ttl == 33
+
+
+def test_a_str_payload_is_latin_1_bytes():
+    assert bytes(packetry.Raw("sca") / "py") == b"scapy"
+    assert bytes("sca" / packetry.Raw("py")) == b"scapy"
+    assert bytes(packetry.Raw("\xff")) == b"\xff"
+    joined = packetry.Raw("sca")
+    joined.add_payload("py")
+    assert bytes(joined) == b"scapy"
+
+
 def test_public_names_are_exported():
     for name in ("Packet", "PacketList", "rdpcap", "wrpcap", "PcapReader", "raw",
                  "hexdump", "hexdump_str", "ls", "known_layers"):

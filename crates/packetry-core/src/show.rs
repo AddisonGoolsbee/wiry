@@ -15,14 +15,21 @@ pub fn render_value(v: &FieldValue) -> String {
     }
 }
 
+/// Names of more than a letter would run together, so a field carrying any of
+/// those separates them with `+`.
 pub fn render_flags(bits: u64, names: &[&str]) -> String {
-    let mut s = String::new();
-    for (i, n) in names.iter().enumerate() {
-        if bits & (1 << i) != 0 {
-            s.push_str(n);
-        }
-    }
-    s
+    let sep = if names.iter().any(|n| n.chars().count() > 1) {
+        "+"
+    } else {
+        ""
+    };
+    names
+        .iter()
+        .enumerate()
+        .filter(|(i, n)| !n.is_empty() && bits & (1 << i) != 0)
+        .map(|(_, n)| *n)
+        .collect::<Vec<_>>()
+        .join(sep)
 }
 
 /// RFC 5952 form.
@@ -121,5 +128,12 @@ mod tests {
     fn flags_render_in_bit_order() {
         let names: &[&str] = &["F", "S", "R", "P", "A"];
         assert_eq!(render_flags(0b1_0010, names), "SA");
+    }
+
+    #[test]
+    fn multi_letter_flag_names_are_separated() {
+        let names: &[&str] = &["MF", "DF", "evil"];
+        assert_eq!(render_flags(0b011, names), "MF+DF");
+        assert_eq!(render_flags(0b010, names), "DF");
     }
 }
