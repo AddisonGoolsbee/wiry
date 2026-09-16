@@ -31,6 +31,15 @@ fn next(hdr: &[u8]) -> Next {
     Next::Raw
 }
 
+/// Stacking BOOTP under UDP moves the ports to the BOOTP pair (RFC 951 §3),
+/// since the default 53/53 would otherwise dissect back as DNS.
+fn bind_next(hdr: &mut [u8], p: ProtoId) {
+    if p == ProtoId::Bootp && hdr.len() >= 4 {
+        hdr[0..2].copy_from_slice(&ports::BOOTPS.to_be_bytes());
+        hdr[2..4].copy_from_slice(&ports::BOOTPC.to_be_bytes());
+    }
+}
+
 pub static DESC: ProtoDesc = ProtoDesc {
     id: ProtoId::Udp,
     name: "UDP",
@@ -41,5 +50,5 @@ pub static DESC: ProtoDesc = ProtoDesc {
     build_len: 8,
     parse_options: None,
     set_hlen: None,
-    bind_next: None,
+    bind_next: Some(bind_next),
 };

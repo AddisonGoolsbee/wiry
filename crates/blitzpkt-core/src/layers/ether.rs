@@ -18,7 +18,9 @@ pub static FIELDS: &[FieldDesc] = &[
         computed: false,
     },
     FieldDesc::mac("src", 48),
-    FieldDesc::uint("type", 96, 16, ethertype::IPV4 as u64),
+    // Stacking a layer rewrites this. The default names no payload protocol, so
+    // a frame with nothing under it does not claim to carry IPv4.
+    FieldDesc::uint("type", 96, 16, ethertype::LOOP as u64),
 ];
 
 fn header_len(_: &[u8]) -> usize {

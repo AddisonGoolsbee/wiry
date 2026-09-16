@@ -119,6 +119,112 @@ _IP_OPT = {
 }
 
 
+# DHCP option codes and payload shapes, RFC 2132. An integer entry means a
+# fixed-width big-endian integer of that many bytes.
+#
+# The length octet here counts ONLY the option data (RFC 2132 s2), the opposite
+# of the TCP/IPv4 convention above where it also counts the code and length
+# octets. Using one rule for the other desynchronises every following option.
+_DHCP_OPT: dict[str, tuple[int, Any]] = {
+    "pad": (0, "flag"),
+    "subnet_mask": (1, "ip"),
+    "router": (3, "ip"),
+    "name_server": (6, "ip"),
+    "hostname": (12, "text"),
+    "domain": (15, "text"),
+    "broadcast_address": (28, "ip"),
+    "requested_addr": (50, "ip"),
+    "lease_time": (51, 4),
+    "message-type": (53, 1),
+    "server_id": (54, "ip"),
+    "param_req_list": (55, "bytes"),
+    "max_dhcp_size": (57, 2),
+    "renewal_time": (58, 4),
+    "rebinding_time": (59, 4),
+    "client_id": (61, "bytes"),
+    "relay_agent_information": (82, "bytes"),
+    "end": (255, "flag"),
+}
+
+# RFC 2132 section 9.6.
+_DHCP_MSGTYPE = {
+    "discover": 1, "offer": 2, "request": 3, "decline": 4,
+    "ack": 5, "nak": 6, "release": 7, "inform": 8,
+}
+
+# Pad and End are a bare octet: no length, no data (RFC 2132 s3.1, s3.2).
+_DHCP_BARE = {0, 255}
+
+
+def _ipv4_bytes(v: Any) -> bytes:
+    if _is_bytes(v):
+        return bytes(v)
+    if isinstance(v, int):
+        return int(v).to_bytes(4, "big")
+    return bytes(int(p) for p in str(v).split("."))
+
+
+def _dhcp_payload(kind: Any, values: tuple) -> bytes:
+    # A list value and several values mean the same thing, so ("router", a, b)
+    # and ("router", [a, b]) encode identically.
+    flat: list[Any] = []
+    for v in values:
+        if isinstance(v, (list, tuple)):
+            flat.extend(v)
+        else:
+            flat.append(v)
+    if kind == "ip":
+        return b"".join(_ipv4_bytes(v) for v in flat)
+    if kind == "text":
+        return b"".join(
+            v.encode() if isinstance(v, str) else bytes(v) for v in flat
+        )
+    if kind == "bytes":
+        if len(flat) == 1 and _is_bytes(flat[0]):
+            return bytes(flat[0])
+        if len(flat) == 1 and isinstance(flat[0], str):
+            return flat[0].encode()
+        return bytes(int(v) & 0xFF for v in flat)
+    v = flat[0] if flat else 0
+    if isinstance(v, str):
+        v = _DHCP_MSGTYPE.get(v.lower(), v)
+    return int(v).to_bytes(kind, "big")
+
+
+def _encode_dhcp_options(items: Any) -> bytes:
+    """Encode a DHCP option list (RFC 2132) into wire bytes.
+
+    Accepts what the parser gives back and what people type: "end",
+    ("end", None), ("message-type", 1), ("message-type", "discover"),
+    ("server_id", "10.0.0.1"), ("router", ["10.0.0.1", "10.0.0.2"]),
+    (224, b"raw").
+    """
+    out = bytearray()
+    for item in items:
+        if isinstance(item, (str, int)):
+            name, values = item, ()
+        else:
+            name, values = item[0], tuple(item[1:])
+        if values == (None,):
+            values = ()
+        if isinstance(name, int):
+            code, kind = name, "bytes"
+        elif name in _DHCP_OPT:
+            code, kind = _DHCP_OPT[name]
+        else:
+            raise ValueError(f"unknown DHCP option {name!r}")
+        if code in _DHCP_BARE:
+            out.append(code)
+            continue
+        payload = _dhcp_payload(kind, values)
+        if len(payload) > 255:
+            raise ValueError(f"DHCP option {name!r} is too long to encode")
+        out.append(code)
+        out.append(len(payload))
+        out += payload
+    return bytes(out)
+
+
 def _encode_options(layer: str, items: Any) -> bytes:
     """Encode an option list into wire bytes.
 
@@ -127,6 +233,8 @@ def _encode_options(layer: str, items: Any) -> bytes:
     """
     if _is_bytes(items):
         return bytes(items)
+    if layer == "DHCP":
+        return _encode_dhcp_options(items)
     table = _TCP_OPT if layer == "TCP" else _IP_OPT if layer == "IP" else None
     if table is None:
         raise ValueError(f"{layer} does not take an encodable option list")
@@ -203,21 +311,19 @@ class Packet:
             else:
                 return NotImplemented
 
-        # A dissected packet cannot be rebuilt from a field spec: variable-length
-        # header content (options, Raw payloads) does not survive the build path,
-        # so reconstructing would silently reset every field to its default.
-        # Append to the real bytes instead, which is also what happens on the wire.
-        if self._rust is not None:
-            new = self._rust.copy()
+        # A materialised packet cannot be turned back into a field spec:
+        # variable-length header content does not survive the build path, so
+        # reconstructing would silently reset every field to its default. When
+        # either side is one, append to the real bytes instead, which is what
+        # happens on the wire.
+        if self._rust is not None or other._rust is not None:
+            new = self._materialize().copy()
             n = len(new.layer_names())
             if n:
                 new.set_payload(n - 1, bytes(other))
             return Packet(_rust=new, time=self.time)
 
-        left = self._spec()
-        right = other._spec()
-        payload = other._payload if other._payload is not None else self._payload
-        return Packet(_stack=left + right, _payload=payload)
+        return Packet(_stack=self._spec() + other._spec())
 
     def __rtruediv__(self, other: Any) -> "Packet":
         if _is_bytes(other):
@@ -244,6 +350,8 @@ class Packet:
                 # header rather than written into a fixed-width field.
                 if k == "options" and not _is_bytes(v):
                     continue
+                if k == "load" and lname in ("Raw", "Padding"):
+                    continue
                 if isinstance(v, bool):
                     ints.append((i, k, int(v)))
                 elif isinstance(v, int):
@@ -262,6 +370,11 @@ class Packet:
         """Encoded option regions, as (layer index, bytes)."""
         out: list[tuple[int, bytes]] = []
         for i, (lname, fields) in enumerate(self._stack):
+            if lname in ("Raw", "Padding"):
+                load = fields.get("load")
+                if load:
+                    out.append((i, bytes(load)))
+                continue
             v = fields.get("options")
             if v is None or _is_bytes(v):
                 if _is_bytes(v) and v:
@@ -415,10 +528,7 @@ def _make_layer(name: str, doc: str = "") -> type:
             # Dissecting from bytes, the way a layer class accepts raw input.
             Packet.__init__(self, _rust=_b.dissect(bytes(_data), name))
             return
-        payload = None
-        if name in ("Raw", "Padding") and "load" in kw:
-            payload = bytes(kw.pop("load"))
-        Packet.__init__(self, _stack=[(name, dict(kw))], _payload=payload)
+        Packet.__init__(self, _stack=[(name, dict(kw))])
 
     cls = type(name, (Packet,), {
         "__init__": __init__,
@@ -501,6 +611,10 @@ class PacketList:
         """Positions of the matching packets."""
         from .columnar import filter_indices
         return filter_indices(self, layer, where)
+
+    def head(self, n: int) -> "PacketList":
+        """The first n packets, as a view. Shares the capture buffer."""
+        return PacketList(self._list.head(n))
 
     def times(self) -> list[float]:
         return self._list.times()

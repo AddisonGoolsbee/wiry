@@ -15,7 +15,8 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("prio", 0, 3, 0),
     FieldDesc::uint("id", 3, 1, 0),
     FieldDesc::uint("vlan", 4, 12, 1),
-    FieldDesc::uint("type", 16, 16, ethertype::IPV4 as u64),
+    // Zero until a layer is stacked under the tag, which rewrites it.
+    FieldDesc::uint("type", 16, 16, 0),
 ];
 
 fn header_len(_: &[u8]) -> usize {

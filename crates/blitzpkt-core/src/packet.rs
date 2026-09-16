@@ -48,9 +48,12 @@ impl Packet {
         Self::build_with(&owned)
     }
 
-    /// Build a stack where some layers carry extra header bytes (options).
-    /// Option regions are padded to a 4-byte boundary, as IPv4 and TCP require,
-    /// and the layer's own length field is rewritten to match.
+    /// Build a stack where some layers carry extra header bytes: IPv4/TCP
+    /// options, a DHCP option region, a `Raw` load.
+    ///
+    /// Only a layer with a header-length field pads its extra bytes to a 4-byte
+    /// boundary; DHCP (RFC 2132) and `Raw` take theirs verbatim, and padding
+    /// them would corrupt the option walk or the payload.
     pub fn build_with(stack: &[(ProtoId, Option<Vec<u8>>)]) -> Self {
         let mut buf = Vec::new();
         let mut spans = Spans::new();
@@ -59,15 +62,16 @@ impl Packet {
             let d = desc(p);
             let off = buf.len();
             buf.resize(off + d.build_len, 0);
-            // Append the option region, padded so the header stays a whole
-            // number of 32-bit words.
             let mut hlen = d.build_len;
             if let Some(o) = opts {
-                if !o.is_empty() && d.set_hlen.is_some() {
+                if !o.is_empty() {
                     buf.extend_from_slice(o);
-                    let pad = (4 - (o.len() % 4)) % 4;
-                    buf.extend(std::iter::repeat(0u8).take(pad));
-                    hlen = d.build_len + o.len() + pad;
+                    hlen = d.build_len + o.len();
+                    if d.set_hlen.is_some() {
+                        let pad = (4 - (o.len() % 4)) % 4;
+                        buf.extend(std::iter::repeat(0u8).take(pad));
+                        hlen += pad;
+                    }
                 }
             }
             for f in d.fields {

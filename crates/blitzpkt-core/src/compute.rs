@@ -26,12 +26,21 @@ pub fn recompute(pkt: &mut Packet) {
     }
 }
 
+/// Trailing `Padding` is not part of any enclosing length or checksum: it is
+/// what fills a frame out to its minimum size, so every computation stops where
+/// it starts.
+fn content_end(pkt: &Packet) -> usize {
+    pkt.spans
+        .iter()
+        .find(|s| s.proto == ProtoId::Padding)
+        .map_or(pkt.buf.len(), |s| (s.off as usize).min(pkt.buf.len()))
+}
+
 fn span_bounds(pkt: &Packet, i: usize) -> (usize, usize, usize) {
     let s = pkt.spans[i];
     let off = s.off as usize;
     let hlen = (s.hlen as usize).min(pkt.buf.len().saturating_sub(off));
-    let end = pkt.buf.len();
-    (off, hlen, end)
+    (off, hlen, content_end(pkt))
 }
 
 fn fix_ipv4(pkt: &mut Packet, i: usize) {

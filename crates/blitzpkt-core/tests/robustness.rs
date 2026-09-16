@@ -100,10 +100,7 @@ fn check_spans(pkt: &Packet, what: &str) {
             "span {:?} runs past the {n}-byte buffer ({what}, seed {SEED:#x})",
             s
         );
-        assert!(
-            s.off >= prev,
-            "spans out of order ({what}, seed {SEED:#x})"
-        );
+        assert!(s.off >= prev, "spans out of order ({what}, seed {SEED:#x})");
         prev = s.off;
     }
 }
@@ -151,7 +148,12 @@ fn eth_ip_tcp() -> Vec<u8> {
 fn eth_ip_tcp_options() -> Vec<u8> {
     let mut v = eth_ip_tcp();
     v[46] = 0x80; // data offset 8: three more 32-bit words of options
-    v.splice(54..54, [2, 4, 0x05, 0xb4, 4, 2, 1, 1, 8, 10, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0]);
+    v.splice(
+        54..54,
+        [
+            2, 4, 0x05, 0xb4, 4, 2, 1, 1, 8, 10, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0,
+        ],
+    );
     v
 }
 
@@ -468,18 +470,15 @@ fn dns_adversarial_compression_pointers_terminate() {
     cases.push(("rdlength overrun", m));
 
     for (name, msg) in cases {
-        let start = Instant::now();
-        let r = dns::parse_records(&msg);
-        assert!(
-            start.elapsed() < Duration::from_secs(2),
-            "parse_records did not terminate promptly on {name} (seed {SEED:#x})"
-        );
-        let n = r.qd.len() + r.an.len() + r.ns.len() + r.ar.len();
-        assert!(
-            n <= msg.len(),
-            "{name}: more records ({n}) than message bytes ({})",
-            msg.len()
-        );
+        within(Duration::from_secs(2), name, move || {
+            let r = dns::parse_records(&msg);
+            let n = r.qd.len() + r.an.len() + r.ns.len() + r.ar.len();
+            assert!(
+                n <= msg.len(),
+                "{name}: more records ({n}) than message bytes ({})",
+                msg.len()
+            );
+        });
     }
 }
 
@@ -656,7 +655,10 @@ fn read_all_pcap(data: &[u8]) -> usize {
         let mut pkt = Packet::dissect(rec.data.to_vec(), link);
         exercise(&mut pkt, "pcap record");
     }
-    assert!(n <= data.len() / 16 + 1, "more records than the file can hold");
+    assert!(
+        n <= data.len() / 16 + 1,
+        "more records than the file can hold"
+    );
     n
 }
 
@@ -675,7 +677,10 @@ fn read_all_pcapng(data: &[u8]) -> usize {
         let mut pkt = Packet::dissect(rec.data.to_vec(), link);
         exercise(&mut pkt, "pcapng record");
     }
-    assert!(n <= data.len() / 12 + 1, "more blocks than the file can hold");
+    assert!(
+        n <= data.len() / 12 + 1,
+        "more blocks than the file can hold"
+    );
     n
 }
 

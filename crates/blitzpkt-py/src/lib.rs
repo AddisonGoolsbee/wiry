@@ -689,6 +689,18 @@ impl PyPktList {
         })
     }
 
+    /// The first `n` packets, as a view sharing the capture buffer.
+    fn head(&self, n: usize) -> PyPktList {
+        let k = n.min(self.index.len());
+        PyPktList {
+            buf: Arc::clone(&self.buf),
+            index: self.index[..k].to_vec(),
+            link: self.link,
+            nanos: self.nanos,
+            nums: Some((0..k).map(|i| self.num_at(i)).collect()),
+        }
+    }
+
     /// Positions of these packets in the capture they were filtered from.
     fn nums(&self) -> Vec<u32> {
         (0..self.index.len()).map(|i| self.num_at(i)).collect()

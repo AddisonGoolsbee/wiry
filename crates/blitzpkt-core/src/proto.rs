@@ -133,6 +133,10 @@ pub mod ethertype {
     pub const ARP: u16 = 0x0806;
     pub const DOT1Q: u16 = 0x8100;
     pub const IPV6: u16 = 0x86DD;
+    /// "Loopback" (Ethernet Configuration Testing Protocol). Carries no payload
+    /// of its own, which is why it is the default for a frame with nothing
+    /// stacked under it.
+    pub const LOOP: u16 = 0x9000;
 }
 
 /// IP protocol numbers. IANA "Protocol Numbers" registry.

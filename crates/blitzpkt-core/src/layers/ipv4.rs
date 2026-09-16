@@ -18,7 +18,8 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::flags("flags", 48, 3, FLAG_NAMES),
     FieldDesc::uint("frag", 51, 13, 0),
     FieldDesc::uint("ttl", 64, 8, 64),
-    FieldDesc::uint("proto", 72, 8, ipproto::TCP as u64),
+    // Zero until a transport layer is stacked under it, which rewrites it.
+    FieldDesc::uint("proto", 72, 8, 0),
     FieldDesc::computed_uint("chksum", 80, 16),
     FieldDesc::ipv4("src", 96, 0),
     FieldDesc::ipv4("dst", 128, 0),

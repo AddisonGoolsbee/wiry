@@ -35,7 +35,11 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("tc", 22, 1, 0),
     FieldDesc::uint("rd", 23, 1, 1),
     FieldDesc::uint("ra", 24, 1, 0),
-    FieldDesc::uint("z", 25, 3, 0),
+    // RFC 1035 reserved all three bits as Z; RFC 4035 later took two of them
+    // for the DNSSEC AD and CD flags.
+    FieldDesc::uint("z", 25, 1, 0),
+    FieldDesc::uint("ad", 26, 1, 0),
+    FieldDesc::uint("cd", 27, 1, 0),
     FieldDesc::uint("rcode", 28, 4, 0),
     FieldDesc::uint("qdcount", 32, 16, 1),
     FieldDesc::uint("ancount", 48, 16, 0),
@@ -476,7 +480,7 @@ mod tests {
         // A second pattern where every field differs, so no two offsets can be
         // swapped and still pass.
         // Byte 2 = 0x13 = 0 0010 0 1 1 -> QR=0, OPCODE=2 (STATUS), AA=0, TC=1, RD=1
-        // Byte 3 = 0x5f = 0 101 1111   -> RA=0, Z=5, RCODE=15
+        // Byte 3 = 0x5f = 0 1 0 1 1111 -> RA=0, Z=1, AD=0, CD=1, RCODE=15
         let mut b = vec![0x00, 0x00, 0x13, 0x5f];
         b.extend_from_slice(&[0; 8]);
         let p = Packet::dissect(b, ProtoId::Dns);
@@ -486,7 +490,9 @@ mod tests {
         assert_eq!(p.get(0, "tc").unwrap(), FieldValue::Uint(1));
         assert_eq!(p.get(0, "rd").unwrap(), FieldValue::Uint(1));
         assert_eq!(p.get(0, "ra").unwrap(), FieldValue::Uint(0));
-        assert_eq!(p.get(0, "z").unwrap(), FieldValue::Uint(5));
+        assert_eq!(p.get(0, "z").unwrap(), FieldValue::Uint(1));
+        assert_eq!(p.get(0, "ad").unwrap(), FieldValue::Uint(0));
+        assert_eq!(p.get(0, "cd").unwrap(), FieldValue::Uint(1));
         assert_eq!(p.get(0, "rcode").unwrap(), FieldValue::Uint(15));
     }
 
