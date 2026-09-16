@@ -1,9 +1,9 @@
 //! Layout from the IETF draft "PCAP Next Generation (pcapng) Capture File
-//! Format" (draft-ietf-opsawg-pcapng); see CONTRIBUTING.md.
+//! Format" (draft-ietf-opsawg-pcapng).
 //!
 //! Every block is `block type (4) | total length (4) | body | total length (4)`,
-//! total length covering all four parts and a multiple of 4. The trailing copy
-//! is used here as an integrity check, and a mismatch stops the walk.
+//! the length covering all four parts and a multiple of 4. The trailing copy is
+//! an integrity check here, and a mismatch stops the walk.
 
 pub use crate::pcap::{link_to_proto, Record};
 
@@ -111,8 +111,7 @@ fn decode_tsresol(v: u8) -> u64 {
 pub struct Reader<'a> {
     buf: &'a [u8],
     off: usize,
-    /// Buffer end, or the section length when the section header declared one
-    /// (a length of -1 means unknown).
+    /// Buffer end, or the declared section length (-1 means unknown).
     end: usize,
     swapped: bool,
     ifaces: Vec<Iface>,
@@ -152,7 +151,7 @@ impl<'a> Reader<'a> {
         r.off = r.enter_section(0).ok_or(PcapngError::BadSectionHeader)?;
 
         // Consume the leading interface descriptions so the file header can
-        // report a link type before the first packet is read.
+        // report a link type before the first packet.
         while let Some((btype, total)) = r.read_block_at(r.off) {
             if btype != BLOCK_IDB {
                 break;
@@ -177,8 +176,8 @@ impl<'a> Reader<'a> {
             x if x.swap_bytes() == BYTE_ORDER_MAGIC => true,
             _ => return None,
         };
-        // The total length needs this section's endianness, so the generic
-        // block check runs only after the magic is decoded.
+        // The total length needs this section's endianness, so the block check
+        // runs only after the magic is decoded.
         self.end = self.buf.len();
         let (btype, total) = self.read_block_at(off)?;
         if btype != BLOCK_SHB || total < 28 {
@@ -252,8 +251,8 @@ impl<'a> Reader<'a> {
     }
 
     /// `ts_frac` is microseconds, or nanoseconds at exactly 10^-9 resolution —
-    /// the two classic pcap can express. Every other resolution is truncated to
-    /// microseconds, losing the sub-microsecond part rather than misreporting it.
+    /// the two classic pcap can express. Anything else truncates to
+    /// microseconds rather than misreporting the scale.
     fn split_ts(&self, ticks: u64, tsresol: u64) -> (u32, u32) {
         if tsresol == 0 {
             return (0, 0);
@@ -272,37 +271,31 @@ impl<'a> Reader<'a> {
 impl<'a> Iterator for Reader<'a> {
     type Item = Record<'a>;
 
+    /// The first `None` ends the walk for good: anything the reader could not
+    /// make sense of leaves `off` pointing into the middle of a block.
     fn next(&mut self) -> Option<Record<'a>> {
-        // Each pass advances `off` by at least 12 bytes or stops, so the walk
-        // is bounded by the buffer length.
-        while !self.done {
+        if self.done {
+            return None;
+        }
+        let rec = self.next_record();
+        self.done = rec.is_none();
+        rec
+    }
+}
+
+impl<'a> Reader<'a> {
+    /// Each pass advances `off` by at least 12 bytes or stops, so the walk is
+    /// bounded by the buffer length.
+    fn next_record(&mut self) -> Option<Record<'a>> {
+        loop {
             if self.off + 12 > self.end {
-                self.done = true;
                 return None;
             }
-            let peek = match rd32(self.buf, self.off, self.swapped) {
-                Some(t) => t,
-                None => {
-                    self.done = true;
-                    return None;
-                }
-            };
-            if peek == BLOCK_SHB {
-                match self.enter_section(self.off) {
-                    Some(next) => {
-                        self.off = next;
-                        continue;
-                    }
-                    None => {
-                        self.done = true;
-                        return None;
-                    }
-                }
+            if rd32(self.buf, self.off, self.swapped)? == BLOCK_SHB {
+                self.off = self.enter_section(self.off)?;
+                continue;
             }
-            let Some((btype, total)) = self.read_block_at(self.off) else {
-                self.done = true;
-                return None;
-            };
+            let (btype, total) = self.read_block_at(self.off)?;
             let start = self.off;
             self.off += total;
 
@@ -314,33 +307,20 @@ impl<'a> Iterator for Reader<'a> {
                 BLOCK_EPB => {
                     // iface(4) ts_high(4) ts_low(4) caplen(4) origlen(4) then data.
                     if total < 32 {
-                        self.done = true;
                         return None;
                     }
-                    let (Some(iface_id), Some(hi), Some(lo), Some(caplen), Some(origlen)) = (
-                        rd32(self.buf, start + 8, self.swapped),
-                        rd32(self.buf, start + 12, self.swapped),
-                        rd32(self.buf, start + 16, self.swapped),
-                        rd32(self.buf, start + 20, self.swapped),
-                        rd32(self.buf, start + 24, self.swapped),
-                    ) else {
-                        self.done = true;
-                        return None;
-                    };
+                    let iface_id = rd32(self.buf, start + 8, self.swapped)?;
+                    let hi = rd32(self.buf, start + 12, self.swapped)?;
+                    let lo = rd32(self.buf, start + 16, self.swapped)?;
+                    let caplen = rd32(self.buf, start + 20, self.swapped)?;
+                    let origlen = rd32(self.buf, start + 24, self.swapped)?;
                     let n = caplen as usize;
                     // Data is padded to 4 bytes and options may follow, so the
                     // body only has to be big enough.
                     if pad4(n) > total - 32 {
-                        self.done = true;
                         return None;
                     }
-                    let data = match self.buf.get(start + 28..start + 28 + n) {
-                        Some(d) => d,
-                        None => {
-                            self.done = true;
-                            return None;
-                        }
-                    };
+                    let data = self.buf.get(start + 28..start + 28 + n)?;
                     let tsresol = self.tsresol_for(iface_id);
                     let (ts_sec, ts_frac) = self.split_ts(((hi as u64) << 32) | lo as u64, tsresol);
                     return Some(Record {
@@ -352,24 +332,14 @@ impl<'a> Iterator for Reader<'a> {
                     });
                 }
                 BLOCK_SPB => {
-                    // No timestamp and no captured length: the bytes present are
-                    // whatever fits in the block, capped at the original length.
+                    // No captured length: the bytes present are whatever fits in
+                    // the block, capped at the original length.
                     if total < 16 {
-                        self.done = true;
                         return None;
                     }
-                    let Some(origlen) = rd32(self.buf, start + 8, self.swapped) else {
-                        self.done = true;
-                        return None;
-                    };
+                    let origlen = rd32(self.buf, start + 8, self.swapped)?;
                     let n = (origlen as usize).min(total - 16);
-                    let data = match self.buf.get(start + 12..start + 12 + n) {
-                        Some(d) => d,
-                        None => {
-                            self.done = true;
-                            return None;
-                        }
-                    };
+                    let data = self.buf.get(start + 12..start + 12 + n)?;
                     return Some(Record {
                         ts_sec: 0,
                         ts_frac: 0,
@@ -381,7 +351,6 @@ impl<'a> Iterator for Reader<'a> {
                 _ => {}
             }
         }
-        None
     }
 }
 
@@ -535,7 +504,6 @@ mod tests {
 
     #[test]
     fn power_of_two_tsresol_rescales_to_microseconds() {
-        // 0x80 | 10 => 1024 ticks per second.
         let data = minimal(false, Some(0x8a), 1024 + 512);
         let r = Reader::new(&data).unwrap();
         assert_eq!(r.header.tsresol, 1024);
@@ -549,7 +517,6 @@ mod tests {
     fn packet_data_padding_is_handled() {
         let mut v = shb(false);
         v.extend_from_slice(&idb(linktype::ETHERNET, None, false));
-        // 13 bytes padded to 16, so a second block must still be found.
         v.extend_from_slice(&epb(0, 0, &[0x11; 13], 13, false));
         v.extend_from_slice(&epb(0, 0, &[0x22; 7], 9, false));
         let recs: Vec<_> = Reader::new(&v).unwrap().collect();
@@ -566,7 +533,6 @@ mod tests {
         let mut v = shb(false);
         v.extend_from_slice(&idb(linktype::ETHERNET, None, false));
         v.extend_from_slice(&epb(0, 1_000_000, &[0x01; 4], 4, false));
-        // Name Resolution Block (4) and a made-up type.
         v.extend_from_slice(&block(0x0000_0004, &[0xde; 20], false));
         v.extend_from_slice(&block(0x0000_BEEF, &[0xad; 9], false));
         v.extend_from_slice(&epb(0, 2_000_000, &[0x02; 4], 4, false));
@@ -663,7 +629,6 @@ mod tests {
         v.extend_from_slice(&idb(linktype::RAW, Some(9), false));
         v.extend_from_slice(&epb(0, 2_000_500, &[0xa1; 4], 4, false));
         v.extend_from_slice(&epb(1, 2_000_000_500, &[0xa2; 4], 4, false));
-        // An interface id nobody described falls back to the file resolution.
         v.extend_from_slice(&epb(9, 3_000_000, &[0xa3; 4], 4, false));
 
         let r = Reader::new(&v).unwrap();
