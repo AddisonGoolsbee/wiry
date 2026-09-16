@@ -21,9 +21,13 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::computed_uint("plen", 32, 16),
     FieldDesc::uint("nh", 48, 8, NO_NEXT_HEADER as u64),
     FieldDesc::uint("hlim", 56, 8, 64),
-    FieldDesc::ipv6("src", 64),
-    FieldDesc::ipv6("dst", 192),
+    FieldDesc::ipv6("src", 64).defaulting_to(&LOOPBACK),
+    FieldDesc::ipv6("dst", 192).defaulting_to(&LOOPBACK),
 ];
+
+/// `::1` (RFC 4291 §2.5.3). Both addresses default to it, so a header built with
+/// nothing specified describes traffic that goes nowhere.
+const LOOPBACK: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
 
 /// RFC 8200 §3: the IPv6 header is a fixed 40 octets. Anything further is an
 /// extension header and belongs to the payload, not to this layer.

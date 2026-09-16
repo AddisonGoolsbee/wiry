@@ -122,7 +122,9 @@ impl Query {
             let Some(s) = spans.iter().find(|s| s.proto == c.proto) else {
                 return false;
             };
-            let v = decode_span(buf, s, c.field);
+            let Some(v) = decode_span(buf, s, c.field) else {
+                return false;
+            };
             match &c.val {
                 CondVal::Uint(n) => v.as_uint().is_some_and(|x| c.op.test(x, *n)),
                 CondVal::Bytes(b) => raw_bytes(&v).is_some_and(|x| c.op.test(x, b.as_slice())),
@@ -133,12 +135,14 @@ impl Query {
 
 /// Decode one field straight out of the capture buffer, without copying the
 /// packet. Clamped exactly as `Packet::get_desc` clamps, so the bulk path and
-/// the per-packet path cannot disagree.
+/// the per-packet path cannot disagree. `None` when this header does not carry
+/// the field, which for a conditional field varies packet by packet.
 #[inline]
-fn decode_span(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> FieldValue {
+fn decode_span(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<FieldValue> {
     let a = s.off as usize;
     let b = (a + s.hlen as usize).min(buf.len());
-    field::decode(&buf[a..b], f)
+    let hdr = &buf[a..b];
+    f.is_active(hdr).then(|| field::decode(hdr, f))
 }
 
 fn raw_bytes(v: &FieldValue) -> Option<&[u8]> {
@@ -640,7 +644,7 @@ impl PyPktList {
                             Cell::Val(FieldValue::Uint(nums.map_or(row as u64, |n| n[row] as u64)))
                         }
                         ColSpec::Field(id, f) => match spans.iter().find(|s| s.proto == *id) {
-                            Some(s) => Cell::Val(decode_span(bytes, s, f)),
+                            Some(s) => decode_span(bytes, s, f).map_or(Cell::Null, Cell::Val),
                             None => Cell::Null,
                         },
                     });

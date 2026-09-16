@@ -27,7 +27,17 @@
 use crate::field::FieldDesc;
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
+/// RFC 1035 §4.2.2 gives the message a two-octet length prefix over TCP and no
+/// prefix over UDP. This layer is only ever reached over UDP: TCP-carried DNS
+/// stays `Raw` because the prefix has to be stripped before the header starts
+/// (DEVIATIONS.md E8). The name is part of the interface, so the field exists
+/// and its condition is the one test that can never pass here.
+fn over_tcp(_: &[u8]) -> bool {
+    false
+}
+
 pub static FIELDS: &[FieldDesc] = &[
+    FieldDesc::uint("length", 0, 16, 0).when(over_tcp),
     FieldDesc::uint("id", 0, 16, 0),
     FieldDesc::uint("qr", 16, 1, 0),
     FieldDesc::uint("opcode", 17, 4, 0),
