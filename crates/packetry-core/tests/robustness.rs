@@ -115,6 +115,15 @@ fn exercise(pkt: &mut Packet, what: &str) {
             let v = pkt.get_desc(i, f);
             let _ = show::render_value(&v);
             let _ = v.as_uint();
+            // A lookup by name answers with the field this header carries,
+            // which is neither this one when the condition is false nor this
+            // one when another field shares the name under a disjoint
+            // condition (ICMP).
+            if proto::active_field_of(proto, pkt.header(i), f.name)
+                .is_some_and(|a| std::ptr::eq(a, f))
+            {
+                assert_eq!(pkt.get(i, f.name), Some(v), "{what}, seed {SEED:#x}");
+            }
         }
         let _ = pkt.options(i);
     }
