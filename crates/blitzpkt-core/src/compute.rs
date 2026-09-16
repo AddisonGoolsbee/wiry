@@ -16,9 +16,11 @@ pub fn recompute(pkt: &mut Packet) {
     for i in (0..n).rev() {
         match pkt.spans[i].proto {
             ProtoId::Ipv4 => fix_ipv4(pkt, i),
+            ProtoId::Ipv6 => fix_ipv6(pkt, i),
             ProtoId::Udp => fix_udp(pkt, i),
             ProtoId::Tcp => fix_tcp(pkt, i),
             ProtoId::Icmp => fix_icmp(pkt, i),
+            ProtoId::Icmpv6 => fix_icmpv6(pkt, i),
             _ => {}
         }
     }
@@ -48,6 +50,17 @@ fn fix_ipv4(pkt: &mut Packet, i: usize) {
     let c = ck::ones_complement(&pkt.buf[off..off + hlen]);
     pkt.buf[off + 10] = (c >> 8) as u8;
     pkt.buf[off + 11] = (c & 0xff) as u8;
+}
+
+fn fix_ipv6(pkt: &mut Packet, i: usize) {
+    let (off, _, end) = span_bounds(pkt, i);
+    if off + 40 > end {
+        return;
+    }
+    // Payload Length excludes the fixed 40-octet header (RFC 8200 §3).
+    let plen = (end - off - 40) as u16;
+    pkt.buf[off + 4] = (plen >> 8) as u8;
+    pkt.buf[off + 5] = (plen & 0xff) as u8;
 }
 
 /// Find the IPv4/IPv6 addresses enclosing layer `i`, if any.
@@ -136,6 +149,22 @@ fn fix_icmp(pkt: &mut Packet, i: usize) {
     pkt.buf[off + 2] = 0;
     pkt.buf[off + 3] = 0;
     let c = ck::ones_complement(&pkt.buf[off..end]);
+    pkt.buf[off + 2] = (c >> 8) as u8;
+    pkt.buf[off + 3] = (c & 0xff) as u8;
+}
+
+fn fix_icmpv6(pkt: &mut Packet, i: usize) {
+    let (off, _, end) = span_bounds(pkt, i);
+    if off + 4 > end {
+        return;
+    }
+    let tlen = end - off;
+    pkt.buf[off + 2] = 0;
+    pkt.buf[off + 3] = 0;
+    // Unlike ICMPv4, ICMPv6 covers the IPv6 pseudo-header (RFC 4443 §2.3),
+    // so without an enclosing IPv6 layer the checksum is left zeroed.
+    let Some(seed) = transport_seed(pkt, i, ipproto::IPV6_ICMP, tlen) else { return };
+    let c = ck::finish(ck::sum16(&pkt.buf[off..end], seed));
     pkt.buf[off + 2] = (c >> 8) as u8;
     pkt.buf[off + 3] = (c & 0xff) as u8;
 }

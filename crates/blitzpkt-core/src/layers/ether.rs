@@ -5,7 +5,18 @@ use crate::field::FieldDesc;
 use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::mac("dst", 0),
+    // Defaults to the broadcast address. `src` stays zero: filling it from the
+    // host interface would need interface introspection, which is out of scope
+    // for the offline build (see DEVIATIONS.md S2).
+    FieldDesc {
+        name: "dst",
+        bit_off: 0,
+        bit_len: 48,
+        kind: crate::field::FieldKind::MacAddr,
+        default: 0xffff_ffff_ffff,
+        flags: &[],
+        computed: false,
+    },
     FieldDesc::mac("src", 48),
     FieldDesc::uint("type", 96, 16, ethertype::IPV4 as u64),
 ];

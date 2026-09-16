@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/blitzpkt-core"]
+members = ["crates/blitzpkt-core", "crates/blitzpkt-py"]
 
 [workspace.package]
 version = "0.1.0"
@@ -16,4 +16,4 @@ smallvec = "1.13"
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+# Unwinding is required: a Python extension module must not abort the host process.

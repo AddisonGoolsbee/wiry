@@ -36,11 +36,14 @@ running Scapy, because a machine-generated corpus derived from GPL code is a gre
 | E4 | `show()` output formatting matched by eye, not byte-for-byte against Scapy | Cosmetic divergence possible in edge cases | OPEN |
 | E5 | pcapng read/write not implemented in v1 (pcap only) | pcapng is common in modern captures; needed before launch | OPEN |
 | E6 | No IPv6 extension-header chain walking beyond the common set | Exotic chains fall back to `Raw` | OPEN |
+| E7 | DHCP options (RFC 2132) are exposed as a single raw `options` byte blob, not parsed into a TLV list | Round-trips correctly, but `pkt[DHCP].options` is bytes rather than a list of `(name, value)` tuples, so per-option lookup (message type, lease time, requested address) is unavailable | OPEN |
+| E8 | DNS parses only the 12-byte header (RFC 1035 §4.1.1); the question and resource-record sections stay a `Raw` payload | Name compression (RFC 1035 §4.1.4) is unimplemented, so `qd`/`an` (and `ns`/`ar`) are not yet available as structured fields. Header flags and the section counts do decode, and bytes round-trip unchanged | OPEN |
+| E9 | Source MAC defaults (`Ether.src`, `ARP.hwsrc`) stay zero instead of being filled from the host interface | Scapy queries the live interface; this build is offline-only (see S2), so constructed frames are deterministic rather than host-dependent. Byte output differs from Scapy for these two fields unless set explicitly | OPEN |
 
 ## Correctness debt
 
 | # | Item | Status |
 |---|---|---|
-| C1 | Checksum recomputation implemented for IPv4/TCP/UDP/ICMP only | OPEN |
+| C1 | Checksum recomputation implemented for IPv4/TCP/UDP/ICMP/ICMPv6 only | OPEN |
 | C2 | No fuzzing of the dissector against malformed input yet (`cargo-fuzz` planned) | OPEN |
 | C3 | Endianness assumed little-endian host; big-endian hosts untested | OPEN |

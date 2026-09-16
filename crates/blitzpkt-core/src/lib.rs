@@ -15,6 +15,7 @@ pub mod compute;
 pub mod field;
 pub mod layers;
 pub mod packet;
+pub mod parse;
 pub mod pcap;
 pub mod proto;
 pub mod show;

@@ -14,7 +14,17 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("ack", 64, 32, 0),
     FieldDesc::uint("dataofs", 96, 4, 5),
     FieldDesc::uint("reserved", 100, 4, 0),
-    FieldDesc::flags("flags", 104, 8, FLAG_NAMES),
+    // Defaults to SYN, matching the long-standing convention for a freshly
+    // constructed TCP header in packet-crafting tools.
+    FieldDesc {
+        name: "flags",
+        bit_off: 104,
+        bit_len: 8,
+        kind: crate::field::FieldKind::Flags,
+        default: 0b0000_0010,
+        flags: FLAG_NAMES,
+        computed: false,
+    },
     FieldDesc::uint("window", 112, 16, 8192),
     FieldDesc::computed_uint("chksum", 128, 16),
     FieldDesc::uint("urgptr", 144, 16, 0),
