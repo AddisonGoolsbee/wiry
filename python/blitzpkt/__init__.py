@@ -17,8 +17,17 @@ __version__ = _b.__version__
 
 __all__ = [
     "Packet", "PacketList", "rdpcap", "wrpcap", "PcapReader", "raw", "hexdump",
-    "hexdump_str", "ls", "known_layers",
+    "hexdump_str", "ls", "known_layers", "to_arrow", "to_polars", "to_pandas",
 ]
+
+_COLUMNAR = ("to_arrow", "to_polars", "to_pandas")
+
+
+def __getattr__(name: str) -> Any:
+    if name in _COLUMNAR:
+        from . import columnar
+        return getattr(columnar, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _is_bytes(x: Any) -> bool:
@@ -472,6 +481,26 @@ class PacketList:
         Python loop when you want one field across a whole capture.
         """
         return self._list.field_column(_layer_name(layer), field)
+
+    def columns(self, specs: Any = None, where: Any = None, layer: Any = None) -> dict:
+        """Several fields from the whole capture in one pass. See `columnar`."""
+        from .columnar import columns
+        return columns(self, specs, where=where, layer=layer)
+
+    def to_dict(self, specs: Any = None, where: Any = None, layer: Any = None) -> dict:
+        """The capture as a plain dict of lists, with no extra dependency."""
+        from .columnar import to_dict
+        return to_dict(self, specs, where=where, layer=layer)
+
+    def filter(self, layer: Any = None, where: Any = None) -> "PacketList":
+        """A view over matching packets. The predicate is evaluated in Rust."""
+        from .columnar import filter_packets
+        return filter_packets(self, layer, where)
+
+    def filter_indices(self, layer: Any = None, where: Any = None) -> list[int]:
+        """Positions of the matching packets."""
+        from .columnar import filter_indices
+        return filter_indices(self, layer, where)
 
     def times(self) -> list[float]:
         return self._list.times()
