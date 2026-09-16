@@ -17,7 +17,7 @@ __version__ = _b.__version__
 
 __all__ = [
     "Packet", "PacketList", "rdpcap", "wrpcap", "PcapReader", "raw", "hexdump",
-    "ls", "known_layers",
+    "hexdump_str", "ls", "known_layers",
 ]
 
 
@@ -112,6 +112,18 @@ class Packet:
                 other = Raw(load=bytes(other))
             else:
                 return NotImplemented
+
+        # A dissected packet cannot be rebuilt from a field spec: variable-length
+        # header content (options, Raw payloads) does not survive the build path,
+        # so reconstructing would silently reset every field to its default.
+        # Append to the real bytes instead, which is also what happens on the wire.
+        if self._rust is not None:
+            new = self._rust.copy()
+            n = len(new.layer_names())
+            if n:
+                new.set_payload(n - 1, bytes(other))
+            return Packet(_rust=new, time=self.time)
+
         left = self._spec()
         right = other._spec()
         payload = other._payload if other._payload is not None else self._payload

@@ -5,6 +5,10 @@
 //! Python objects are minted only for the packets somebody actually touches.
 //! Getting this wrong is the failure mode that has sunk other Rust-core rewrites.
 
+// The #[pymethods]/#[pyfunction] trampolines pyo3 0.22 generates convert PyErr
+// to PyErr, which clippy flags as useless_conversion at each function's span.
+#![allow(clippy::useless_conversion)]
+
 use blitzpkt_core::field::FieldValue;
 use blitzpkt_core::packet::Packet as CorePacket;
 use blitzpkt_core::pcap;
@@ -58,13 +62,18 @@ impl PyPkt {
     fn get_field(&self, py: Python<'_>, layer: usize, name: &str) -> PyResult<PyObject> {
         match self.inner.get(layer, name) {
             Some(v) => Ok(value_to_py(py, &v)),
-            None => Err(PyKeyError::new_err(format!("no field {name:?} in layer {layer}"))),
+            None => Err(PyKeyError::new_err(format!(
+                "no field {name:?} in layer {layer}"
+            ))),
         }
     }
 
     /// Read a field by layer name rather than index.
     fn get_field_by_layer(
-        &self, py: Python<'_>, layer_name: &str, field: &str,
+        &self,
+        py: Python<'_>,
+        layer_name: &str,
+        field: &str,
     ) -> PyResult<PyObject> {
         let id = proto_by_name(layer_name)?;
         let idx = self
@@ -76,7 +85,9 @@ impl PyPkt {
 
     fn set_field(&mut self, layer: usize, name: &str, val: u64) -> PyResult<()> {
         if !self.inner.set_uint(layer, name, val) {
-            return Err(PyKeyError::new_err(format!("no field {name:?} in layer {layer}")));
+            return Err(PyKeyError::new_err(format!(
+                "no field {name:?} in layer {layer}"
+            )));
         }
         Ok(())
     }
@@ -108,7 +119,9 @@ impl PyPkt {
 
     fn set_field_bytes(&mut self, layer: usize, name: &str, val: &[u8]) -> PyResult<()> {
         if !self.inner.set_bytes(layer, name, val) {
-            return Err(PyKeyError::new_err(format!("no field {name:?} in layer {layer}")));
+            return Err(PyKeyError::new_err(format!(
+                "no field {name:?} in layer {layer}"
+            )));
         }
         Ok(())
     }
@@ -117,18 +130,54 @@ impl PyPkt {
         self.inner.set_payload(layer, data);
     }
 
+    /// Parsed options for a layer, as (name, value) pairs.
+    /// None means the protocol has no option region at all, which is different
+    /// from an empty list meaning it has one and it is empty.
+    fn options(&self, py: Python<'_>, layer: usize) -> Option<Py<PyList>> {
+        use blitzpkt_core::options::ItemValue;
+        let items = self.inner.options(layer)?;
+        let out = PyList::empty_bound(py);
+        for it in &items {
+            let v: PyObject = match &it.value {
+                ItemValue::Flag => py.None(),
+                ItemValue::Uint(n) => n.into_py(py),
+                ItemValue::Pair(a, b) => (*a, *b).into_py(py),
+                ItemValue::Bytes(b) => PyBytes::new_bound(py, b).into(),
+                ItemValue::Text(s) => s.into_py(py),
+                ItemValue::Ipv4List(l) => l
+                    .iter()
+                    .map(|a| format!("{}.{}.{}.{}", a[0], a[1], a[2], a[3]))
+                    .collect::<Vec<_>>()
+                    .into_py(py),
+            };
+            out.append((it.name.as_ref(), v)).ok()?;
+        }
+        Some(out.unbind())
+    }
+
     /// Payload bytes beneath a layer.
     fn payload<'py>(&self, py: Python<'py>, layer: usize) -> Bound<'py, PyBytes> {
         PyBytes::new_bound(py, self.inner.payload(layer))
     }
 
     /// Serialise, recomputing lengths and checksums.
+    // &mut self is required: CorePacket::to_bytes caches computed checksums in place.
+    #[allow(clippy::wrong_self_convention)]
     fn to_bytes<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new_bound(py, self.inner.to_bytes())
     }
 
     fn show(&self) -> String {
         show::show(&self.inner)
+    }
+
+    /// An independent copy. Used when stacking onto a dissected packet, where
+    /// rebuilding from a field spec would lose variable-length header content.
+    fn copy(&self) -> PyPkt {
+        PyPkt {
+            inner: self.inner.clone(),
+            time: self.time,
+        }
     }
 
     fn summary(&self) -> String {
@@ -213,12 +262,12 @@ impl PyPktList {
 
     /// Extract one field across the whole capture in a single crossing.
     /// Packets lacking the layer yield None.
-    fn field_column(
-        &self, py: Python<'_>, layer_name: &str, field: &str,
-    ) -> PyResult<Py<PyList>> {
+    fn field_column(&self, py: Python<'_>, layer_name: &str, field: &str) -> PyResult<Py<PyList>> {
         let id = proto_by_name(layer_name)?;
         if proto::field_of(id, field).is_none() {
-            return Err(PyKeyError::new_err(format!("no field {field:?} on {layer_name}")));
+            return Err(PyKeyError::new_err(format!(
+                "no field {field:?} on {layer_name}"
+            )));
         }
         let buf = Arc::clone(&self.buf);
         let idx = self.index.clone();
@@ -249,7 +298,10 @@ impl PyPktList {
     /// Timestamps for every packet, as floating seconds.
     fn times(&self) -> Vec<f64> {
         let div = if self.nanos { 1e9 } else { 1e6 };
-        self.index.iter().map(|(_, _, s, f)| *s as f64 + *f as f64 / div).collect()
+        self.index
+            .iter()
+            .map(|(_, _, s, f)| *s as f64 + *f as f64 / div)
+            .collect()
     }
 
     /// Raw bytes of one packet without dissecting it.
@@ -273,28 +325,37 @@ impl PyPktList {
 #[pyfunction]
 fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
     let data = std::fs::read(path)?;
-    let (index, link, nanos) = py.allow_threads(|| -> Result<_, String> {
-        let r = pcap::Reader::new(&data).map_err(|e| e.to_string())?;
-        let link = pcap::link_to_proto(r.header.linktype);
-        let nanos = r.header.nanos;
-        let mut index = Vec::new();
-        let base = data.as_ptr() as usize;
-        for rec in pcap::Reader::new(&data).map_err(|e| e.to_string())? {
-            let off = (rec.data.as_ptr() as usize - base) as u32;
-            index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
-        }
-        Ok((index, link, nanos))
-    })
-    .map_err(PyValueError::new_err)?;
+    let (index, link, nanos) = py
+        .allow_threads(|| -> Result<_, String> {
+            let r = pcap::Reader::new(&data).map_err(|e| e.to_string())?;
+            let link = pcap::link_to_proto(r.header.linktype);
+            let nanos = r.header.nanos;
+            let mut index = Vec::new();
+            let base = data.as_ptr() as usize;
+            for rec in pcap::Reader::new(&data).map_err(|e| e.to_string())? {
+                let off = (rec.data.as_ptr() as usize - base) as u32;
+                index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
+            }
+            Ok((index, link, nanos))
+        })
+        .map_err(PyValueError::new_err)?;
 
-    Ok(PyPktList { buf: Arc::new(data), index, link, nanos })
+    Ok(PyPktList {
+        buf: Arc::new(data),
+        index,
+        link,
+        nanos,
+    })
 }
 
 /// Dissect a single buffer.
 #[pyfunction]
 #[pyo3(signature = (data, link = "Ether"))]
 fn dissect(data: &[u8], link: &str) -> PyResult<PyPkt> {
-    Ok(PyPkt { inner: CorePacket::dissect(data.to_vec(), proto_by_name(link)?), time: 0.0 })
+    Ok(PyPkt {
+        inner: CorePacket::dissect(data.to_vec(), proto_by_name(link)?),
+        time: 0.0,
+    })
 }
 
 /// Build a packet from a stack of layer names using default field values.
@@ -304,7 +365,10 @@ fn build_stack(names: Vec<String>) -> PyResult<PyPkt> {
     for n in &names {
         stack.push(proto_by_name(n)?);
     }
-    Ok(PyPkt { inner: CorePacket::build(&stack), time: 0.0 })
+    Ok(PyPkt {
+        inner: CorePacket::build(&stack),
+        time: 0.0,
+    })
 }
 
 fn apply_fields(
@@ -315,7 +379,9 @@ fn apply_fields(
 ) -> PyResult<()> {
     for (layer, name, v) in ints {
         if !pkt.set_uint(*layer, name, *v) {
-            return Err(PyKeyError::new_err(format!("no field {name:?} in layer {layer}")));
+            return Err(PyKeyError::new_err(format!(
+                "no field {name:?} in layer {layer}"
+            )));
         }
     }
     for (layer, name, s) in strs {
@@ -341,7 +407,9 @@ fn apply_fields(
     }
     for (layer, name, b) in raws {
         if !pkt.set_bytes(*layer, name, b) {
-            return Err(PyKeyError::new_err(format!("no field {name:?} in layer {layer}")));
+            return Err(PyKeyError::new_err(format!(
+                "no field {name:?} in layer {layer}"
+            )));
         }
     }
     Ok(())
@@ -398,7 +466,10 @@ fn build_packet(
     }
     apply_fields(&mut pkt, &ints, &strs, &raws)?;
     pkt.mark_all_dirty();
-    Ok(PyPkt { inner: pkt, time: 0.0 })
+    Ok(PyPkt {
+        inner: pkt,
+        time: 0.0,
+    })
 }
 
 /// Write packets to a pcap file.
@@ -417,16 +488,31 @@ fn write_pcap(path: &str, packets: Vec<Vec<u8>>, linktype: u32) -> PyResult<()> 
 /// Field names for a layer, in header order.
 #[pyfunction]
 fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
-    Ok(proto::desc(proto_by_name(name)?).fields.iter().map(|f| f.name).collect())
+    Ok(proto::desc(proto_by_name(name)?)
+        .fields
+        .iter()
+        .map(|f| f.name)
+        .collect())
 }
 
 /// Every layer name the engine knows.
 #[pyfunction]
 fn known_layers() -> Vec<&'static str> {
     const ALL: &[ProtoId] = &[
-        ProtoId::Ether, ProtoId::Dot1Q, ProtoId::Arp, ProtoId::Ipv4, ProtoId::Ipv6,
-        ProtoId::Tcp, ProtoId::Udp, ProtoId::Icmp, ProtoId::Icmpv6, ProtoId::Dns,
-        ProtoId::Bootp, ProtoId::Dhcp, ProtoId::Raw, ProtoId::Padding,
+        ProtoId::Ether,
+        ProtoId::Dot1Q,
+        ProtoId::Arp,
+        ProtoId::Ipv4,
+        ProtoId::Ipv6,
+        ProtoId::Tcp,
+        ProtoId::Udp,
+        ProtoId::Icmp,
+        ProtoId::Icmpv6,
+        ProtoId::Dns,
+        ProtoId::Bootp,
+        ProtoId::Dhcp,
+        ProtoId::Raw,
+        ProtoId::Padding,
     ];
     ALL.iter().map(|p| p.name()).collect()
 }

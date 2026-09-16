@@ -14,9 +14,11 @@ pub mod checksum;
 pub mod compute;
 pub mod field;
 pub mod layers;
+pub mod options;
 pub mod packet;
 pub mod parse;
 pub mod pcap;
+pub mod pcapng;
 pub mod proto;
 pub mod show;
 

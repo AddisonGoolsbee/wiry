@@ -3,4 +3,7 @@ target/
 .venv/
 __pycache__/
 *.so
+*.pyd
 dist/
+*.whl
+.pytest_cache/
