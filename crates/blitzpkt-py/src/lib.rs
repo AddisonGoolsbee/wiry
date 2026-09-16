@@ -288,7 +288,7 @@ impl PyPkt {
             .get(layer)
             .copied()
             .ok_or_else(|| PyIndexError::new_err("layer out of range"))?;
-        let f = proto::field_of(span.proto, name)
+        let f = proto::active_field_of(span.proto, self.inner.header(layer), name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
         match blitzpkt_core::parse::value_for(f, val) {
             Some(blitzpkt_core::parse::ValueBits::Uint(v)) => {
@@ -876,7 +876,7 @@ fn apply_fields(
             .layers()
             .get(*layer)
             .ok_or_else(|| PyIndexError::new_err("layer out of range"))?;
-        let f = proto::field_of(span.proto, name)
+        let f = proto::active_field_of(span.proto, pkt.header(*layer), name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
         match blitzpkt_core::parse::value_for(f, s) {
             Some(blitzpkt_core::parse::ValueBits::Uint(v)) => {

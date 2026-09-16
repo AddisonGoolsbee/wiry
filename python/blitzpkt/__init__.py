@@ -49,7 +49,9 @@ class _LayerView:
         return self._name
 
     def fields(self) -> list[str]:
-        return _b.layer_fields(self._name)
+        """Field names this layer carries, conditional fields included only
+        where this particular header has them."""
+        return self._pkt._materialize().field_names(self._idx)
 
     def __getattr__(self, field: str) -> Any:
         if field.startswith("_"):
