@@ -87,10 +87,19 @@ Beyond the fixed headers:
 - **Layers you define yourself**, declared in Python and executed in Rust; see
   below.
 
-Verified against scapy 2.7.0 on a real 14,261-packet capture: 3,000 of 3,000
-layer chains agree, 32,982 of 32,982 field comparisons are equal, and 3,000 of
-3,000 packets round-trip byte-identical, and every field name scapy defines for
-these layers exists here. 158 Rust and 399 Python tests pass.
+Verified against scapy 2.7.0 over an entire real capture: all 14,261 layer
+chains agree, all 155,501 field comparisons are equal, and all 14,261 packets
+round-trip byte-identical. 38 of 38 construction cases are byte-identical too,
+and field names match scapy exactly across all eleven layers.
+
+Scapy's own regression suite runs against packetry: 37 pass, 14 fail, 629 skip.
+Every skip is a scope boundary such as live capture or a layer we do not
+implement; every remaining failure is a feature we do not claim, and each is
+listed in [DEVIATIONS.md](DEVIATIONS.md).
+
+175 Rust and 500 Python tests pass. Both crates forbid unsafe code, and the
+dissector is covered by seven fuzz targets plus seeded property tests that run
+on stable.
 
 Offline only for now. There is no `sniff()` or `send()` yet; see
 [DEVIATIONS.md](DEVIATIONS.md) S2 for why and what the plan is.
