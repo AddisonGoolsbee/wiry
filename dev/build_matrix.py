@@ -25,7 +25,7 @@ except ImportError:
 VERBOSE = "-v" in sys.argv
 
 # scapy fills these from the live interface, so both sides must be pinned or
-# every comparison is a spurious mismatch. Logged as E9 in DEVIATIONS.md.
+# every comparison is a spurious mismatch (DEVIATIONS.md E9).
 MAC = "00:11:22:33:44:55"
 MAC2 = "66:77:88:99:aa:bb"
 
@@ -37,7 +37,6 @@ def cases():
     def add(label, a, b):
         out.append((label, a, b))
 
-    # --- single layers, defaults pinned where the environment leaks in ---
     add("Ether", B.Ether(src=MAC2, dst=MAC), S.Ether(src=MAC2, dst=MAC))
     add("IP", B.IP(src="10.0.0.1", dst="10.0.0.2"), S.IP(src="10.0.0.1", dst="10.0.0.2"))
     add("IPv6", B.IPv6(src="2001:db8::1", dst="2001:db8::2"),
@@ -49,7 +48,6 @@ def cases():
         S.ARP(hwsrc=MAC2, psrc="10.0.0.1", hwdst=MAC, pdst="10.0.0.2"))
     add("Dot1Q", B.Dot1Q(vlan=100), S.Dot1Q(vlan=100))
 
-    # --- explicit field values ---
     add("IP fields", B.IP(src="1.2.3.4", dst="5.6.7.8", ttl=33, tos=8, id=7),
         S.IP(src="1.2.3.4", dst="5.6.7.8", ttl=33, tos=8, id=7))
     add("TCP fields", B.TCP(sport=1234, dport=80, seq=42, ack=7, window=1024),
@@ -60,7 +58,6 @@ def cases():
     add("ICMP fields", B.ICMP(type=8, code=0, id=99, seq=5),
         S.ICMP(type=8, code=0, id=99, seq=5))
 
-    # --- stacks ---
     eth = dict(src=MAC2, dst=MAC)
     ip = dict(src="10.0.0.1", dst="10.0.0.2")
     add("Ether/IP/TCP", B.Ether(**eth) / B.IP(**ip) / B.TCP(dport=80),
@@ -82,7 +79,6 @@ def cases():
         S.Ether(**eth) / S.IPv6(**v6) / S.UDP())
     add("IP/UDP", B.IP(**ip) / B.UDP(), S.IP(**ip) / S.UDP())
 
-    # --- payloads, in every composition form ---
     for load in (b"", b"a", b"hello world", bytes(range(256)), b"\x00" * 64):
         tag = f"{len(load)}B"
         add(f"Ether/IP/TCP/Raw({tag})",
@@ -98,7 +94,6 @@ def cases():
         B.IP(**ip) / B.ICMP() / B.Raw(load=b"ping"),
         S.IP(**ip) / S.ICMP() / S.Raw(load=b"ping"))
 
-    # --- options ---
     add("TCP MSS",
         B.IP(**ip) / B.TCP(options=[("MSS", 1460)]),
         S.IP(**ip) / S.TCP(options=[("MSS", 1460)]))
@@ -183,7 +178,6 @@ def check_roundtrip():
             else:
                 bad += 1
                 print(f"  {layer}.{field}: built {want!r} but read back {got!r}")
-    # A payload must survive, and the lengths above it must account for it.
     pkt = B.Ether() / B.IP() / B.UDP() / B.Raw(load=b"hello")
     raw = bytes(pkt)
     back = B.Ether(raw)

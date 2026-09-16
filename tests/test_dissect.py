@@ -13,8 +13,8 @@ from helpers import (
 
 
 def test_helper_checksum_agrees_with_the_hand_built_icmp_vector():
-    # The vector carries the checksum computed by hand from RFC 792, so a
-    # correct RFC 1071 implementation sums the whole message to zero.
+    # The vector carries a checksum hand-computed from RFC 792, so a correct
+    # RFC 1071 implementation sums the whole message to zero.
     assert checksum(ICMP_ECHO) == 0
 
 
@@ -100,7 +100,7 @@ def test_every_field_survives_a_build_serialise_dissect_cycle():
         / TCP(sport=4321, dport=8443, seq=99, ack=5, flags="PA", window=4096)
         / Raw(load=b"payload")
     )
-    built[IP].version  # force materialisation so bytes() settles computed fields
+    built[IP].version  # materialise, so bytes() settles computed fields
     data = bytes(built)
     back = Ether(data)
     assert back.layers() == ["Ether", "IP", "TCP", "Raw"]
@@ -128,7 +128,6 @@ def test_every_truncation_dissects_without_raising(n):
     if n == 0:
         assert names == []
     else:
-        # Only a full 14-byte header may be claimed as Ethernet; the rest is opaque.
         assert names[0] == ("Ether" if n >= 14 else "Raw")
         assert set(names) <= {"Ether", "IP", "TCP", "Raw"}
 
@@ -157,7 +156,7 @@ def test_short_input_falls_back_to_raw_at_the_right_depth(n, expected):
 
 
 def test_header_longer_than_the_buffer_claims_is_not_over_read():
-    # IHL says 15 words (60 bytes) but only 20 bytes of IPv4 are present.
+    # IHL says 15 words but only 20 bytes of IPv4 are present.
     data = bytearray(ETHER_IP_TCP)
     data[14] = 0x4F
     pkt = Ether(bytes(data))
@@ -191,7 +190,7 @@ def test_ipv6_extension_headers_dissect_to_raw(nh):
 
 def test_non_initial_fragment_has_no_transport_layer():
     data = bytearray(ETHER_IP_TCP)
-    data[20:22] = struct.pack("!H", 100)  # fragment offset 100 eight-octet units
+    data[20:22] = struct.pack("!H", 100)
     assert Ether(bytes(data)).layers() == ["Ether", "IP", "Raw"]
 
 
@@ -213,7 +212,6 @@ def test_absurd_vlan_nesting_is_bounded_and_still_round_trips():
         pkt = pkt / Dot1Q(vlan=1)
     data = bytes(pkt)
     back = Ether(data)
-    # The dissector caps nesting rather than walking forever.
     assert len(back.layers()) <= 32
     assert bytes(back) == data
 
@@ -233,10 +231,8 @@ def test_raw_layer_from_bytes_keeps_the_whole_buffer():
 
 
 def test_stacking_onto_a_dissected_packet_keeps_its_fields():
-    # Regression: stacking used to rebuild the left operand from a field spec,
-    # which silently reset every header to its defaults, because variable-length
-    # content cannot survive the build path. It now copies the real packet and
-    # appends to its bytes.
+    # Regression: stacking must copy the real packet and append to its bytes,
+    # because variable-length content cannot survive the build path.
     dissected = Ether(ETHER_IP_TCP)
     combined = dissected / Raw(load=b"zz")
     assert combined[IP].src == "10.0.0.1"
@@ -244,7 +240,7 @@ def test_stacking_onto_a_dissected_packet_keeps_its_fields():
     out = bytes(combined)
     assert out.endswith(b"zz")
     assert len(out) == len(ETHER_IP_TCP) + 2
-    # The headers are preserved apart from the fields that MUST change when a
-    # payload is appended: the IPv4 total length and the two checksums.
+    # Only the fields that must change when a payload is appended: the IPv4
+    # total length and the two checksums.
     assert combined[IP].len == len(ETHER_IP_TCP) - 14 + 2
     assert out[:16] == ETHER_IP_TCP[:16]

@@ -21,9 +21,6 @@ def pkt():
     )
 
 
-# ---- reading fields --------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "layer,field,expected",
     [
@@ -48,7 +45,6 @@ def test_field_reads_through_layer_lookup(pkt, layer, field, expected):
 def test_fields_are_also_reachable_from_the_packet(pkt):
     assert pkt.ttl == 33
     assert pkt.dport == 80
-    # The outermost layer owning the name wins.
     assert pkt.type == 0x0800
 
 
@@ -72,9 +68,6 @@ def test_layer_lists_its_field_names(pkt):
     assert pkt[TCP].name == "TCP"
 
 
-# ---- writing fields --------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "layer,field,value",
     [
@@ -90,7 +83,6 @@ def test_layer_lists_its_field_names(pkt):
 def test_set_then_read_back(pkt, layer, field, value):
     setattr(pkt[layer], field, value)
     assert getattr(pkt[layer], field) == value
-    # And it survives a serialise/dissect cycle.
     assert getattr(Ether(bytes(pkt))[layer], field) == value
 
 
@@ -118,7 +110,7 @@ def test_mac_strings_accept_both_separators(pkt, mac):
         ("::1", "::1"),
         ("2001:db8::1", "2001:db8::1"),
         ("fe80::200:5eff:fe00:5213", "fe80::200:5eff:fe00:5213"),
-        # Full form and elided form denote the same address (RFC 5952).
+        # RFC 5952: full form and elided form denote the same address.
         ("0:0:0:0:0:0:0:1", "::1"),
         ("::ffff:192.0.2.1", "::ffff:c000:201"),
     ],
@@ -149,9 +141,6 @@ def test_ipv4_flags_render_as_names():
     pkt = Ether() / IP(flags="DF") / TCP()
     assert Ether(bytes(pkt))[IP].flags == "DF"
     assert bytes(pkt)[20] & 0x40
-
-
-# ---- membership and lookup -------------------------------------------------
 
 
 @pytest.mark.parametrize("layer", [Ether, IP, TCP])
@@ -186,9 +175,6 @@ def test_getlayer_returns_the_outermost_match():
     assert Ether(bytes(pkt)).getlayer(Dot1Q).vlan == 10
 
 
-# ---- display ---------------------------------------------------------------
-
-
 def test_summary_joins_the_layer_names(pkt):
     assert pkt.summary() == "Ether / IP / TCP"
     assert Ether(bytes(pkt)).summary() == "Ether / IP / TCP"
@@ -214,7 +200,7 @@ def test_show_prints_what_show_str_returns(pkt):
 
 def test_hexdump_str_formats_offset_hex_and_text():
     lines = hexdump_str(Ether() / IP()).splitlines()
-    assert len(lines) == 3  # 34 bytes over 16-byte rows
+    assert len(lines) == 3
     assert lines[0].startswith("0000  ff ff ff ff ff ff")
     assert lines[1].startswith("0010  ")
     assert lines[0].endswith("..............E.")
@@ -233,9 +219,6 @@ def test_hexdump_prints(capsys):
 
 def test_layer_view_repr(pkt):
     assert repr(pkt[IP]) == "<IP layer 1>"
-
-
-# ---- module surface --------------------------------------------------------
 
 
 def test_known_layers_matches_the_exported_classes():

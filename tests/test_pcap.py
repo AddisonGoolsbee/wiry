@@ -105,9 +105,6 @@ def test_rdpcap_rejects_the_unimplemented_count_argument(capture):
         rdpcap(path, count=2)
 
 
-# ---- PcapReader ------------------------------------------------------------
-
-
 def test_pcapreader_is_a_context_manager_and_iterator(capture):
     path, pkts = capture
     with PcapReader(path) as reader:
@@ -131,9 +128,6 @@ def test_pcapreader_read_all_gives_the_whole_capture(capture):
         everything = reader.read_all()
     assert len(everything) == len(pkts)
     assert bytes(everything[0]) == bytes(pkts[0])
-
-
-# ---- bulk paths must agree with the per-packet path ------------------------
 
 
 @pytest.mark.parametrize("layer", [Ether, IP, IPv6, TCP, UDP, ARP, ICMP, Dot1Q, Raw])

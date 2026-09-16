@@ -6,8 +6,8 @@ use blitzpkt_core::proto::ProtoId;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    // A TCP header whose option region is the fuzz input, reached the way a real
-    // caller reaches it: through the layer's own option parser.
+    // A TCP header whose option region is the fuzz input, reached through the
+    // layer's own option parser.
     let mut pkt = Packet::build_with(&[(ProtoId::Tcp, Some(data.to_vec()))]);
     blitzpkt_fuzz::exercise(&mut pkt);
 

@@ -12,8 +12,7 @@ fuzz_target!(|data: &[u8]| {
 
     let mut first = Packet::dissect(body.to_vec(), link);
     blitzpkt_fuzz::check_spans(&first);
-    // Force the recomputation path; without this `to_bytes` is a no-op and the
-    // property is vacuous.
+    // Without this `to_bytes` is a no-op and the property is vacuous.
     first.mark_all_dirty();
     let bytes = first.to_bytes().to_vec();
     assert_eq!(bytes.len(), body.len(), "serialising changed the length");

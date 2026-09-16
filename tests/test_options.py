@@ -29,9 +29,6 @@ def _tcp_with(opts: bytes) -> bytes:
     return bytes(12) + b"\x08\x00" + bytes(ip) + bytes(tcp)
 
 
-# ---- reading ---------------------------------------------------------------
-
-
 def test_reads_a_realistic_syn_option_block():
     # MSS 1460, SACK permitted, NOP, window scale 7, then EOL padding.
     opts = bytes([2, 4, 0x05, 0xB4, 4, 2, 1, 3, 3, 7, 0, 0])
@@ -69,14 +66,10 @@ def test_raw_option_bytes_remain_available():
 
 
 def test_a_layer_without_an_option_region_reports_none_shaped_result():
-    # UDP has no options at all, so the attribute falls through to the field
-    # table and raises rather than returning a list.
+    # UDP has no option region, so the attribute falls through to the field table.
     pkt = Ether(_tcp_with(b""))
     with pytest.raises(AttributeError):
         _ = pkt[Ether].options
-
-
-# ---- writing ---------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -96,7 +89,7 @@ def test_written_options_read_back_identically(opts):
 
 
 def test_writing_options_updates_the_data_offset():
-    # 4 + 2 + 1 + 3 = 10 bytes, padded to 12, so 3 extra 32-bit words.
+    # 10 bytes of options padded to 12: 3 extra 32-bit words.
     pkt = Ether() / IP() / TCP(
         options=[("MSS", 1460), ("SAckOK", None), ("NOP", None), ("WScale", 7)]
     )
@@ -146,13 +139,10 @@ def test_options_survive_a_payload_being_added():
     assert bytes(back).endswith(b"hello")
 
 
-# ---- DHCP ------------------------------------------------------------------
-
-
 def _dhcp_frame(opt_bytes: bytes) -> bytes:
     bootp = bytearray(236)
     bootp[0] = 1  # BOOTREQUEST
-    bootp[1] = 1  # Ethernet
+    bootp[1] = 1  # htype Ethernet
     bootp[2] = 6
     udp = bytearray(8)
     udp[0:2] = struct.pack("!H", 68)
@@ -163,7 +153,6 @@ def _dhcp_frame(opt_bytes: bytes) -> bytes:
 
 
 def test_dhcp_options_decode_by_name():
-    # message-type DISCOVER, then End.
     pkt = UDP(_dhcp_frame(bytes([53, 1, 1, 255])))
     assert ("message-type", 1) in pkt[DHCP].options
 
@@ -176,7 +165,7 @@ def test_dhcp_address_option_decodes():
 
 
 def test_bootp_option_field_is_the_magic_cookie():
-    # RFC 2131 3: the cookie ends the BOOTP header and introduces the DHCP
+    # RFC 2131 §3: the cookie ends the BOOTP header and introduces the DHCP
     # options, so it is what BOOTP's own option field holds.
     pkt = UDP(_dhcp_frame(bytes([255])))
     assert BOOTP in pkt

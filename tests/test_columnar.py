@@ -52,9 +52,6 @@ def loop_column(cap, layer, field):
     return out
 
 
-# ---- extraction ------------------------------------------------------------
-
-
 def test_a_single_spec_matches_field_column(capture):
     got = capture.columns([("IP", "dst")])
     assert list(got) == ["IP.dst"]
@@ -82,7 +79,6 @@ def test_columns_agree_exactly_with_a_per_packet_loop(capture):
 def test_a_missing_layer_yields_none(capture):
     got = capture.columns([("TCP", "dport"), ("UDP", "dport")])
     tcp, udp = got["TCP.dport"], got["UDP.dport"]
-    # Every packet has at most one of TCP and UDP, and some have neither.
     assert all(t is None or u is None for t, u in zip(tcp, udp))
     assert None in tcp and None in udp
     assert tcp[:5] == [80, 81, 82, 83, 84]
@@ -118,9 +114,6 @@ def test_an_empty_capture_gives_empty_columns(empty):
     assert all(col == [] for col in empty.to_dict().values())
     assert empty.filter_indices("TCP") == []
     assert len(empty.filter("TCP")) == 0
-
-
-# ---- filtering -------------------------------------------------------------
 
 
 def test_filter_by_layer_presence(capture):
@@ -211,9 +204,6 @@ def test_a_bad_operator_is_rejected(capture):
         capture.filter(where=[("IP", "dst", "==", "not-an-address")])
 
 
-# ---- to_dict ---------------------------------------------------------------
-
-
 def test_to_dict_is_the_dependency_free_export(capture):
     got = capture.to_dict([("IP", "dst")])
     assert isinstance(got, dict)
@@ -230,9 +220,6 @@ def test_the_default_spec_covers_the_usual_columns(capture):
     assert got["IP.dst"] == loop_column(capture, "IP", "dst")
 
 
-# ---- optional dependencies -------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "func,module",
     [("to_arrow", "pyarrow"), ("to_polars", "polars"), ("to_pandas", "pandas")],
@@ -241,7 +228,7 @@ def test_exports_explain_themselves_when_the_library_is_missing(
     capture, monkeypatch, func, module
 ):
     # None in sys.modules makes the import fail the way an absent package does,
-    # whether or not the real library happens to be installed here.
+    # whether or not the real library is installed here.
     monkeypatch.setitem(sys.modules, module, None)
     with pytest.raises(ImportError) as exc:
         getattr(columnar, func)(capture)

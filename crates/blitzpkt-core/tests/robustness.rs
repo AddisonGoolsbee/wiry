@@ -1,10 +1,6 @@
-//! Robustness properties over malformed input.
-//!
-//! The design promise is that every parser returns what it managed, never
-//! panics and never loops forever, because truncated and hostile input is the
-//! normal case on snaplen-clipped captures. These are the stable-toolchain
-//! equivalent of the `fuzz/` targets: same contract, deterministic inputs, so
-//! they run in ordinary `cargo test`. See `fuzz/README.md`.
+//! Robustness properties over malformed input: every parser returns what it
+//! managed, never panics and never loops forever. Same contract as the `fuzz/`
+//! targets, with deterministic inputs so it runs in ordinary `cargo test`.
 
 use blitzpkt_core::layers::dns;
 use blitzpkt_core::options::{self, Item};
@@ -16,8 +12,8 @@ use std::time::{Duration, Instant};
 /// Fixed so a failure is reproducible; printed in every assertion message.
 const SEED: u64 = 0x2545_F491_4F6C_DD1D;
 
-/// Wall-clock budget for one property loop. Generous enough not to flake on a
-/// loaded CI runner, tight enough that an unbounded walk trips it.
+/// Loose enough not to flake on a loaded CI runner, tight enough that an
+/// unbounded walk trips it.
 const BUDGET: Duration = Duration::from_secs(20);
 
 struct Rng(u64);
@@ -54,8 +50,8 @@ impl Rng {
     }
 }
 
-/// Run `f` on a worker thread and fail if it does not finish in time. A parser
-/// that loops forever would otherwise hang the whole run instead of failing.
+/// Runs `f` on a worker thread: a parser that loops forever would otherwise
+/// hang the whole run instead of failing.
 fn within<F: FnOnce() + Send + 'static>(limit: Duration, what: &'static str, f: F) {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -105,9 +101,8 @@ fn check_spans(pkt: &Packet, what: &str) {
     }
 }
 
-/// Read every field of every layer, the option region, and the serialised bytes.
-/// Any out-of-bounds read inside the engine panics, which is exactly the bug
-/// this is looking for.
+/// Reads every field of every layer, the option region and the serialised
+/// bytes: an out-of-bounds read inside the engine panics here.
 fn exercise(pkt: &mut Packet, what: &str) {
     check_spans(pkt, what);
     let total = pkt.len();
@@ -129,7 +124,7 @@ fn exercise(pkt: &mut Packet, what: &str) {
     check_spans(pkt, what);
 }
 
-// ---- hand-built valid packets, from the RFC layouts, not from any tool ----
+// Valid packets, hand-built from the RFC layouts and not from any tool.
 
 fn eth_ip_tcp() -> Vec<u8> {
     let mut v = Vec::new();
@@ -147,7 +142,7 @@ fn eth_ip_tcp() -> Vec<u8> {
 
 fn eth_ip_tcp_options() -> Vec<u8> {
     let mut v = eth_ip_tcp();
-    v[46] = 0x80; // data offset 8: three more 32-bit words of options
+    v[46] = 0x80; // data offset 8
     v.splice(
         54..54,
         [
@@ -239,8 +234,6 @@ fn valid_frames() -> Vec<(&'static str, Vec<u8>)> {
         ("eth/ip/udp/dhcp", eth_dhcp()),
     ]
 }
-
-// ---- properties ----
 
 #[test]
 fn random_bytes_dissect_at_every_entry_point() {
@@ -377,7 +370,7 @@ fn random_input_round_trips_to_a_fixed_point() {
     }
 }
 
-// ---- DNS name compression: the highest-value adversarial surface ----
+// DNS name compression: the highest-value adversarial surface.
 
 fn dns_header(qd: u16, an: u16, ns: u16, ar: u16) -> Vec<u8> {
     let mut v = vec![0xab, 0xcd, 0x81, 0x80];
@@ -421,8 +414,7 @@ fn dns_adversarial_compression_pointers_terminate() {
     m.extend_from_slice(&[0, 1, 0, 1]);
     cases.push(("out of bounds", m));
 
-    // A long strictly-backwards chain: every pointer is individually legal, so
-    // only the jump cap stops the walk.
+    // Every pointer here is individually legal, so only the jump cap stops it.
     let mut m = dns_header(1, 0, 0, 0);
     for i in 0..600 {
         let t = if i == 0 { 12 } else { 12 + (i - 1) * 2 };
@@ -432,8 +424,7 @@ fn dns_adversarial_compression_pointers_terminate() {
     m.splice(12..14, ptr(last).iter().copied());
     cases.push(("long backwards chain", m));
 
-    // A chain that alternates a real label with a backwards jump, which is how
-    // a decompression bomb is built.
+    // Alternating a real label with a backwards jump: a decompression bomb.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&[4, b'a', b'a', b'a', b'a']);
     for _ in 0..200 {
@@ -539,8 +530,6 @@ fn dns_random_and_mutated_messages_terminate() {
     );
 }
 
-// ---- option regions ----
-
 #[test]
 fn option_regions_never_hang_or_over_read() {
     let mut rng = Rng::new(SEED ^ 0x0071);
@@ -594,8 +583,6 @@ fn option_regions_never_hang_or_over_read() {
         "option walking did not finish promptly (seed {SEED:#x})"
     );
 }
-
-// ---- capture file readers ----
 
 fn pcap_file(link: u32, records: &[Vec<u8>]) -> Vec<u8> {
     let mut v = Vec::new();
@@ -701,8 +688,8 @@ fn capture_readers_survive_corruption() {
         read_all_pcapng(&png_ok[..cut]);
     }
 
-    // Corrupt single bytes with extreme values, concentrating on the length and
-    // offset fields that drive the walk.
+    // Corrupt single bytes with extreme values, concentrating on the length
+    // and offset fields that drive the walk.
     let mut rng = Rng::new(SEED ^ 0xcafe);
     let start = Instant::now();
     for i in 0..6000 {

@@ -1,13 +1,10 @@
-//! Shared assertions for the fuzz targets.
-//!
-//! Every target asserts the same contract: dissection does not panic, it
-//! terminates, and no span ever points outside the buffer it came from.
+//! Shared assertions: dissection does not panic, it terminates, and no span
+//! ever points outside the buffer it came from.
 
 use blitzpkt_core::packet::Packet;
 use blitzpkt_core::proto::{desc, ProtoId};
 use blitzpkt_core::show;
 
-/// Every protocol the dissector can be entered at.
 pub const ALL_PROTOS: [ProtoId; 14] = [
     ProtoId::Raw,
     ProtoId::Padding,
@@ -40,8 +37,8 @@ pub fn check_spans(pkt: &Packet) {
     }
 }
 
-/// Read every field of every layer, plus the option region and the serialised
-/// bytes. Any out-of-bounds read inside the engine panics, which is the bug.
+/// Reads every field of every layer, plus the option region and the serialised
+/// bytes: an out-of-bounds read inside the engine panics here.
 pub fn exercise(pkt: &mut Packet) {
     check_spans(pkt);
     let n = pkt.layers().len();

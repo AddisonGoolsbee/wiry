@@ -15,8 +15,8 @@ fuzz_target!(|data: &[u8]| {
         data.len()
     );
 
-    // Each record consumes at least one byte of the message, so the section
-    // counts in the header cannot make the output larger than the input.
+    // Each record consumes at least one byte, so the header's section counts
+    // cannot make the output larger than the input.
     let n = r.qd.len() + r.an.len() + r.ns.len() + r.ar.len();
     assert!(n <= data.len(), "more records than bytes");
 

@@ -101,7 +101,7 @@ def test_address_mask_reply_carries_a_mask():
 
 
 def test_router_advertisement_names_its_four_octets_unused():
-    # Type 9 is not one of the types this layer gives a structured meaning to.
+    # Type 9 has no structured layout here.
     pkt = icmp(9, 0, bytes([1, 2, 3, 4]))
     assert pkt[ICMP].fields() == ["type", "code", "chksum", "unused"]
     assert pkt[ICMP].unused == 0x01020304
@@ -133,7 +133,6 @@ def test_changing_type_changes_which_fields_exist():
     pkt = ICMP(bytes(ECHO))
     pkt[ICMP].type = 5
     assert pkt[ICMP].fields() == ["type", "code", "chksum", "gw"]
-    # The identifier octets are now read as the gateway address.
     assert pkt[ICMP].gw == "18.52.0.1"
     with pytest.raises(AttributeError):
         pkt[ICMP].id

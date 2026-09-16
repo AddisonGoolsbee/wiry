@@ -215,7 +215,6 @@ def test_changing_an_address_changes_the_transport_checksum():
 
 def test_computed_fields_are_filled_in_by_serialisation():
     pkt = Ether() / IP() / UDP(sport=9, dport=9) / Raw(load=b"abcde")
-    # Lengths and checksums are derived at serialisation time, not at build time.
     assert pkt[IP].len == 0 and pkt[UDP].len == 0
     total = len(bytes(pkt))
     assert pkt[IP].len == total - 14
@@ -224,8 +223,7 @@ def test_computed_fields_are_filled_in_by_serialisation():
 
 def test_bootp_stack_reaches_dhcp():
     pkt = Ether() / IP() / UDP(sport=68, dport=67) / BOOTP() / DHCP()
-    # Stacking DHCP appends the magic cookie, which RFC 2131 puts at the end of
-    # the BOOTP header rather than in DHCP itself.
+    # RFC 2131 puts the magic cookie at the end of the BOOTP header, not in DHCP.
     assert len(bytes(pkt)) == 14 + 20 + 8 + 236 + 4
     assert pkt[BOOTP].options == bytes([99, 130, 83, 99])
 

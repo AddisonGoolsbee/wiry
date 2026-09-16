@@ -16,7 +16,7 @@ try:
 except ImportError:
     sys.exit("scapy not installed; this is a dev-only audit")
 
-# Our layer name -> scapy class. Names match where both implement the protocol.
+# Our layer name -> scapy class.
 PAIRS = [
     ("Ether", S.Ether),
     ("Dot1Q", S.Dot1Q),
@@ -94,7 +94,7 @@ def audit_methods():
     print("\n=== PACKET METHOD SURFACE ===")
     ours = {m for m in dir(B.Packet) if not m.startswith("_")}
     theirs = {m for m in dir(S.Packet) if not m.startswith("_")}
-    # Methods that are meaningless without live capture, deliberately out of scope.
+    # Meaningless without live capture, deliberately out of scope.
     live = {
         "answers", "hashret", "send", "sendp", "sr", "sr1", "srp", "srp1",
         "sniff", "route", "src", "dst", "psdump", "pdfdump", "canvas_dump",

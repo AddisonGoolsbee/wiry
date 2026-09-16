@@ -53,9 +53,8 @@ def bench(path, limit):
     print(f"\n=== FOUR COLUMNS FROM {n:,} PACKETS ===")
     results = {}
 
-    # Comparing identical packet sets matters: an early draft of the project's
-    # benchmark compared a bulk call over the whole capture against a loop over
-    # a prefix and produced a flattering, wrong ratio.
+    # Both sides must cover identical packet sets: a bulk call over the whole
+    # capture against a loop over a prefix gives a flattering, wrong ratio.
     cap = pl.head(n)
 
     def bulk():
