@@ -1,11 +1,4 @@
-"""blitzpkt: fast packet dissection and crafting with a familiar API.
-
-The engine is Rust. This module is a thin facade whose job is to look like the
-packet library people already know, while crossing into Rust as rarely as
-possible. Construction accumulates a layer stack in Python and hands the whole
-thing over in a single call; dissection keeps the capture in Rust and mints
-Python objects only for packets you actually touch.
-"""
+"""blitzpkt: fast packet dissection and crafting with a familiar API."""
 
 from __future__ import annotations
 
@@ -57,16 +50,10 @@ class _LayerView:
         if field.startswith("_"):
             raise AttributeError(field)
         rust = self._pkt._materialize()
-        # `options` is the parsed (name, value) list where the protocol has a
-        # real option region. Falls through to the raw bytes otherwise, so
-        # nothing breaks for layers whose parser is not written yet.
         if field == "options":
             parsed = rust.options(self._idx)
             if parsed is not None:
                 return parsed
-        # DNS question and record sections. Compression pointers are offsets
-        # from the start of the message, so this is parsed on demand rather
-        # than being part of the flat field table.
         if field in ("qd", "an", "ns", "ar"):
             recs = rust.dns_records(self._idx)
             if recs is not None:
@@ -100,14 +87,12 @@ class _LayerView:
         return hash((self._name, self._idx))
 
 
-# Option kinds that can be written, as (code, payload width in bytes, or None
-# for variable). Numbers from the IANA TCP Option Kind and IP Option Number
-# registries.
+# (code, payload width, or None for variable). Codes from the IANA TCP Option
+# Kind and IP Option Number registries.
 #
-# Note the distinction that is easy to get wrong: EOL and NOP occupy a single
-# octet with no length field, while an option like SAckOK still carries a
-# length octet even though its payload is empty. Emitting SAckOK as one bare
-# byte desynchronises every option after it.
+# EOL and NOP occupy a single octet with no length field, but SAckOK still
+# carries a length octet despite an empty payload; emitting it as one bare byte
+# desynchronises every option after it.
 _SINGLE_BYTE = {0, 1}
 _TCP_OPT = {
     "EOL": (0, 0), "NOP": (1, 0), "MSS": (2, 2), "WScale": (3, 1),
@@ -121,10 +106,10 @@ _IP_OPT = {
 }
 
 
-# DHCP option codes and payload shapes, RFC 2132. An integer entry means a
-# fixed-width big-endian integer of that many bytes.
+# RFC 2132 option codes and payload shapes; an integer entry means a fixed-width
+# big-endian integer of that many bytes.
 #
-# The length octet here counts ONLY the option data (RFC 2132 s2), the opposite
+# The length octet here counts ONLY the option data (RFC 2132 §2), the opposite
 # of the TCP/IPv4 convention above where it also counts the code and length
 # octets. Using one rule for the other desynchronises every following option.
 _DHCP_OPT: dict[str, tuple[int, Any]] = {
@@ -148,13 +133,13 @@ _DHCP_OPT: dict[str, tuple[int, Any]] = {
     "end": (255, "flag"),
 }
 
-# RFC 2132 section 9.6.
+# RFC 2132 §9.6.
 _DHCP_MSGTYPE = {
     "discover": 1, "offer": 2, "request": 3, "decline": 4,
     "ack": 5, "nak": 6, "release": 7, "inform": 8,
 }
 
-# Pad and End are a bare octet: no length, no data (RFC 2132 s3.1, s3.2).
+# RFC 2132 §3.1, §3.2: Pad and End are a bare octet, no length and no data.
 _DHCP_BARE = {0, 255}
 
 
@@ -167,8 +152,6 @@ def _ipv4_bytes(v: Any) -> bytes:
 
 
 def _dhcp_payload(kind: Any, values: tuple) -> bytes:
-    # A list value and several values mean the same thing, so ("router", a, b)
-    # and ("router", [a, b]) encode identically.
     flat: list[Any] = []
     for v in values:
         if isinstance(v, (list, tuple)):
@@ -303,8 +286,6 @@ class Packet:
         self._rust = _rust
         self.time = time
 
-    # ---- construction -------------------------------------------------
-
     def __truediv__(self, other: "Packet") -> "Packet":
         """Stack another layer beneath this one."""
         if not isinstance(other, Packet):
@@ -315,9 +296,8 @@ class Packet:
 
         # A materialised packet cannot be turned back into a field spec:
         # variable-length header content does not survive the build path, so
-        # reconstructing would silently reset every field to its default. When
-        # either side is one, append to the real bytes instead, which is what
-        # happens on the wire.
+        # reconstructing would reset every field to its default. Append to the
+        # real bytes instead, as happens on the wire.
         if self._rust is not None or other._rust is not None:
             new = self._materialize().copy()
             n = len(new.layer_names())
@@ -340,16 +320,14 @@ class Packet:
             return [(n, {}) for n in self._rust.layer_names()]
         return []
 
-    # ---- materialisation ----------------------------------------------
-
     def _split_fields(self):
         ints: list[tuple[int, str, int]] = []
         strs: list[tuple[int, str, str]] = []
         raws: list[tuple[int, str, bytes]] = []
         for i, (lname, fields) in enumerate(self._stack):
             for k, v in fields.items():
-                # `options` given as a list is encoded and appended to the
-                # header rather than written into a fixed-width field.
+                # A list of options is encoded and appended to the header rather
+                # than written into a fixed-width field.
                 if k == "options" and not _is_bytes(v):
                     continue
                 if k == "load" and lname in ("Raw", "Padding"):
@@ -400,8 +378,6 @@ class Packet:
         return self._rust
 
     def _set(self, layer: int, field: str, value: Any) -> None:
-        # Writing invalidates any cached Rust packet only if we are still a spec;
-        # once materialised we write through to Rust directly.
         if self._rust is not None:
             if isinstance(value, bool):
                 self._rust.set_field(layer, field, int(value))
@@ -418,10 +394,8 @@ class Packet:
             raise IndexError("layer out of range")
         self._stack[layer][1][field] = value
 
-    # ---- serialisation -------------------------------------------------
-
     def __bytes__(self) -> bytes:
-        # Fast path: a pure spec serialises in one crossing, no Rust object kept.
+        # A pure spec serialises in one crossing, with no Rust object kept.
         if self._rust is None and self._stack:
             names = [n for n, _ in self._stack]
             ints, strs, raws = self._split_fields()
@@ -435,8 +409,6 @@ class Packet:
 
     def __len__(self) -> int:
         return len(bytes(self))
-
-    # ---- layer access ---------------------------------------------------
 
     def layers(self) -> list[str]:
         if self._rust is not None:
@@ -466,7 +438,6 @@ class Packet:
         return view
 
     def __getattr__(self, field: str) -> Any:
-        # Only called when normal lookup fails, so this is the field path.
         if field.startswith("_"):
             raise AttributeError(field)
         names = self.layers()
@@ -486,15 +457,11 @@ class Packet:
                 return
         raise AttributeError(f"no field {field!r} in {' / '.join(names)}")
 
-    # ---- payload ---------------------------------------------------------
-
     @property
     def payload(self) -> bytes:
         rust = self._materialize()
         n = len(rust.layer_names())
         return rust.payload(n - 1) if n else b""
-
-    # ---- display ---------------------------------------------------------
 
     def show(self) -> None:
         print(self.show_str(), end="")
@@ -521,24 +488,19 @@ class Packet:
         return hash(bytes(self))
 
 
-# ---- generated layer classes ---------------------------------------------
-
-
-def _make_layer(name: str, doc: str = "") -> type:
+def _make_layer(name: str) -> type:
     def __init__(self, _data: Any = None, **kw: Any) -> None:
         if _data is not None and _is_bytes(_data):
-            # Dissecting from bytes, the way a layer class accepts raw input.
             Packet.__init__(self, _rust=_b.dissect(bytes(_data), name))
             return
         Packet.__init__(self, _stack=[(name, dict(kw))])
 
-    cls = type(name, (Packet,), {
+    return type(name, (Packet,), {
         "__init__": __init__,
         "_name": name,
-        "__doc__": doc or f"{name} layer.",
+        "__doc__": f"{name} layer.",
         "__slots__": (),
     })
-    return cls
 
 
 _LAYER_NAMES = list(_b.known_layers())
@@ -548,17 +510,10 @@ for _n in _LAYER_NAMES:
     globals()[_n] = _LAYERS[_n]
     __all__.append(_n)
 
-# Conventional aliases.
-Dot1Q = _LAYERS.get("Dot1Q")
-IPv6 = _LAYERS.get("IPv6")
-
 
 def known_layers() -> list[str]:
     """Every layer this build can dissect."""
     return list(_LAYER_NAMES)
-
-
-# ---- capture files ---------------------------------------------------------
 
 
 class PacketList:
@@ -587,11 +542,7 @@ class PacketList:
         return self._list.count_layer(_layer_name(layer))
 
     def field_column(self, layer: Any, field: str) -> list[Any]:
-        """Pull one field from every packet in a single crossing.
-
-        This is the API that keeps the speedup on bulk work. Prefer it over a
-        Python loop when you want one field across a whole capture.
-        """
+        """Pull one field from every packet in a single crossing."""
         return self._list.field_column(_layer_name(layer), field)
 
     def columns(self, specs: Any = None, where: Any = None, layer: Any = None) -> dict:
@@ -678,9 +629,6 @@ class PcapReader:
         return self._pl
 
 
-# ---- helpers ---------------------------------------------------------------
-
-
 def raw(pkt: Any) -> bytes:
     """Serialise a packet to bytes."""
     return bytes(pkt)
@@ -691,7 +639,7 @@ def hexdump(pkt: Any, width: int = 16) -> None:
 
 
 def hexdump_str(pkt: Any, width: int = 16) -> str:
-    data = bytes(pkt) if not _is_bytes(pkt) else bytes(pkt)
+    data = bytes(pkt)
     out = []
     for off in range(0, len(data), width):
         chunk = data[off : off + width]

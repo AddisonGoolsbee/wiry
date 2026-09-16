@@ -1,11 +1,5 @@
 """Columnar access: a whole capture as columns in one crossing of the boundary.
 
-A field extracted per packet from Python costs one FFI call per packet per
-field. Here the whole capture is dissected once in Rust, every requested field
-is read out of the same dissection, and the result crosses back as one list per
-column. That is what makes a capture usable as a dataframe rather than as a
-loop.
-
 Specs name the columns. Each is ``(layer, field)``, ``(layer, field, name)``
 with an explicit column name, or the string ``"IP.src"``. The pseudo-layer
 ``Frame`` carries per-record metadata that is not in the packet bytes: ``time``
@@ -48,7 +42,6 @@ DEFAULT_SPECS: list[tuple[str, str]] = [
 
 
 def _rust(cap: Any) -> Any:
-    """The Rust list behind a PacketList, or the list itself."""
     inner = getattr(cap, "_list", None)
     return cap if inner is None else inner
 
@@ -157,12 +150,6 @@ def filter_packets(cap: Any, layer: Any = None, where: Where = None) -> Any:
             None if layer is None else _layer_name(layer), _normalize_where(where)
         )
     )
-
-
-# ---- dataframe exports -----------------------------------------------------
-#
-# Optional dependencies. Imported inside each function so installing blitzpkt
-# never pulls in a dataframe library nobody asked for.
 
 
 def _require(module: str, extra: str) -> Any:
