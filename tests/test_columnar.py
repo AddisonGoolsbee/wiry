@@ -194,6 +194,16 @@ def test_a_filtered_view_keeps_its_original_positions(capture):
     )["Frame.num"] == capture.filter_indices(where=[("TCP", "dport", "==", 22)])
 
 
+def test_head_takes_a_prefix_and_keeps_its_positions(capture):
+    first = capture.head(3)
+    assert [bytes(p) for p in first] == [bytes(p) for p in capture[:3]]
+    assert first.columns([("Frame", "num")])["Frame.num"] == [0, 1, 2]
+    assert len(capture.head(len(capture) + 10)) == len(capture)
+    assert capture.filter(TCP).head(2).columns([("Frame", "num")])["Frame.num"] == (
+        capture.filter_indices(TCP)[:2]
+    )
+
+
 def test_a_bad_operator_is_rejected(capture):
     with pytest.raises(ValueError):
         capture.filter(where=[("TCP", "dport", "~=", 1)])

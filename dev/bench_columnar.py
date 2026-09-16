@@ -154,6 +154,8 @@ def summarise(r):
     for k in ("field_column", "loop", "scapy"):
         if r.get(k):
             print(f"  -> columns() is {base / r[k]:,.1f}x {k}")
+    print("  (one pass saves three dissections, not the Python objects: four")
+    print("   columns cost four columns' worth of objects either way)")
 
 
 if __name__ == "__main__":
