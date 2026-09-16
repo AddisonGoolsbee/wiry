@@ -430,12 +430,29 @@ def _layer_name(x: Any) -> str:
 # appended at build time like an option region, not written into a fixed slot.
 _VAR_FIELD: dict[str, tuple[str, Any]] = {}
 
+_OPAQUE = ("Raw", "Padding")
+
+
+def _float_padding(stack: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
+    """Padding is assembled after every other payload, wherever it was stacked,
+    so that it lands at the end of the frame the way a pad does on the wire."""
+    if not any(n == "Padding" for n, _ in stack):
+        return stack
+    return [s for s in stack if s[0] != "Padding"] + [
+        s for s in stack if s[0] == "Padding"
+    ]
+
 
 def _layer_init(name: str):
     def __init__(self, _data: Any = None, **kw: Any) -> None:
-        if _data is not None and _is_bytes(_data):
-            Packet.__init__(self, _rust=_b.dissect(bytes(_data), name))
-            return
+        if _data is not None and (_is_bytes(_data) or isinstance(_data, str)):
+            # An opaque layer keeps its bytes as a field, so that stacking it
+            # under another one still produces a layer rather than a payload.
+            if name in _OPAQUE:
+                kw.setdefault("load", _to_bytes(_data))
+            else:
+                Packet.__init__(self, _rust=_b.dissect(_to_bytes(_data), name))
+                return
         Packet.__init__(self, _stack=[(name, dict(kw))])
 
     return __init__
@@ -487,8 +504,8 @@ class Packet(metaclass=_PacketMeta):
     def __truediv__(self, other: "Packet") -> "Packet":
         """Stack another layer beneath this one."""
         if not isinstance(other, Packet):
-            if _is_bytes(other):
-                other = Raw(load=bytes(other))
+            if _is_bytes(other) or isinstance(other, str):
+                other = Raw(load=_to_bytes(other))
             else:
                 return NotImplemented
 
@@ -503,12 +520,19 @@ class Packet(metaclass=_PacketMeta):
                 new.set_payload(n - 1, bytes(other))
             return Packet(_rust=new, time=self.time)
 
-        return Packet(_stack=self._spec() + other._spec())
+        return Packet(_stack=_float_padding(self._spec() + other._spec()))
 
     def __rtruediv__(self, other: Any) -> "Packet":
-        if _is_bytes(other):
-            return Raw(load=bytes(other)) / self
+        if _is_bytes(other) or isinstance(other, str):
+            return Raw(load=_to_bytes(other)) / self
         return NotImplemented
+
+    def add_payload(self, other: Any) -> None:
+        """Stack a layer, or bytes, beneath this one, in place."""
+        joined = self / other
+        self._stack = joined._stack
+        self._payload = joined._payload
+        self._rust = joined._rust
 
     def _spec(self) -> list[tuple[str, dict]]:
         """The layer stack as (name, fields) pairs, dissecting if needed."""
