@@ -1,5 +1,5 @@
 use crate::field::{self, FieldDesc, FieldKind};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -236,6 +236,15 @@ const MAX_BINDS: usize = 1024;
 const NO_BIND: OnceLock<Bind> = OnceLock::new();
 static BINDS: [OnceLock<Bind>; MAX_BINDS] = [NO_BIND; MAX_BINDS];
 static BOUND: AtomicUsize = AtomicUsize::new(0);
+/// Which protocols appear as a parent, so a layer nobody bound under skips the
+/// search entirely. Ids past 64 share a bit, which costs a fruitless search and
+/// never a missed binding.
+static BOUND_PARENTS: AtomicU64 = AtomicU64::new(0);
+
+#[inline]
+fn parent_bit(p: ProtoId) -> u64 {
+    1u64 << (p.0 % 64)
+}
 
 pub fn bind(
     parent: ProtoId,
@@ -256,6 +265,7 @@ pub fn bind(
         child,
         conds: Box::leak(conds.into_boxed_slice()),
     });
+    BOUND_PARENTS.fetch_or(parent_bit(parent), Ordering::Release);
     Ok(())
 }
 
@@ -265,11 +275,11 @@ fn binds() -> impl Iterator<Item = &'static Bind> {
 }
 
 /// The child a declared binding selects for this header, if any. The search
-/// itself is kept out of line so that a dissection with nothing bound pays one
+/// itself is kept out of line, so a layer nothing was bound under pays one
 /// relaxed load and a branch.
 #[inline]
 pub fn bound_next(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
-    if BOUND.load(Ordering::Relaxed) == 0 {
+    if BOUND_PARENTS.load(Ordering::Relaxed) & parent_bit(parent) == 0 {
         return None;
     }
     search_binds(parent, hdr)
@@ -291,7 +301,7 @@ fn search_binds(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
 /// values that will make dissection find it again.
 #[inline]
 pub fn apply_bind(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
-    if BOUND.load(Ordering::Relaxed) == 0 {
+    if BOUND_PARENTS.load(Ordering::Relaxed) & parent_bit(parent) == 0 {
         return;
     }
     write_bind(hdr, parent, child);
