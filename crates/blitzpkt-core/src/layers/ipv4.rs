@@ -120,6 +120,13 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
     walk_tlv(&hdr[20..end], SINGLE_BYTE, Some(opttype::EOL), decode)
 }
 
+/// Write the IHL field, which counts 32-bit words (RFC 791 s3.1).
+fn set_hlen(hdr: &mut [u8], len: usize) {
+    if !hdr.is_empty() {
+        hdr[0] = (hdr[0] & 0xf0) | (((len / 4) as u8) & 0x0f);
+    }
+}
+
 pub static DESC: ProtoDesc = ProtoDesc {
     id: ProtoId::Ipv4,
     name: "IP",
@@ -129,6 +136,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     next,
     build_len: 20,
     parse_options: Some(parse_options),
+    set_hlen: Some(set_hlen),
     bind_next: Some(bind_next),
 };
 

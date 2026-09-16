@@ -62,6 +62,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     next,
     build_len: BOOTP_LEN,
     parse_options: None,
+    set_hlen: None,
     bind_next: None,
 };
 
@@ -192,6 +193,7 @@ pub static DHCP_DESC: ProtoDesc = ProtoDesc {
     next: dhcp_next,
     build_len: 4,
     parse_options: Some(parse_options),
+    set_hlen: None,
     bind_next: None,
 };
 

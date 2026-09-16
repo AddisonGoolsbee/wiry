@@ -59,6 +59,10 @@ pub struct ProtoDesc {
     /// Parse this header's variable-length option region, when it has one.
     /// Given the full layer header bytes.
     pub parse_options: Option<OptionParser>,
+    /// Write this header's own length field (IPv4 ihl, TCP data offset)
+    /// after option bytes have been appended. Protocols with a fixed
+    /// header leave this None.
+    pub set_hlen: Option<fn(&mut [u8], usize)>,
     /// Set this header's demultiplexing field so it points at `next`.
     /// Mirrors the automatic binding that happens when layers are stacked.
     pub bind_next: Option<fn(&mut [u8], ProtoId)>,

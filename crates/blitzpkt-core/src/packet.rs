@@ -44,12 +44,32 @@ impl Packet {
 
     /// Build a packet from a stack of protocols using each field's default value.
     pub fn build(stack: &[ProtoId]) -> Self {
+        let owned: Vec<(ProtoId, Option<Vec<u8>>)> = stack.iter().map(|p| (*p, None)).collect();
+        Self::build_with(&owned)
+    }
+
+    /// Build a stack where some layers carry extra header bytes (options).
+    /// Option regions are padded to a 4-byte boundary, as IPv4 and TCP require,
+    /// and the layer's own length field is rewritten to match.
+    pub fn build_with(stack: &[(ProtoId, Option<Vec<u8>>)]) -> Self {
         let mut buf = Vec::new();
         let mut spans = Spans::new();
-        for (i, &p) in stack.iter().enumerate() {
+        for (i, (p, opts)) in stack.iter().enumerate() {
+            let p = *p;
             let d = desc(p);
             let off = buf.len();
             buf.resize(off + d.build_len, 0);
+            // Append the option region, padded so the header stays a whole
+            // number of 32-bit words.
+            let mut hlen = d.build_len;
+            if let Some(o) = opts {
+                if !o.is_empty() && d.set_hlen.is_some() {
+                    buf.extend_from_slice(o);
+                    let pad = (4 - (o.len() % 4)) % 4;
+                    buf.extend(std::iter::repeat(0u8).take(pad));
+                    hlen = d.build_len + o.len() + pad;
+                }
+            }
             for f in d.fields {
                 if f.default != 0 {
                     field::write_bits(&mut buf[off..], f.bit_off, f.bit_len, f.default);
@@ -65,11 +85,15 @@ impl Packet {
                     bind(&mut buf[a..b], p);
                 }
             }
+            if let Some(setter) = d.set_hlen {
+                let end = (off + hlen).min(buf.len());
+                setter(&mut buf[off..end], hlen);
+            }
             spans.push(LayerSpan {
                 proto: p,
                 off: off as u32,
-                hlen: d.build_len as u32,
-                total: d.build_len as u32,
+                hlen: hlen as u32,
+                total: hlen as u32,
             });
         }
         let mut pkt = Self {

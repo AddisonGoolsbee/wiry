@@ -461,6 +461,22 @@ fn build_stack(names: Vec<String>) -> PyResult<PyPkt> {
     })
 }
 
+/// Resolve layer names into a build stack, attaching any option bytes.
+fn make_stack(
+    names: &[String],
+    opts: &[(usize, Vec<u8>)],
+) -> PyResult<Vec<(ProtoId, Option<Vec<u8>>)>> {
+    let mut stack = Vec::with_capacity(names.len());
+    for (i, n) in names.iter().enumerate() {
+        let o = opts
+            .iter()
+            .find(|(idx, _)| *idx == i)
+            .map(|(_, b)| b.clone());
+        stack.push((proto_by_name(n)?, o));
+    }
+    Ok(stack)
+}
+
 fn apply_fields(
     pkt: &mut CorePacket,
     ints: &[(usize, String, u64)],
@@ -512,7 +528,7 @@ fn apply_fields(
 /// it field by field would put an FFI call in the hot loop, which is exactly the
 /// mistake that erases the speedup.
 #[pyfunction]
-#[pyo3(signature = (names, ints, strs, raws, payload = None))]
+#[pyo3(signature = (names, ints, strs, raws, payload = None, opts = Vec::new()))]
 fn build_and_serialize<'py>(
     py: Python<'py>,
     names: Vec<String>,
@@ -520,12 +536,10 @@ fn build_and_serialize<'py>(
     strs: Vec<(usize, String, String)>,
     raws: Vec<(usize, String, Vec<u8>)>,
     payload: Option<Vec<u8>>,
+    opts: Vec<(usize, Vec<u8>)>,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    let mut stack = Vec::with_capacity(names.len());
-    for n in &names {
-        stack.push(proto_by_name(n)?);
-    }
-    let mut pkt = CorePacket::build(&stack);
+    let stack = make_stack(&names, &opts)?;
+    let mut pkt = CorePacket::build_with(&stack);
     if let Some(p) = payload {
         let last = stack.len().saturating_sub(1);
         pkt.set_payload(last, &p);
@@ -537,19 +551,17 @@ fn build_and_serialize<'py>(
 
 /// Same as `build_and_serialize` but returns the packet for further inspection.
 #[pyfunction]
-#[pyo3(signature = (names, ints, strs, raws, payload = None))]
+#[pyo3(signature = (names, ints, strs, raws, payload = None, opts = Vec::new()))]
 fn build_packet(
     names: Vec<String>,
     ints: Vec<(usize, String, u64)>,
     strs: Vec<(usize, String, String)>,
     raws: Vec<(usize, String, Vec<u8>)>,
     payload: Option<Vec<u8>>,
+    opts: Vec<(usize, Vec<u8>)>,
 ) -> PyResult<PyPkt> {
-    let mut stack = Vec::with_capacity(names.len());
-    for n in &names {
-        stack.push(proto_by_name(n)?);
-    }
-    let mut pkt = CorePacket::build(&stack);
+    let stack = make_stack(&names, &opts)?;
+    let mut pkt = CorePacket::build_with(&stack);
     if let Some(p) = payload {
         let last = stack.len().saturating_sub(1);
         pkt.set_payload(last, &p);

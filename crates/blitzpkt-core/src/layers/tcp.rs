@@ -115,6 +115,13 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
     walk_tlv(&hdr[20..end], SINGLE_BYTE, Some(optkind::EOL), decode)
 }
 
+/// Write the Data Offset field, which counts 32-bit words (RFC 9293 s3.1).
+fn set_hlen(hdr: &mut [u8], len: usize) {
+    if hdr.len() > 12 {
+        hdr[12] = (hdr[12] & 0x0f) | ((((len / 4) as u8) & 0x0f) << 4);
+    }
+}
+
 pub static DESC: ProtoDesc = ProtoDesc {
     id: ProtoId::Tcp,
     name: "TCP",
@@ -124,6 +131,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     next,
     build_len: 20,
     parse_options: Some(parse_options),
+    set_hlen: Some(set_hlen),
     bind_next: None,
 };
 

@@ -89,6 +89,69 @@ class _LayerView:
         return hash((self._name, self._idx))
 
 
+# Option kinds that can be written, as (code, payload width in bytes, or None
+# for variable). Numbers from the IANA TCP Option Kind and IP Option Number
+# registries.
+#
+# Note the distinction that is easy to get wrong: EOL and NOP occupy a single
+# octet with no length field, while an option like SAckOK still carries a
+# length octet even though its payload is empty. Emitting SAckOK as one bare
+# byte desynchronises every option after it.
+_SINGLE_BYTE = {0, 1}
+_TCP_OPT = {
+    "EOL": (0, 0), "NOP": (1, 0), "MSS": (2, 2), "WScale": (3, 1),
+    "SAckOK": (4, 0), "SAck": (5, None), "Timestamp": (8, 8),
+    "UTO": (28, 2), "AO": (29, None), "TFO": (34, None),
+}
+_IP_OPT = {
+    "EOL": (0, 0), "NOP": (1, 0), "RR": (7, None), "Timestamp": (68, None),
+    "Security": (130, None), "LSRR": (131, None), "SID": (136, 2),
+    "SSRR": (137, None), "RA": (148, 2),
+}
+
+
+def _encode_options(layer: str, items: Any) -> bytes:
+    """Encode an option list into wire bytes.
+
+    Accepts the same shapes the parser produces: ("MSS", 1460),
+    ("SAckOK", None), ("Timestamp", (tsval, tsecr)), or (code, b"raw").
+    """
+    if _is_bytes(items):
+        return bytes(items)
+    table = _TCP_OPT if layer == "TCP" else _IP_OPT if layer == "IP" else None
+    if table is None:
+        raise ValueError(f"{layer} does not take an encodable option list")
+
+    out = bytearray()
+    for item in items:
+        name, value = item if isinstance(item, tuple) else (item, None)
+        if isinstance(name, int):
+            code, width = name, None
+        elif name in table:
+            code, width = table[name]
+        else:
+            raise ValueError(f"unknown {layer} option {name!r}")
+
+        if code in _SINGLE_BYTE:
+            out.append(code)
+            continue
+        if isinstance(value, tuple):
+            payload = b"".join(int(v).to_bytes(4, "big") for v in value)
+        elif isinstance(value, int):
+            payload = int(value).to_bytes(width or 4, "big")
+        elif _is_bytes(value):
+            payload = bytes(value)
+        elif value is None:
+            payload = b""
+        else:
+            raise TypeError(f"cannot encode option {name!r} value {value!r}")
+        # The length octet counts the code and length octets themselves.
+        out.append(code)
+        out.append(len(payload) + 2)
+        out += payload
+    return bytes(out)
+
+
 def _layer_name(x: Any) -> str:
     """Accept a layer class, an instance, or a plain string."""
     if isinstance(x, str):
@@ -166,8 +229,12 @@ class Packet:
         ints: list[tuple[int, str, int]] = []
         strs: list[tuple[int, str, str]] = []
         raws: list[tuple[int, str, bytes]] = []
-        for i, (_, fields) in enumerate(self._stack):
+        for i, (lname, fields) in enumerate(self._stack):
             for k, v in fields.items():
+                # `options` given as a list is encoded and appended to the
+                # header rather than written into a fixed-width field.
+                if k == "options" and not _is_bytes(v):
+                    continue
                 if isinstance(v, bool):
                     ints.append((i, k, int(v)))
                 elif isinstance(v, int):
@@ -182,6 +249,20 @@ class Packet:
                     )
         return ints, strs, raws
 
+    def _opt_blobs(self) -> list[tuple[int, bytes]]:
+        """Encoded option regions, as (layer index, bytes)."""
+        out: list[tuple[int, bytes]] = []
+        for i, (lname, fields) in enumerate(self._stack):
+            v = fields.get("options")
+            if v is None or _is_bytes(v):
+                if _is_bytes(v) and v:
+                    out.append((i, bytes(v)))
+                continue
+            blob = _encode_options(lname, v)
+            if blob:
+                out.append((i, blob))
+        return out
+
     def _materialize(self):
         """Build the Rust packet if this is still just a spec."""
         if self._rust is None:
@@ -189,7 +270,9 @@ class Packet:
             if not names:
                 raise ValueError("empty packet")
             ints, strs, raws = self._split_fields()
-            self._rust = _b.build_packet(names, ints, strs, raws, self._payload)
+            self._rust = _b.build_packet(
+                names, ints, strs, raws, self._payload, self._opt_blobs()
+            )
         return self._rust
 
     def _set(self, layer: int, field: str, value: Any) -> None:
@@ -218,7 +301,9 @@ class Packet:
         if self._rust is None and self._stack:
             names = [n for n, _ in self._stack]
             ints, strs, raws = self._split_fields()
-            return _b.build_and_serialize(names, ints, strs, raws, self._payload)
+            return _b.build_and_serialize(
+                names, ints, strs, raws, self._payload, self._opt_blobs()
+            )
         return self._materialize().to_bytes()
 
     def build(self) -> bytes:

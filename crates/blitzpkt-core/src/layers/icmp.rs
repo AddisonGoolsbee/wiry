@@ -44,6 +44,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     next,
     build_len: 8,
     parse_options: None,
+    set_hlen: None,
     bind_next: None,
 };
 

@@ -23,6 +23,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     next,
     build_len: 0,
     parse_options: None,
+    set_hlen: None,
     bind_next: None,
 };
 
@@ -35,5 +36,6 @@ pub static PADDING_DESC: ProtoDesc = ProtoDesc {
     next,
     build_len: 0,
     parse_options: None,
+    set_hlen: None,
     bind_next: None,
 };
