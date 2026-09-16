@@ -10,6 +10,8 @@
 //!
 //! Protocol layouts are written from RFCs and IANA registries. See CONTRIBUTING.md.
 
+#![forbid(unsafe_code)]
+
 pub mod checksum;
 pub mod compute;
 pub mod field;

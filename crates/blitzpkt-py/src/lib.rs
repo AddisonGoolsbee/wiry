@@ -5,6 +5,8 @@
 //! Python objects are minted only for the packets somebody actually touches.
 //! Getting this wrong is the failure mode that has sunk other Rust-core rewrites.
 
+#![forbid(unsafe_code)]
+
 // The #[pymethods]/#[pyfunction] trampolines pyo3 0.22 generates convert PyErr
 // to PyErr, which clippy flags as useless_conversion at each function's span.
 #![allow(clippy::useless_conversion)]
