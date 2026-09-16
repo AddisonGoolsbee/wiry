@@ -38,8 +38,7 @@ def _to_bytes(x: Any) -> bytes:
 
 _FLAG_NAMES: dict[tuple[str, str], tuple[str, ...] | None] = {}
 
-# Read paths test this before anything else, so a field that is a flag field
-# nowhere costs one set lookup and no crossing.
+# Tested first on every field read, so a non-flag field costs one set lookup.
 _FLAG_FIELDS: set[str] = set()
 
 
