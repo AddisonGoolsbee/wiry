@@ -163,6 +163,19 @@ def test_fields_that_do_not_fill_whole_bytes_are_rejected():
     assert "Ragged" not in known_layers()
 
 
+def test_a_variable_length_field_that_is_not_last_is_rejected():
+    with pytest.raises(ValueError) as exc:
+
+        class TwoVar(Packet):
+            name = "TwoVar"
+            fields_desc = [
+                StrField("a", b"xx"), ByteField("n", 1), StrField("b", b"yy"),
+            ]
+
+    assert "must be the last field" in str(exc.value)
+    assert "TwoVar" not in known_layers()
+
+
 def test_a_builtin_name_cannot_be_taken_over():
     with pytest.raises(ValueError):
 

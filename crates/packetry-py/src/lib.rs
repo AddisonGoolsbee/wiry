@@ -977,8 +977,16 @@ fn kind_of(k: &str) -> PyResult<FieldKind> {
 fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
     let mut descs = Vec::with_capacity(fields.len());
     let mut bit_off = 0u16;
-    for (fname, bit_len, kind, default, default_bytes, flag_names) in fields {
+    let last = fields.len().saturating_sub(1);
+    for (i, (fname, bit_len, kind, default, default_bytes, flag_names)) in
+        fields.into_iter().enumerate()
+    {
         let kind = kind_of(&kind)?;
+        if kind == FieldKind::VarBytes && i != last {
+            return Err(PyValueError::new_err(format!(
+                "{name}.{fname} has no width of its own, so it must be the last field"
+            )));
+        }
         let packed = matches!(kind, FieldKind::Uint | FieldKind::LeUint | FieldKind::Flags);
         if packed && bit_len > 64 {
             return Err(PyValueError::new_err(format!(
