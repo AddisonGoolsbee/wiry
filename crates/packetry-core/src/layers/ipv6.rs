@@ -45,6 +45,14 @@ fn next(hdr: &[u8]) -> Next {
     }
 }
 
+/// RFC 8200 §3: Payload Length excludes the fixed 40-octet header.
+fn content_len(hdr: &[u8]) -> usize {
+    if hdr.len() < 6 {
+        return 0;
+    }
+    40 + u16::from_be_bytes([hdr[4], hdr[5]]) as usize
+}
+
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
     let v = match p {
         ProtoId::Tcp => ipproto::TCP,
@@ -69,6 +77,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     set_hlen: None,
     bind_next: Some(bind_next),
     bind_next_bytes: None,
+    content_len: Some(content_len),
 };
 
 #[cfg(test)]

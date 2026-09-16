@@ -7,18 +7,31 @@ pub fn recompute(pkt: &mut Packet) {
     if n == 0 {
         return;
     }
+    // Read before anything is written, so every layer sees the same answer.
+    let clipped = is_clipped(pkt);
     // Innermost first: transport checksums need a settled payload.
     for i in (0..n).rev() {
         match pkt.spans[i].proto {
-            ProtoId::Ipv4 => fix_ipv4(pkt, i),
-            ProtoId::Ipv6 => fix_ipv6(pkt, i),
-            ProtoId::Udp => fix_udp(pkt, i),
-            ProtoId::Tcp => fix_tcp(pkt, i),
-            ProtoId::Icmp => fix_icmp(pkt, i),
-            ProtoId::Icmpv6 => fix_icmpv6(pkt, i),
+            ProtoId::Ipv4 => fix_ipv4(pkt, i, clipped),
+            ProtoId::Ipv6 => fix_ipv6(pkt, i, clipped),
+            ProtoId::Udp => fix_udp(pkt, i, clipped),
+            ProtoId::Tcp if !clipped => fix_tcp(pkt, i),
+            ProtoId::Icmp if !clipped => fix_icmp(pkt, i),
+            ProtoId::Icmpv6 if !clipped => fix_icmpv6(pkt, i),
             _ => {}
         }
     }
+}
+
+/// True when a length field describes more bytes than the buffer holds, which
+/// is what a capture clipped by the snaplen looks like. Nothing derived from
+/// the missing bytes can be recomputed, so what the wire said stands.
+fn is_clipped(pkt: &Packet) -> bool {
+    pkt.spans.iter().enumerate().any(|(i, s)| {
+        crate::proto::desc(s.proto)
+            .content_len
+            .is_some_and(|f| s.off as usize + f(pkt.header(i)) > pkt.buf.len())
+    })
 }
 
 /// Trailing `Padding` counts towards no enclosing length or checksum, so every
@@ -37,15 +50,17 @@ fn span_bounds(pkt: &Packet, i: usize) -> (usize, usize, usize) {
     (off, hlen, content_end(pkt))
 }
 
-fn fix_ipv4(pkt: &mut Packet, i: usize) {
+fn fix_ipv4(pkt: &mut Packet, i: usize, clipped: bool) {
     let (off, hlen, end) = span_bounds(pkt, i);
     if off + 20 > end {
         return;
     }
-    // RFC 791 §3.1: header plus everything after it.
-    let total = (end - off) as u16;
-    pkt.buf[off + 2] = (total >> 8) as u8;
-    pkt.buf[off + 3] = (total & 0xff) as u8;
+    if !clipped {
+        // RFC 791 §3.1: header plus everything after it.
+        let total = (end - off) as u16;
+        pkt.buf[off + 2] = (total >> 8) as u8;
+        pkt.buf[off + 3] = (total & 0xff) as u8;
+    }
 
     // Computed with the field zeroed.
     pkt.buf[off + 10] = 0;
@@ -55,9 +70,9 @@ fn fix_ipv4(pkt: &mut Packet, i: usize) {
     pkt.buf[off + 11] = (c & 0xff) as u8;
 }
 
-fn fix_ipv6(pkt: &mut Packet, i: usize) {
+fn fix_ipv6(pkt: &mut Packet, i: usize, clipped: bool) {
     let (off, _, end) = span_bounds(pkt, i);
-    if off + 40 > end {
+    if clipped || off + 40 > end {
         return;
     }
     // RFC 8200 §3: excludes the fixed 40-octet header.
@@ -104,9 +119,9 @@ fn transport_seed(pkt: &Packet, i: usize, proto: u8, tlen: usize) -> Option<u32>
     }
 }
 
-fn fix_udp(pkt: &mut Packet, i: usize) {
+fn fix_udp(pkt: &mut Packet, i: usize, clipped: bool) {
     let (off, _, end) = span_bounds(pkt, i);
-    if off + 8 > end {
+    if clipped || off + 8 > end {
         return;
     }
     let tlen = end - off;
@@ -206,5 +221,34 @@ mod tests {
         let _ = p.to_bytes();
         let udp = p.find_layer(ProtoId::Udp).unwrap();
         assert_eq!(p.get(udp, "len").unwrap(), FieldValue::Uint(8 + 5));
+    }
+
+    #[test]
+    fn a_trailer_is_counted_into_no_length_after_a_write() {
+        let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Udp]);
+        let mut bytes = p.to_bytes().to_vec();
+        bytes.extend_from_slice(&[0u8; 18]);
+
+        let mut back = Packet::dissect(bytes, ProtoId::Ipv4);
+        assert!(back.set_uint(0, "ttl", 33));
+        assert_eq!(back.to_bytes().len(), 46);
+        assert_eq!(back.get(0, "len").unwrap(), FieldValue::Uint(28));
+        assert_eq!(back.get(1, "len").unwrap(), FieldValue::Uint(8));
+    }
+
+    #[test]
+    fn a_clipped_capture_keeps_the_lengths_the_wire_gave() {
+        let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Udp]);
+        p.set_payload(1, &[0u8; 40]);
+        let bytes = p.to_bytes().to_vec();
+
+        let mut back = Packet::dissect(bytes[..40].to_vec(), ProtoId::Ipv4);
+        assert!(back.set_uint(0, "ttl", 33));
+        let out = back.to_bytes().to_vec();
+        assert_eq!(out.len(), 40);
+        assert_eq!(back.get(0, "len").unwrap(), FieldValue::Uint(68));
+        assert_eq!(back.get(1, "len").unwrap(), FieldValue::Uint(48));
+        // The header is all there, so its own checksum still holds.
+        assert_eq!(ck::ones_complement(&out[..20]), 0);
     }
 }

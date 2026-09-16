@@ -25,6 +25,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     set_hlen: None,
     bind_next: None,
     bind_next_bytes: None,
+    content_len: None,
 };
 
 pub static PADDING_DESC: ProtoDesc = ProtoDesc {
@@ -39,4 +40,5 @@ pub static PADDING_DESC: ProtoDesc = ProtoDesc {
     set_hlen: None,
     bind_next: None,
     bind_next_bytes: None,
+    content_len: None,
 };

@@ -33,6 +33,15 @@ fn header_len(hdr: &[u8]) -> usize {
     ((hdr[0] & 0x0f) as usize * 4).max(20)
 }
 
+/// RFC 791 §3.1: Total Length covers the header and its data, so anything the
+/// frame carries beyond it is a trailer and not part of this datagram.
+fn content_len(hdr: &[u8]) -> usize {
+    if hdr.len() < 4 {
+        return 0;
+    }
+    u16::from_be_bytes([hdr[2], hdr[3]]) as usize
+}
+
 fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 20 {
         return Next::Raw;
@@ -131,6 +140,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     set_hlen: Some(set_hlen),
     bind_next: Some(bind_next),
     bind_next_bytes: None,
+    content_len: Some(content_len),
 };
 
 #[cfg(test)]

@@ -31,6 +31,14 @@ fn next(hdr: &[u8]) -> Next {
     Next::Raw
 }
 
+/// RFC 768: Length covers the header and its data.
+fn content_len(hdr: &[u8]) -> usize {
+    if hdr.len() < 6 {
+        return 0;
+    }
+    u16::from_be_bytes([hdr[4], hdr[5]]) as usize
+}
+
 /// RFC 951 §3 ports: the default 53/53 would otherwise dissect back as DNS.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
     if p == ProtoId::Bootp && hdr.len() >= 4 {
@@ -51,4 +59,5 @@ pub static DESC: ProtoDesc = ProtoDesc {
     set_hlen: None,
     bind_next: Some(bind_next),
     bind_next_bytes: None,
+    content_len: Some(content_len),
 };

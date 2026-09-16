@@ -79,6 +79,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     set_hlen: None,
     bind_next: None,
     bind_next_bytes: Some(bind_next_bytes),
+    content_len: None,
 };
 
 pub static DHCP_FIELDS: &[FieldDesc] = &[FieldDesc::var_bytes("options", 0)];
@@ -199,6 +200,7 @@ pub static DHCP_DESC: ProtoDesc = ProtoDesc {
     set_hlen: None,
     bind_next: None,
     bind_next_bytes: None,
+    content_len: None,
 };
 
 #[cfg(test)]

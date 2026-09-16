@@ -229,7 +229,7 @@ impl Packet {
         self.buf.truncate(cut.min(self.buf.len()));
         self.buf.extend_from_slice(data);
         let link = self.spans[0].proto;
-        self.spans = dissect_spans(&self.buf, link);
+        self.spans = spans_of(&self.buf, link, false);
         self.dirty = u32::MAX;
     }
 
@@ -304,13 +304,22 @@ impl Packet {
 }
 
 pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
+    spans_of(buf, link, true)
+}
+
+/// `bound` is false only when rebuilding after the buffer changed under us: the
+/// length fields still describe the old extent, so they bound nothing yet.
+fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
     let mut spans = Spans::new();
     let mut off = 0usize;
+    // Where the content of the innermost layer that declared a length ends. A
+    // frame padded to Ethernet's 60-octet minimum carries bytes past it.
+    let mut end = buf.len();
     let mut proto = link;
 
     for _ in 0..MAX_LAYERS {
         let d = desc(proto);
-        let remaining = buf.len().saturating_sub(off);
+        let remaining = end.saturating_sub(off);
 
         if remaining < d.min_len {
             if remaining > 0 {
@@ -324,7 +333,7 @@ pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
             break;
         }
 
-        let hdr = &buf[off..];
+        let hdr = &buf[off..end];
         let hlen = (d.header_len)(hdr).max(d.min_len).min(remaining);
 
         spans.push(LayerSpan {
@@ -333,6 +342,15 @@ pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
             hlen: hlen as u32,
             total: remaining as u32,
         });
+
+        // A length that claims more than was captured means a clipped capture,
+        // not a trailer, so the bound only ever tightens.
+        if let Some(f) = d.content_len.filter(|_| bound) {
+            let claimed = f(hdr);
+            if claimed >= hlen && off + claimed < end {
+                end = off + claimed;
+            }
+        }
 
         // A declared binding outranks the layer's own guess: it is the only way
         // a user layer can be reached, and it was asked for explicitly.
@@ -343,10 +361,19 @@ pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
         off += hlen;
 
         match next {
-            Next::Proto(p) if off < buf.len() => proto = p,
-            Next::Raw if off < buf.len() => proto = ProtoId::Raw,
+            Next::Proto(p) if off < end => proto = p,
+            Next::Raw if off < end => proto = ProtoId::Raw,
             _ => break,
         }
+    }
+
+    if end < buf.len() {
+        spans.push(LayerSpan {
+            proto: ProtoId::Padding,
+            off: end as u32,
+            hlen: (buf.len() - end) as u32,
+            total: (buf.len() - end) as u32,
+        });
     }
 
     spans
@@ -436,6 +463,33 @@ mod tests {
             p.get(0, "chaddr").unwrap(),
             FieldValue::Bytes(vec![9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         );
+    }
+
+    #[test]
+    fn an_ethernet_trailer_dissects_as_padding() {
+        // IEEE 802.3 clause 4 sets a 60-octet minimum frame.
+        let mut v = sample();
+        v.extend_from_slice(&[0u8; 6]);
+        let p = Packet::dissect(v, ProtoId::Ether);
+        let got: Vec<_> = p.layers().iter().map(|s| s.proto).collect();
+        assert_eq!(
+            got,
+            vec![
+                ProtoId::Ether,
+                ProtoId::Ipv4,
+                ProtoId::Tcp,
+                ProtoId::Padding
+            ]
+        );
+        assert_eq!(p.layers()[3].hlen, 6);
+    }
+
+    #[test]
+    fn a_length_claiming_more_than_was_captured_bounds_nothing() {
+        let mut v = sample();
+        v[16] = 0xff;
+        let p = Packet::dissect(v, ProtoId::Ether);
+        assert!(!p.has_layer(ProtoId::Padding));
     }
 
     #[test]

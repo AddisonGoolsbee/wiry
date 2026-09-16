@@ -59,6 +59,10 @@ pub struct ProtoDesc {
     /// Bytes appended when `next` is stacked. BOOTP's magic cookie starts the
     /// option area rather than DHCP itself: RFC 2131 §3.
     pub bind_next_bytes: Option<fn(ProtoId) -> &'static [u8]>,
+    /// Total bytes this header claims, its own length included, as read from a
+    /// length field of its own. `None` when the layer has no such field, in
+    /// which case its content runs to the end of what encloses it.
+    pub content_len: Option<fn(&[u8]) -> usize>,
 }
 
 pub const BUILTIN_COUNT: u16 = 14;
@@ -216,6 +220,7 @@ pub fn register(name: String, fields: Vec<FieldDesc>, build_len: usize) -> Resul
         set_hlen: None,
         bind_next: None,
         bind_next_bytes: None,
+        content_len: None,
     }));
     let _ = REGISTRY[slot].set(d);
     Ok(d.id)

@@ -67,3 +67,36 @@ def test_a_padding_layer_keeps_its_place_in_the_stack():
     pkt = IP() / Padding("abc")
     assert pkt.layers() == ["IP", "Padding"]
     assert pkt[Padding].load == b"abc"
+
+
+# IEEE 802.3 clause 4 sets a 60-octet minimum frame, so short datagrams reach
+# the wire with a trailer that belongs to no layer above Ethernet.
+def padded(datagram):
+    frame = raw(Ether() / datagram)
+    return frame + b"\x00" * (60 - len(frame))
+
+
+def test_an_ethernet_trailer_dissects_as_padding():
+    pkt = Ether(padded(IP() / UDP()))
+    assert pkt.layers() == ["Ether", "IP", "UDP", "Padding"]
+    assert pkt[Padding].load == b"\x00" * 18
+    assert pkt[IP].len == 28
+
+
+def test_a_trailer_stays_out_of_the_lengths_when_a_field_is_written():
+    pkt = Ether(padded(IP() / UDP()))
+    pkt[IP].ttl = 33
+    out = raw(pkt)
+    assert len(out) == 60
+    back = Ether(out)
+    assert back[IP].ttl == 33
+    assert back[IP].len == 28
+    assert back[UDP].len == 8
+
+
+def test_a_trailer_stays_out_of_the_transport_checksum():
+    payload = Raw("hello")
+    padded_pkt = Ether(padded(IP() / UDP() / payload))
+    bare = Ether(raw(Ether() / IP() / UDP() / payload))
+    padded_pkt[IP].ttl = bare[IP].ttl = 33
+    assert Ether(raw(padded_pkt))[UDP].chksum == Ether(raw(bare))[UDP].chksum
