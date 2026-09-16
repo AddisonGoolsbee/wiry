@@ -86,7 +86,7 @@ pub fn show(pkt: &Packet) -> String {
                     continue;
                 }
             }
-            out.push_str(&format!("  {:<10}= {}\n", f.name, render_value(&v)));
+            out.push_str(&format!("  {:<11}= {}\n", f.name, render_value(&v)));
         }
     }
     out
