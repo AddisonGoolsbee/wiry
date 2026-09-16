@@ -335,13 +335,23 @@ def _dhcp_payload(kind: Any, values: tuple) -> bytes:
     return int(v).to_bytes(kind, "big")
 
 
+def _opt_code(name: Any) -> int | None:
+    """An option the parser could not name comes back labelled with its code in
+    decimal, so that label has to encode as that code again."""
+    if isinstance(name, int):
+        return name
+    if isinstance(name, str) and name.isdigit() and 0 <= int(name) <= 255:
+        return int(name)
+    return None
+
+
 def _encode_dhcp_options(items: Any) -> bytes:
     """Encode a DHCP option list (RFC 2132) into wire bytes.
 
     Accepts what the parser gives back and what people type: "end",
     ("end", None), ("message-type", 1), ("message-type", "discover"),
     ("server_id", "10.0.0.1"), ("router", ["10.0.0.1", "10.0.0.2"]),
-    (224, b"raw").
+    (224, b"raw"), ("60", b"raw").
     """
     out = bytearray()
     for item in items:
@@ -351,10 +361,10 @@ def _encode_dhcp_options(items: Any) -> bytes:
             name, values = item[0], tuple(item[1:])
         if values == (None,):
             values = ()
-        if isinstance(name, int):
-            code, kind = name, "bytes"
-        elif name in _DHCP_OPT:
+        if name in _DHCP_OPT:
             code, kind = _DHCP_OPT[name]
+        elif (c := _opt_code(name)) is not None:
+            code, kind = c, "bytes"
         else:
             raise ValueError(f"unknown DHCP option {name!r}")
         if code in _DHCP_BARE:
@@ -386,10 +396,10 @@ def _encode_options(layer: str, items: Any) -> bytes:
     out = bytearray()
     for item in items:
         name, value = item if isinstance(item, tuple) else (item, None)
-        if isinstance(name, int):
-            code, width = name, None
-        elif name in table:
+        if name in table:
             code, width = table[name]
+        elif (c := _opt_code(name)) is not None:
+            code, width = c, None
         else:
             raise ValueError(f"unknown {layer} option {name!r}")
 

@@ -171,3 +171,28 @@ def test_bootp_option_field_is_the_magic_cookie():
     assert BOOTP in pkt
     assert pkt[BOOTP].options == bytes([99, 130, 83, 99])
     assert pkt[DHCP].raw_options() == bytes([255])
+
+
+# RFC 2132 §9.13: option 60 is the vendor class identifier, which the parser
+# has no name for, so it is labelled with its code in decimal.
+DHCP_WITH_VENDOR_CLASS = bytes(
+    [53, 1, 3, 60, 8]
+) + b"MSFT 5.0" + bytes([55, 3, 1, 3, 6, 255])
+
+
+def test_a_parsed_option_list_encodes_back_to_the_same_bytes():
+    pkt = UDP(_dhcp_frame(DHCP_WITH_VENDOR_CLASS))
+    assert ("60", b"MSFT 5.0") in pkt[DHCP].options
+    assert bytes(DHCP(options=pkt[DHCP].options)) == DHCP_WITH_VENDOR_CLASS
+
+
+def test_an_unnamed_tcp_option_round_trips():
+    parsed = IP(bytes(IP() / TCP(options=b"\x1f\x04\xaa\xbb")))[TCP].options
+    assert parsed == [("31", b"\xaa\xbb")]
+    assert b"\x1f\x04\xaa\xbb" in bytes(IP() / TCP(options=parsed))
+
+
+def test_an_unnamed_ipv4_option_round_trips():
+    parsed = IP(bytes(IP(options=b"\x52\x04\xaa\xbb") / TCP()))[IP].options
+    assert parsed == [("82", b"\xaa\xbb")]
+    assert b"\x52\x04\xaa\xbb" in bytes(IP(options=parsed) / TCP())
