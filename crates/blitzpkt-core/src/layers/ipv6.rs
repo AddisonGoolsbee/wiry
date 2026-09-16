@@ -65,6 +65,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     header_len,
     next,
     build_len: 40,
+    parse_options: None,
     bind_next: Some(bind_next),
 };
 
@@ -75,10 +76,12 @@ mod tests {
     use crate::packet::Packet;
     use crate::show::render_ipv6;
 
-    const SRC: [u8; 16] =
-        [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
-    const DST: [u8; 16] =
-        [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02];
+    const SRC: [u8; 16] = [
+        0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+    ];
+    const DST: [u8; 16] = [
+        0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02,
+    ];
 
     /// Hand-built from the RFC 8200 §3 field order:
     /// version 6, tc 0x12, fl 0x34567 packs as 0110 00010010 00110100010101100111.
@@ -172,12 +175,18 @@ mod tests {
         let ip = p.find_layer(ProtoId::Ipv6).unwrap();
         assert_eq!(p.get(ip, "version").unwrap(), FieldValue::Uint(6));
         assert_eq!(p.get(ip, "hlim").unwrap(), FieldValue::Uint(64));
-        assert_eq!(p.get(ip, "nh").unwrap(), FieldValue::Uint(NO_NEXT_HEADER as u64));
+        assert_eq!(
+            p.get(ip, "nh").unwrap(),
+            FieldValue::Uint(NO_NEXT_HEADER as u64)
+        );
         assert_eq!(p.raw_bytes().len(), 40);
 
         let p = Packet::build(&[ProtoId::Ipv6, ProtoId::Udp]);
         let ip = p.find_layer(ProtoId::Ipv6).unwrap();
-        assert_eq!(p.get(ip, "nh").unwrap(), FieldValue::Uint(ipproto::UDP as u64));
+        assert_eq!(
+            p.get(ip, "nh").unwrap(),
+            FieldValue::Uint(ipproto::UDP as u64)
+        );
     }
 
     #[test]

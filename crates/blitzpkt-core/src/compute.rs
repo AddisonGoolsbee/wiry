@@ -114,7 +114,9 @@ fn fix_udp(pkt: &mut Packet, i: usize) {
 
     pkt.buf[off + 6] = 0;
     pkt.buf[off + 7] = 0;
-    let Some(seed) = transport_seed(pkt, i, ipproto::UDP, tlen) else { return };
+    let Some(seed) = transport_seed(pkt, i, ipproto::UDP, tlen) else {
+        return;
+    };
     let sum = ck::sum16(&pkt.buf[off..end], seed);
     let mut c = ck::finish(sum);
     // RFC 768: an all-zero checksum means "not computed", so send all ones.
@@ -133,7 +135,9 @@ fn fix_tcp(pkt: &mut Packet, i: usize) {
     let tlen = end - off;
     pkt.buf[off + 16] = 0;
     pkt.buf[off + 17] = 0;
-    let Some(seed) = transport_seed(pkt, i, ipproto::TCP, tlen) else { return };
+    let Some(seed) = transport_seed(pkt, i, ipproto::TCP, tlen) else {
+        return;
+    };
     let sum = ck::sum16(&pkt.buf[off..end], seed);
     let c = ck::finish(sum);
     pkt.buf[off + 16] = (c >> 8) as u8;
@@ -163,7 +167,9 @@ fn fix_icmpv6(pkt: &mut Packet, i: usize) {
     pkt.buf[off + 3] = 0;
     // Unlike ICMPv4, ICMPv6 covers the IPv6 pseudo-header (RFC 4443 §2.3),
     // so without an enclosing IPv6 layer the checksum is left zeroed.
-    let Some(seed) = transport_seed(pkt, i, ipproto::IPV6_ICMP, tlen) else { return };
+    let Some(seed) = transport_seed(pkt, i, ipproto::IPV6_ICMP, tlen) else {
+        return;
+    };
     let c = ck::finish(ck::sum16(&pkt.buf[off..end], seed));
     pkt.buf[off + 2] = (c >> 8) as u8;
     pkt.buf[off + 3] = (c & 0xff) as u8;

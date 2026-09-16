@@ -58,6 +58,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     header_len,
     next,
     build_len: 4,
+    parse_options: None,
     bind_next: Some(bind_next),
 };
 
@@ -76,7 +77,7 @@ mod tests {
         v.extend_from_slice(&[0x81, 0x00]); // TPID
         v.extend_from_slice(&[0x60, 0x64]); // TCI
         v.extend_from_slice(&[0x08, 0x00]); // inner EtherType: IPv4
-        // Minimal IPv4 header, 20 bytes, ihl 5.
+                                            // Minimal IPv4 header, 20 bytes, ihl 5.
         v.extend_from_slice(&[0x45, 0x00, 0x00, 0x14]);
         v.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
         v.extend_from_slice(&[0x40, 0x06, 0x00, 0x00]);

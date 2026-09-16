@@ -41,30 +41,97 @@ pub struct FieldDesc {
 
 impl FieldDesc {
     pub const fn uint(name: &'static str, bit_off: u16, bit_len: u16, default: u64) -> Self {
-        Self { name, bit_off, bit_len, kind: FieldKind::Uint, default, flags: &[], computed: false }
+        Self {
+            name,
+            bit_off,
+            bit_len,
+            kind: FieldKind::Uint,
+            default,
+            flags: &[],
+            computed: false,
+        }
     }
     pub const fn computed_uint(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
-        Self { name, bit_off, bit_len, kind: FieldKind::Uint, default: 0, flags: &[], computed: true }
+        Self {
+            name,
+            bit_off,
+            bit_len,
+            kind: FieldKind::Uint,
+            default: 0,
+            flags: &[],
+            computed: true,
+        }
     }
     pub const fn ipv4(name: &'static str, bit_off: u16, default: u64) -> Self {
-        Self { name, bit_off, bit_len: 32, kind: FieldKind::Ipv4Addr, default, flags: &[], computed: false }
+        Self {
+            name,
+            bit_off,
+            bit_len: 32,
+            kind: FieldKind::Ipv4Addr,
+            default,
+            flags: &[],
+            computed: false,
+        }
     }
     pub const fn ipv6(name: &'static str, bit_off: u16) -> Self {
-        Self { name, bit_off, bit_len: 128, kind: FieldKind::Ipv6Addr, default: 0, flags: &[], computed: false }
+        Self {
+            name,
+            bit_off,
+            bit_len: 128,
+            kind: FieldKind::Ipv6Addr,
+            default: 0,
+            flags: &[],
+            computed: false,
+        }
     }
     pub const fn mac(name: &'static str, bit_off: u16) -> Self {
-        Self { name, bit_off, bit_len: 48, kind: FieldKind::MacAddr, default: 0, flags: &[], computed: false }
+        Self {
+            name,
+            bit_off,
+            bit_len: 48,
+            kind: FieldKind::MacAddr,
+            default: 0,
+            flags: &[],
+            computed: false,
+        }
     }
     pub const fn flags(
-        name: &'static str, bit_off: u16, bit_len: u16, names: &'static [&'static str],
+        name: &'static str,
+        bit_off: u16,
+        bit_len: u16,
+        names: &'static [&'static str],
     ) -> Self {
-        Self { name, bit_off, bit_len, kind: FieldKind::Flags, default: 0, flags: names, computed: false }
+        Self {
+            name,
+            bit_off,
+            bit_len,
+            kind: FieldKind::Flags,
+            default: 0,
+            flags: names,
+            computed: false,
+        }
     }
     pub const fn var_bytes(name: &'static str, bit_off: u16) -> Self {
-        Self { name, bit_off, bit_len: 0, kind: FieldKind::VarBytes, default: 0, flags: &[], computed: false }
+        Self {
+            name,
+            bit_off,
+            bit_len: 0,
+            kind: FieldKind::VarBytes,
+            default: 0,
+            flags: &[],
+            computed: false,
+        }
     }
     pub const fn bytes(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
-        Self { name, bit_off, bit_len, kind: FieldKind::Bytes, default: 0, flags: &[], computed: false }
+        Self {
+            name,
+            bit_off,
+            bit_len,
+            kind: FieldKind::Bytes,
+            default: 0,
+            flags: &[],
+            computed: false,
+        }
     }
 }
 
@@ -75,7 +142,10 @@ pub enum FieldValue {
     Ipv4([u8; 4]),
     Ipv6([u8; 16]),
     Mac([u8; 6]),
-    Flags { bits: u64, names: &'static [&'static str] },
+    Flags {
+        bits: u64,
+        names: &'static [&'static str],
+    },
     Bytes(Vec<u8>),
 }
 
@@ -86,7 +156,9 @@ impl FieldValue {
             FieldValue::Ipv4(b) => Some(u32::from_be_bytes(*b) as u64),
             FieldValue::Mac(b) => {
                 let mut v = 0u64;
-                for x in b { v = (v << 8) | *x as u64; }
+                for x in b {
+                    v = (v << 8) | *x as u64;
+                }
                 Some(v)
             }
             _ => None,
@@ -156,25 +228,32 @@ pub fn write_bits(buf: &mut [u8], bit_off: u16, bit_len: u16, val: u64) {
 pub fn decode(hdr: &[u8], f: &FieldDesc) -> FieldValue {
     match f.kind {
         FieldKind::Uint => FieldValue::Uint(read_bits(hdr, f.bit_off, f.bit_len)),
-        FieldKind::Flags => {
-            FieldValue::Flags { bits: read_bits(hdr, f.bit_off, f.bit_len), names: f.flags }
-        }
+        FieldKind::Flags => FieldValue::Flags {
+            bits: read_bits(hdr, f.bit_off, f.bit_len),
+            names: f.flags,
+        },
         FieldKind::Ipv4Addr => {
             let b = (f.bit_off / 8) as usize;
             let mut out = [0u8; 4];
-            if b + 4 <= hdr.len() { out.copy_from_slice(&hdr[b..b + 4]); }
+            if b + 4 <= hdr.len() {
+                out.copy_from_slice(&hdr[b..b + 4]);
+            }
             FieldValue::Ipv4(out)
         }
         FieldKind::Ipv6Addr => {
             let b = (f.bit_off / 8) as usize;
             let mut out = [0u8; 16];
-            if b + 16 <= hdr.len() { out.copy_from_slice(&hdr[b..b + 16]); }
+            if b + 16 <= hdr.len() {
+                out.copy_from_slice(&hdr[b..b + 16]);
+            }
             FieldValue::Ipv6(out)
         }
         FieldKind::MacAddr => {
             let b = (f.bit_off / 8) as usize;
             let mut out = [0u8; 6];
-            if b + 6 <= hdr.len() { out.copy_from_slice(&hdr[b..b + 6]); }
+            if b + 6 <= hdr.len() {
+                out.copy_from_slice(&hdr[b..b + 6]);
+            }
             FieldValue::Mac(out)
         }
         FieldKind::Bytes => {

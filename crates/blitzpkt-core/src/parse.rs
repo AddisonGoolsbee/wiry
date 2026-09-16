@@ -13,7 +13,11 @@ pub fn ipv4(s: &str) -> Option<[u8; 4]> {
         out[n] = part.parse::<u8>().ok()?;
         n += 1;
     }
-    if n == 4 { Some(out) } else { None }
+    if n == 4 {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 pub fn mac(s: &str) -> Option<[u8; 6]> {
@@ -26,7 +30,11 @@ pub fn mac(s: &str) -> Option<[u8; 6]> {
         out[n] = u8::from_str_radix(part, 16).ok()?;
         n += 1;
     }
-    if n == 6 { Some(out) } else { None }
+    if n == 6 {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// IPv6 textual form including `::` elision and trailing IPv4 form.
@@ -107,9 +115,7 @@ pub fn value_for(f: &FieldDesc, s: &str) -> Option<ValueBits> {
         FieldKind::MacAddr => mac(s).map(|b| ValueBits::Bytes(b.to_vec())),
         FieldKind::Flags => Some(ValueBits::Uint(flags(s, f.flags))),
         FieldKind::Uint => s.parse::<u64>().ok().map(ValueBits::Uint),
-        FieldKind::Bytes | FieldKind::VarBytes => {
-            Some(ValueBits::Bytes(s.as_bytes().to_vec()))
-        }
+        FieldKind::Bytes | FieldKind::VarBytes => Some(ValueBits::Bytes(s.as_bytes().to_vec())),
     }
 }
 
@@ -134,8 +140,14 @@ mod tests {
 
     #[test]
     fn mac_parses_both_separators() {
-        assert_eq!(mac("00:11:22:33:44:55"), Some([0, 0x11, 0x22, 0x33, 0x44, 0x55]));
-        assert_eq!(mac("00-11-22-33-44-55"), Some([0, 0x11, 0x22, 0x33, 0x44, 0x55]));
+        assert_eq!(
+            mac("00:11:22:33:44:55"),
+            Some([0, 0x11, 0x22, 0x33, 0x44, 0x55])
+        );
+        assert_eq!(
+            mac("00-11-22-33-44-55"),
+            Some([0, 0x11, 0x22, 0x33, 0x44, 0x55])
+        );
         assert_eq!(mac("00:11:22:33:44"), None);
         assert_eq!(mac("zz:11:22:33:44:55"), None);
     }

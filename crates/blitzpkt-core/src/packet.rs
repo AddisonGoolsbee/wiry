@@ -35,7 +35,11 @@ impl Packet {
     /// Dissect raw bytes starting from a known link-layer protocol.
     pub fn dissect(buf: Vec<u8>, link: ProtoId) -> Self {
         let spans = dissect_spans(&buf, link);
-        Self { buf, spans, dirty: 0 }
+        Self {
+            buf,
+            spans,
+            dirty: 0,
+        }
     }
 
     /// Build a packet from a stack of protocols using each field's default value.
@@ -68,7 +72,11 @@ impl Packet {
                 total: d.build_len as u32,
             });
         }
-        let mut pkt = Self { buf, spans, dirty: u32::MAX };
+        let mut pkt = Self {
+            buf,
+            spans,
+            dirty: u32::MAX,
+        };
         pkt.refresh_totals();
         pkt
     }
@@ -140,8 +148,12 @@ impl Packet {
     /// Write a field in place. Widths are preserved, so this never reallocates.
     /// Returns false when the field is unknown for this layer.
     pub fn set_uint(&mut self, layer: usize, name: &str, val: u64) -> bool {
-        let Some(s) = self.spans.get(layer).copied() else { return false };
-        let Some(f) = crate::proto::field_of(s.proto, name) else { return false };
+        let Some(s) = self.spans.get(layer).copied() else {
+            return false;
+        };
+        let Some(f) = crate::proto::field_of(s.proto, name) else {
+            return false;
+        };
         let a = s.off as usize;
         let b = (a + s.hlen as usize).min(self.buf.len());
         field::write_bits(&mut self.buf[a..b], f.bit_off, f.bit_len, val);
@@ -150,8 +162,12 @@ impl Packet {
     }
 
     pub fn set_bytes(&mut self, layer: usize, name: &str, val: &[u8]) -> bool {
-        let Some(s) = self.spans.get(layer).copied() else { return false };
-        let Some(f) = crate::proto::field_of(s.proto, name) else { return false };
+        let Some(s) = self.spans.get(layer).copied() else {
+            return false;
+        };
+        let Some(f) = crate::proto::field_of(s.proto, name) else {
+            return false;
+        };
         let a = s.off as usize + (f.bit_off / 8) as usize;
         let n = val.len().min(self.buf.len().saturating_sub(a));
         self.buf[a..a + n].copy_from_slice(&val[..n]);
@@ -199,6 +215,17 @@ impl Packet {
     }
 
     /// Serialise without recomputation, for callers that know nothing changed.
+    /// Parse a layer's variable-length option region, when it has one.
+    /// Returns `None` for protocols with no options, which is different from
+    /// `Some(vec![])` meaning "has an option region, and it is empty".
+    pub fn options(&self, layer: usize) -> Option<Vec<crate::options::Item>> {
+        let s = self.spans.get(layer)?;
+        let parse = desc(s.proto).parse_options?;
+        let a = s.off as usize;
+        let b = (a + s.hlen as usize).min(self.buf.len());
+        Some(parse(&self.buf[a..b]))
+    }
+
     pub fn raw_bytes(&self) -> &[u8] {
         &self.buf
     }
@@ -265,13 +292,13 @@ mod tests {
         v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]); // dst mac
         v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]); // src mac
         v.extend_from_slice(&[0x08, 0x00]); // ethertype ipv4
-        // IPv4, ihl=5, total len 40
+                                            // IPv4, ihl=5, total len 40
         v.extend_from_slice(&[0x45, 0x00, 0x00, 0x28]);
         v.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
         v.extend_from_slice(&[0x40, 0x06, 0x00, 0x00]); // ttl 64, proto tcp
         v.extend_from_slice(&[10, 0, 0, 1]); // src
         v.extend_from_slice(&[10, 0, 0, 2]); // dst
-        // TCP, data offset 5
+                                             // TCP, data offset 5
         v.extend_from_slice(&[0x1f, 0x90, 0x00, 0x50]); // sport 8080 dport 80
         v.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 0]);
         v.extend_from_slice(&[0x50, 0x02, 0x20, 0x00]);

@@ -2,6 +2,7 @@
 //! conventional single-letter abbreviations used across packet tooling.
 
 use crate::field::FieldDesc;
+use crate::options::{be, walk_tlv, Item};
 use crate::proto::{ports, Next, ProtoDesc, ProtoId};
 
 /// Control bits, least significant first: FIN, SYN, RST, PSH, ACK, URG, ECE, CWR.
@@ -53,6 +54,67 @@ fn next(hdr: &[u8]) -> Next {
     Next::Raw
 }
 
+/// Option kinds from the IANA "TCP Option Kind Numbers" registry.
+pub mod optkind {
+    pub const EOL: u8 = 0;
+    pub const NOP: u8 = 1;
+    pub const MSS: u8 = 2;
+    pub const WSCALE: u8 = 3;
+    pub const SACKOK: u8 = 4;
+    pub const SACK: u8 = 5;
+    pub const TIMESTAMP: u8 = 8;
+    pub const UTO: u8 = 28;
+    pub const AO: u8 = 29;
+    pub const TFO: u8 = 34;
+}
+
+/// Kinds 0 and 1 are a single octet with no length field (RFC 9293 §3.1).
+const SINGLE_BYTE: &[u8] = &[optkind::EOL, optkind::NOP];
+
+/// An option whose registry length is fixed: decode as an integer at that width,
+/// and fall back to the raw payload when the capture disagrees with the registry.
+fn fixed_uint(name: &'static str, kind: u8, payload: &[u8], width: usize) -> Item {
+    if payload.len() == width {
+        Item::uint(name, kind as u32, be(payload))
+    } else {
+        Item::bytes(name, kind as u32, payload)
+    }
+}
+
+fn decode(kind: u8, payload: &[u8]) -> Item {
+    match kind {
+        // Unreachable while EOL is the walk's end code; kept so the decoder is
+        // total over the kinds it names.
+        optkind::EOL => Item::flag("EOL", optkind::EOL as u32),
+        optkind::NOP => Item::flag("NOP", optkind::NOP as u32),
+        optkind::MSS => fixed_uint("MSS", kind, payload, 2),
+        optkind::WSCALE => fixed_uint("WScale", kind, payload, 1),
+        optkind::SACKOK => Item::flag("SAckOK", optkind::SACKOK as u32),
+        // A run of 32-bit edge pairs (RFC 2018 §3); left unstructured.
+        optkind::SACK => Item::bytes("SAck", kind as u32, payload),
+        optkind::TIMESTAMP if payload.len() == 8 => Item::pair(
+            "Timestamp",
+            kind as u32,
+            be(&payload[..4]),
+            be(&payload[4..]),
+        ),
+        optkind::TIMESTAMP => Item::bytes("Timestamp", kind as u32, payload),
+        optkind::UTO => fixed_uint("UTO", kind, payload, 2),
+        optkind::AO => Item::bytes("AO", kind as u32, payload),
+        optkind::TFO => Item::bytes("TFO", kind as u32, payload),
+        _ => Item::unknown(kind as u32, payload),
+    }
+}
+
+/// Options occupy the header past the fixed 20 bytes, up to Data Offset * 4.
+fn parse_options(hdr: &[u8]) -> Vec<Item> {
+    let end = header_len(hdr).min(hdr.len());
+    if end <= 20 {
+        return Vec::new();
+    }
+    walk_tlv(&hdr[20..end], SINGLE_BYTE, Some(optkind::EOL), decode)
+}
+
 pub static DESC: ProtoDesc = ProtoDesc {
     id: ProtoId::Tcp,
     name: "TCP",
@@ -61,5 +123,197 @@ pub static DESC: ProtoDesc = ProtoDesc {
     header_len,
     next,
     build_len: 20,
+    parse_options: Some(parse_options),
     bind_next: None,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::field::FieldValue;
+    use crate::options::ItemValue;
+    use crate::packet::Packet;
+
+    /// The option block a typical SYN carries: MSS, SAckOK, Timestamp, NOP,
+    /// Window Scale. Hand-built from RFC 9293 §3.1, RFC 2018 §2, RFC 7323 §3-4.
+    const SYN_OPTS: &[u8] = &[
+        0x02, 0x04, 0x05, 0xb4, // MSS 1460
+        0x04, 0x02, // SAckOK
+        0x08, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, // TS 1 / 2
+        0x01, // NOP
+        0x03, 0x03, 0x07, // WScale 7
+    ];
+
+    /// A TCP header carrying `opts`, with Data Offset set to match.
+    fn tcp_hdr(opts: &[u8]) -> Vec<u8> {
+        assert_eq!(opts.len() % 4, 0, "option block must fill whole words");
+        let dataofs = ((20 + opts.len()) / 4) as u8;
+        let mut v = vec![0x1f, 0x90, 0x00, 0x50]; // sport 8080, dport 80
+        v.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]); // seq
+        v.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // ack
+        v.push(dataofs << 4);
+        v.push(0x02); // SYN
+        v.extend_from_slice(&[0x20, 0x00]); // window
+        v.extend_from_slice(&[0x00, 0x00]); // chksum
+        v.extend_from_slice(&[0x00, 0x00]); // urgptr
+        v.extend_from_slice(opts);
+        v
+    }
+
+    /// Ether / IPv4 / TCP, with the TCP header carrying `opts`.
+    fn frame(opts: &[u8]) -> Vec<u8> {
+        let tcp = tcp_hdr(opts);
+        let mut v = Vec::new();
+        v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]);
+        v.extend_from_slice(&[0x08, 0x00]);
+        let total = (20 + tcp.len()) as u16;
+        v.extend_from_slice(&[0x45, 0x00]);
+        v.extend_from_slice(&total.to_be_bytes());
+        v.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
+        v.extend_from_slice(&[0x40, 0x06, 0x00, 0x00]);
+        v.extend_from_slice(&[10, 0, 0, 1]);
+        v.extend_from_slice(&[10, 0, 0, 2]);
+        v.extend_from_slice(&tcp);
+        v
+    }
+
+    #[test]
+    fn decodes_a_syn_option_block_in_order() {
+        let items = parse_options(&tcp_hdr(SYN_OPTS));
+        let got: Vec<_> = items.iter().map(|i| (i.name.as_ref(), i.code)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("MSS", 2),
+                ("SAckOK", 4),
+                ("Timestamp", 8),
+                ("NOP", 1),
+                ("WScale", 3),
+            ]
+        );
+        assert_eq!(items[0].value, ItemValue::Uint(1460));
+        assert_eq!(items[1].value, ItemValue::Flag);
+        assert_eq!(items[2].value, ItemValue::Pair(1, 2));
+        assert_eq!(items[3].value, ItemValue::Flag);
+        assert_eq!(items[4].value, ItemValue::Uint(7));
+    }
+
+    #[test]
+    fn dissects_options_end_to_end() {
+        let p = Packet::dissect(frame(SYN_OPTS), ProtoId::Ether);
+        let t = p.find_layer(ProtoId::Tcp).expect("tcp layer");
+        // Data Offset of 10 words means a 40-byte header, options included.
+        assert_eq!(p.get(t, "dataofs").unwrap(), FieldValue::Uint(10));
+        assert_eq!(p.header(t).len(), 40);
+        assert_eq!(p.layers()[t].hlen, 40);
+        assert!(p.payload(t).is_empty());
+        let items = p.options(t).expect("tcp has an option region");
+        assert_eq!(items.len(), 5);
+        assert_eq!(items[0].value, ItemValue::Uint(1460));
+        assert_eq!(items[4].value, ItemValue::Uint(7));
+        // The option bytes also remain readable as the flat `options` field.
+        assert_eq!(
+            p.get(t, "options").unwrap(),
+            FieldValue::Bytes(SYN_OPTS.to_vec())
+        );
+    }
+
+    #[test]
+    fn truncated_option_region_stops_cleanly() {
+        let full = frame(SYN_OPTS);
+        for cut in 0..full.len() {
+            let p = Packet::dissect(full[..cut].to_vec(), ProtoId::Ether);
+            if let Some(t) = p.find_layer(ProtoId::Tcp) {
+                let items = p.options(t).expect("tcp has an option region");
+                // Never invents options, and never exceeds the full decode.
+                assert!(items.len() <= 5, "cut {cut} produced {items:?}");
+            }
+        }
+        // Directly, on a header whose Data Offset over-claims the bytes present.
+        let mut hdr = tcp_hdr(&[0x02, 0x04, 0x05, 0xb4]);
+        hdr.truncate(22);
+        assert!(parse_options(&hdr).is_empty());
+        // And on an option whose length octet runs past the option region.
+        let bad = tcp_hdr(&[0x02, 0x08, 0x05, 0xb4]);
+        assert!(parse_options(&bad).is_empty());
+    }
+
+    #[test]
+    fn unknown_kind_does_not_abort_the_walk() {
+        // Kind 253 is an RFC 3692 experiment code, deliberately unnamed here.
+        let opts = &[
+            0xfd, 0x04, 0xde, 0xad, // unknown, 2 payload bytes
+            0x03, 0x03, 0x07, // WScale 7
+            0x01, // NOP pad to a word boundary
+        ];
+        let items = parse_options(&tcp_hdr(opts));
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].code, 253);
+        assert_eq!(items[0].name.as_ref(), "253");
+        assert_eq!(items[0].value, ItemValue::Bytes(vec![0xde, 0xad]));
+        assert_eq!(items[1].value, ItemValue::Uint(7));
+        assert_eq!(items[2].value, ItemValue::Flag);
+    }
+
+    #[test]
+    fn no_options_is_an_empty_list_not_none() {
+        let p = Packet::dissect(frame(&[]), ProtoId::Ether);
+        let t = p.find_layer(ProtoId::Tcp).unwrap();
+        assert_eq!(p.header(t).len(), 20);
+        assert_eq!(p.options(t), Some(Vec::new()));
+        // A header built from defaults has Data Offset 5 and so no option region.
+        let built = Packet::build(&[ProtoId::Ipv4, ProtoId::Tcp]);
+        assert_eq!(built.options(1), Some(Vec::new()));
+    }
+
+    #[test]
+    fn eol_ends_the_walk_and_short_dataofs_yields_nothing() {
+        // EOL terminates; the padding after it is not decoded (RFC 9293 §3.1).
+        let opts = &[0x03, 0x03, 0x07, 0x00, 0x02, 0x04, 0x05, 0xb4];
+        let items = parse_options(&tcp_hdr(opts));
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name.as_ref(), "WScale");
+
+        // Data Offset below the legal minimum of 5 leaves no option region.
+        let mut hdr = tcp_hdr(SYN_OPTS);
+        hdr[12] = 0x40;
+        assert!(parse_options(&hdr).is_empty());
+        hdr[12] = 0x00;
+        assert!(parse_options(&hdr).is_empty());
+    }
+
+    #[test]
+    fn decodes_the_remaining_named_kinds() {
+        let opts = &[
+            0x05, 0x0a, 0, 0, 0, 1, 0, 0, 0, 2, // SAck, one edge pair
+            0x1c, 0x04, 0x80, 0x0a, // UTO
+            0x1d, 0x04, 0xaa, 0xbb, // AO
+            0x22, 0x04, 0xc0, 0xff, // TFO
+            0x00, 0x00, // EOL, then padding to a word boundary
+        ];
+        let items = parse_options(&tcp_hdr(opts));
+        assert_eq!(items.len(), 4);
+        assert_eq!(items[0].name.as_ref(), "SAck");
+        assert_eq!(
+            items[0].value,
+            ItemValue::Bytes(vec![0, 0, 0, 1, 0, 0, 0, 2])
+        );
+        assert_eq!(items[1], Item::uint("UTO", 28, 0x800a));
+        assert_eq!(items[2], Item::bytes("AO", 29, &[0xaa, 0xbb]));
+        assert_eq!(items[3], Item::bytes("TFO", 34, &[0xc0, 0xff]));
+    }
+
+    #[test]
+    fn wrong_length_keeps_the_name_and_the_bytes() {
+        // A 4-byte MSS is malformed; the option is still reported, unparsed.
+        let opts = &[0x02, 0x06, 0x05, 0xb4, 0x00, 0x00, 0x01, 0x01];
+        let items = parse_options(&tcp_hdr(opts));
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].name.as_ref(), "MSS");
+        assert_eq!(
+            items[0].value,
+            ItemValue::Bytes(vec![0x05, 0xb4, 0x00, 0x00])
+        );
+    }
+}

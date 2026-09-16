@@ -85,9 +85,18 @@ pub fn parse_header(buf: &[u8]) -> Result<FileHeader, PcapError> {
     };
     let rd = |o: usize| {
         let v = u32::from_le_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]);
-        if swapped { v.swap_bytes() } else { v }
+        if swapped {
+            v.swap_bytes()
+        } else {
+            v
+        }
     };
-    Ok(FileHeader { swapped, nanos, snaplen: rd(16), linktype: rd(20) })
+    Ok(FileHeader {
+        swapped,
+        nanos,
+        snaplen: rd(16),
+        linktype: rd(20),
+    })
 }
 
 /// Zero-copy iterator over the records in a pcap buffer.
@@ -100,15 +109,26 @@ pub struct Reader<'a> {
 impl<'a> Reader<'a> {
     pub fn new(buf: &'a [u8]) -> Result<Self, PcapError> {
         let header = parse_header(buf)?;
-        Ok(Self { buf, off: 24, header })
+        Ok(Self {
+            buf,
+            off: 24,
+            header,
+        })
     }
 
     #[inline]
     fn rd32(&self, o: usize) -> u32 {
         let v = u32::from_le_bytes([
-            self.buf[o], self.buf[o + 1], self.buf[o + 2], self.buf[o + 3],
+            self.buf[o],
+            self.buf[o + 1],
+            self.buf[o + 2],
+            self.buf[o + 3],
         ]);
-        if self.header.swapped { v.swap_bytes() } else { v }
+        if self.header.swapped {
+            v.swap_bytes()
+        } else {
+            v
+        }
     }
 }
 
@@ -130,7 +150,13 @@ impl<'a> Iterator for Reader<'a> {
             return None;
         }
         self.off = start + n;
-        Some(Record { ts_sec, ts_frac, caplen, origlen, data: &self.buf[start..start + n] })
+        Some(Record {
+            ts_sec,
+            ts_frac,
+            caplen,
+            origlen,
+            data: &self.buf[start..start + n],
+        })
     }
 }
 

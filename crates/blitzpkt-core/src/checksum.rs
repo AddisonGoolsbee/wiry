@@ -86,8 +86,8 @@ mod tests {
     fn ipv4_header_checksum_is_self_verifying() {
         // A header whose checksum field is already correct sums to zero.
         let hdr: [u8; 20] = [
-            0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00,
-            10, 0, 0, 1, 10, 0, 0, 2,
+            0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 10, 0, 0, 1,
+            10, 0, 0, 2,
         ];
         let ck = ones_complement(&hdr);
         let mut fixed = hdr;

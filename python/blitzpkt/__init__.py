@@ -46,12 +46,23 @@ class _LayerView:
         if field.startswith("_"):
             raise AttributeError(field)
         rust = self._pkt._materialize()
+        # `options` is the parsed (name, value) list where the protocol has a
+        # real option region. Falls through to the raw bytes otherwise, so
+        # nothing breaks for layers whose parser is not written yet.
+        if field == "options":
+            parsed = rust.options(self._idx)
+            if parsed is not None:
+                return parsed
         try:
             return rust.get_field(self._idx, field)
         except KeyError as exc:
             raise AttributeError(
                 f"{self._name} has no field {field!r}"
             ) from exc
+
+    def raw_options(self) -> Any:
+        """The unparsed option bytes, for layers whose options are parsed."""
+        return self._pkt._materialize().get_field(self._idx, "options")
 
     def __setattr__(self, field: str, value: Any) -> None:
         if field.startswith("_"):

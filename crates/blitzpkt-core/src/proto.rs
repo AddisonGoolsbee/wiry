@@ -39,6 +39,10 @@ pub enum Next {
     End,
 }
 
+/// Parses a header's variable-length option region into a uniform item list.
+/// Given the full layer header bytes.
+pub type OptionParser = fn(&[u8]) -> Vec<crate::options::Item>;
+
 /// Static description of one protocol header.
 pub struct ProtoDesc {
     pub id: ProtoId,
@@ -52,6 +56,9 @@ pub struct ProtoDesc {
     pub next: fn(&[u8]) -> Next,
     /// Fixed header length used when constructing from scratch.
     pub build_len: usize,
+    /// Parse this header's variable-length option region, when it has one.
+    /// Given the full layer header bytes.
+    pub parse_options: Option<OptionParser>,
     /// Set this header's demultiplexing field so it points at `next`.
     /// Mirrors the automatic binding that happens when layers are stacked.
     pub bind_next: Option<fn(&mut [u8], ProtoId)>,
@@ -88,9 +95,20 @@ pub fn desc(id: ProtoId) -> &'static ProtoDesc {
 /// Resolve a layer name as written in Python (`"TCP"`) to its identifier.
 pub fn by_name(name: &str) -> Option<ProtoId> {
     const ALL: &[ProtoId] = &[
-        ProtoId::Raw, ProtoId::Padding, ProtoId::Ether, ProtoId::Dot1Q, ProtoId::Arp,
-        ProtoId::Ipv4, ProtoId::Ipv6, ProtoId::Tcp, ProtoId::Udp, ProtoId::Icmp,
-        ProtoId::Icmpv6, ProtoId::Dns, ProtoId::Bootp, ProtoId::Dhcp,
+        ProtoId::Raw,
+        ProtoId::Padding,
+        ProtoId::Ether,
+        ProtoId::Dot1Q,
+        ProtoId::Arp,
+        ProtoId::Ipv4,
+        ProtoId::Ipv6,
+        ProtoId::Tcp,
+        ProtoId::Udp,
+        ProtoId::Icmp,
+        ProtoId::Icmpv6,
+        ProtoId::Dns,
+        ProtoId::Bootp,
+        ProtoId::Dhcp,
     ];
     ALL.iter().copied().find(|p| desc(*p).name == name)
 }
@@ -100,7 +118,7 @@ pub fn field_of(id: ProtoId, name: &str) -> Option<&'static FieldDesc> {
     desc(id).fields.iter().find(|f| f.name == name)
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::type_complexity)]
 const _UNUSED: fn(usize) -> fn(&[u8]) -> usize = fixed_len;
 
 // ---- Well-known numbers, from IANA registries (not from any GPL source) ----

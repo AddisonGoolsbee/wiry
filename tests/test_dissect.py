@@ -232,13 +232,19 @@ def test_raw_layer_from_bytes_keeps_the_whole_buffer():
     assert pkt[Raw].load == GARBAGE
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="facade bug: Packet._spec() drops field values when the left operand "
-           "was dissected, so '/' rebuilds those layers from defaults",
-)
 def test_stacking_onto_a_dissected_packet_keeps_its_fields():
+    # Regression: stacking used to rebuild the left operand from a field spec,
+    # which silently reset every header to its defaults, because variable-length
+    # content cannot survive the build path. It now copies the real packet and
+    # appends to its bytes.
     dissected = Ether(ETHER_IP_TCP)
     combined = dissected / Raw(load=b"zz")
     assert combined[IP].src == "10.0.0.1"
     assert combined[TCP].dport == 80
+    out = bytes(combined)
+    assert out.endswith(b"zz")
+    assert len(out) == len(ETHER_IP_TCP) + 2
+    # The headers are preserved apart from the fields that MUST change when a
+    # payload is appended: the IPv4 total length and the two checksums.
+    assert combined[IP].len == len(ETHER_IP_TCP) - 14 + 2
+    assert out[:16] == ETHER_IP_TCP[:16]

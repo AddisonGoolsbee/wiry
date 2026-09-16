@@ -44,6 +44,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     header_len,
     next,
     build_len: 28,
+    parse_options: None,
     bind_next: None,
 };
 
@@ -113,8 +114,14 @@ mod tests {
             q.get(1, "hwsrc").unwrap(),
             FieldValue::Mac([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff])
         );
-        assert_eq!(q.get(1, "psrc").unwrap(), FieldValue::Ipv4([192, 168, 1, 1]));
-        assert_eq!(q.get(1, "pdst").unwrap(), FieldValue::Ipv4([192, 168, 1, 2]));
+        assert_eq!(
+            q.get(1, "psrc").unwrap(),
+            FieldValue::Ipv4([192, 168, 1, 1])
+        );
+        assert_eq!(
+            q.get(1, "pdst").unwrap(),
+            FieldValue::Ipv4([192, 168, 1, 2])
+        );
     }
 
     #[test]

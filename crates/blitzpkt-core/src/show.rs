@@ -29,7 +29,9 @@ pub fn render_flags(bits: u64, names: &[&str]) -> String {
 
 /// RFC 5952 textual form: lowercase hex, longest run of zero groups elided once.
 pub fn render_ipv6(b: &[u8; 16]) -> String {
-    let g: Vec<u16> = (0..8).map(|i| u16::from_be_bytes([b[i * 2], b[i * 2 + 1]])).collect();
+    let g: Vec<u16> = (0..8)
+        .map(|i| u16::from_be_bytes([b[i * 2], b[i * 2 + 1]]))
+        .collect();
     let (mut best_start, mut best_len) = (usize::MAX, 0usize);
     let (mut cur_start, mut cur_len) = (usize::MAX, 0usize);
     for (i, &x) in g.iter().enumerate() {
@@ -48,11 +50,17 @@ pub fn render_ipv6(b: &[u8; 16]) -> String {
     }
     // A single zero group is written out rather than elided (RFC 5952 §4.2.2).
     if best_len < 2 {
-        return g.iter().map(|x| format!("{x:x}")).collect::<Vec<_>>().join(":");
+        return g
+            .iter()
+            .map(|x| format!("{x:x}"))
+            .collect::<Vec<_>>()
+            .join(":");
     }
     let head: Vec<String> = g[..best_start].iter().map(|x| format!("{x:x}")).collect();
-    let tail: Vec<String> =
-        g[best_start + best_len..].iter().map(|x| format!("{x:x}")).collect();
+    let tail: Vec<String> = g[best_start + best_len..]
+        .iter()
+        .map(|x| format!("{x:x}"))
+        .collect();
     format!("{}::{}", head.join(":"), tail.join(":"))
 }
 

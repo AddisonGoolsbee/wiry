@@ -43,6 +43,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     header_len,
     next,
     build_len: 8,
+    parse_options: None,
     bind_next: None,
 };
 
@@ -107,7 +108,10 @@ mod tests {
         let bytes = vec![0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         let p = Packet::dissect(bytes, ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
-        assert_eq!(p.get(i, "type").unwrap(), FieldValue::Uint(types::DEST_UNREACH as u64));
+        assert_eq!(
+            p.get(i, "type").unwrap(),
+            FieldValue::Uint(types::DEST_UNREACH as u64)
+        );
         assert_eq!(p.get(i, "code").unwrap(), FieldValue::Uint(3));
         assert_eq!(p.get(i, "id").unwrap(), FieldValue::Uint(0));
     }

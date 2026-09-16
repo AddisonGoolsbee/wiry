@@ -32,6 +32,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     header_len,
     next,
     build_len: 4,
+    parse_options: None,
     bind_next: None,
 };
 
@@ -42,10 +43,12 @@ mod tests {
     use crate::field::FieldValue;
     use crate::packet::Packet;
 
-    const SRC: [u8; 16] =
-        [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
-    const DST: [u8; 16] =
-        [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02];
+    const SRC: [u8; 16] = [
+        0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+    ];
+    const DST: [u8; 16] = [
+        0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02,
+    ];
 
     /// Echo Request with identifier 0x1234 and sequence 1. The checksum 0x1213
     /// is the one's complement of the pseudo-header sum (0x5bb7) plus the

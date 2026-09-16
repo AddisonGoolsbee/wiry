@@ -9,6 +9,7 @@
 //! introduces them is specified in RFC 2131 section 3 and RFC 1497.
 
 use crate::field::FieldDesc;
+use crate::options::{be, Item, ItemValue};
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
 /// Fixed BOOTP header size in bytes: `file` ends at 108 + 128 (RFC 951 §3).
@@ -19,8 +20,9 @@ pub const MAGIC_COOKIE: [u8; 4] = [99, 130, 83, 99];
 
 /// RFC 2131 figure 2, least significant bit first. Only the most significant
 /// bit of the 16-bit field is assigned (BROADCAST); the rest are MBZ.
-pub static FLAG_NAMES: &[&str] =
-    &["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "B"];
+pub static FLAG_NAMES: &[&str] = &[
+    "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "B",
+];
 
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("op", 0, 8, 1),
@@ -59,6 +61,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     header_len,
     next,
     build_len: BOOTP_LEN,
+    parse_options: None,
     bind_next: None,
 };
 
@@ -67,14 +70,117 @@ pub static DHCP_FIELDS: &[FieldDesc] = &[
     FieldDesc::var_bytes("options", 32),
 ];
 
-/// The options blob runs to the end of the packet; it is not parsed into a TLV
-/// list (see DEVIATIONS.md E7).
+/// The options blob runs to the end of the packet.
 fn dhcp_header_len(hdr: &[u8]) -> usize {
     hdr.len()
 }
 
 fn dhcp_next(_: &[u8]) -> Next {
     Next::End
+}
+
+/// DHCP message types, RFC 2132 §9.6 (option 53).
+pub mod msgtype {
+    pub const DISCOVER: u64 = 1;
+    pub const OFFER: u64 = 2;
+    pub const REQUEST: u64 = 3;
+    pub const DECLINE: u64 = 4;
+    pub const ACK: u64 = 5;
+    pub const NAK: u64 = 6;
+    pub const RELEASE: u64 = 7;
+    pub const INFORM: u64 = 8;
+}
+
+/// RFC 2132 §3.1: Pad carries no length octet; §3.2: End terminates the region.
+const PAD: u8 = 0;
+const END: u8 = 255;
+
+/// RFC 2132 gives address options a length that is a multiple of four, so a
+/// trailing partial address is malformed and dropped.
+fn addrs(p: &[u8]) -> Vec<[u8; 4]> {
+    p.chunks_exact(4)
+        .map(|c| [c[0], c[1], c[2], c[3]])
+        .collect()
+}
+
+fn ipv4(name: &'static str, code: u32, p: &[u8]) -> Item {
+    Item {
+        name: std::borrow::Cow::Borrowed(name),
+        code,
+        value: ItemValue::Ipv4List(addrs(p)),
+    }
+}
+
+fn text(name: &'static str, code: u32, p: &[u8]) -> Item {
+    Item {
+        name: std::borrow::Cow::Borrowed(name),
+        code,
+        value: ItemValue::Text(String::from_utf8_lossy(p).into_owned()),
+    }
+}
+
+fn decode(code: u8, p: &[u8]) -> Item {
+    match code {
+        PAD => Item::flag("pad", 0),
+        END => Item::flag("end", 255),
+        // Single-address options use Ipv4List with one entry, so every option
+        // carrying addresses has the same shape.
+        1 => ipv4("subnet_mask", 1, p),
+        3 => ipv4("router", 3, p),
+        6 => ipv4("name_server", 6, p),
+        12 => text("hostname", 12, p),
+        15 => text("domain", 15, p),
+        28 => ipv4("broadcast_address", 28, p),
+        50 => ipv4("requested_addr", 50, p),
+        51 => Item::uint("lease_time", 51, be(p)),
+        53 => Item::uint("message-type", 53, be(p)),
+        54 => ipv4("server_id", 54, p),
+        55 => Item::bytes("param_req_list", 55, p),
+        57 => Item::uint("max_dhcp_size", 57, be(p)),
+        58 => Item::uint("renewal_time", 58, be(p)),
+        59 => Item::uint("rebinding_time", 59, be(p)),
+        61 => Item::bytes("client_id", 61, p),
+        82 => Item::bytes("relay_agent_information", 82, p),
+        _ => Item::unknown(code as u32, p),
+    }
+}
+
+/// Parse the option region of a DHCP layer (RFC 2132); `hdr` starts at the
+/// magic cookie, so the options begin at offset 4.
+///
+/// Not `options::walk_tlv`: there the length octet counts the code and length
+/// octets themselves (TCP/IPv4), whereas RFC 2132 §2 counts only the option data.
+fn parse_options(hdr: &[u8]) -> Vec<Item> {
+    if hdr.len() <= 4 {
+        return Vec::new();
+    }
+    let data = &hdr[4..];
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    // A zero-length option is legal here, so bound the walk by option count.
+    let mut guard = 0;
+    while i < data.len() && guard < 512 {
+        guard += 1;
+        let code = data[i];
+        if code == PAD || code == END {
+            out.push(decode(code, &[]));
+            i += 1;
+            if code == END {
+                break;
+            }
+            continue;
+        }
+        if i + 1 >= data.len() {
+            break;
+        }
+        let len = data[i + 1] as usize;
+        if i + 2 + len > data.len() {
+            break;
+        }
+        out.push(decode(code, &data[i + 2..i + 2 + len]));
+        i += 2 + len;
+    }
+    out
 }
 
 pub static DHCP_DESC: ProtoDesc = ProtoDesc {
@@ -85,6 +191,7 @@ pub static DHCP_DESC: ProtoDesc = ProtoDesc {
     header_len: dhcp_header_len,
     next: dhcp_next,
     build_len: 4,
+    parse_options: Some(parse_options),
     bind_next: None,
 };
 
@@ -145,8 +252,14 @@ mod tests {
         assert_eq!(p.get(b, "hlen").unwrap(), FieldValue::Uint(6));
         assert_eq!(p.get(b, "xid").unwrap(), FieldValue::Uint(0xdead_beef));
         assert_eq!(p.get(b, "secs").unwrap(), FieldValue::Uint(4));
-        assert_eq!(p.get(b, "yiaddr").unwrap(), FieldValue::Ipv4([192, 168, 1, 50]));
-        assert_eq!(p.get(b, "siaddr").unwrap(), FieldValue::Ipv4([192, 168, 1, 1]));
+        assert_eq!(
+            p.get(b, "yiaddr").unwrap(),
+            FieldValue::Ipv4([192, 168, 1, 50])
+        );
+        assert_eq!(
+            p.get(b, "siaddr").unwrap(),
+            FieldValue::Ipv4([192, 168, 1, 1])
+        );
         assert_eq!(p.get(b, "ciaddr").unwrap(), FieldValue::Ipv4([0, 0, 0, 0]));
 
         let mut want = vec![0u8; 16];
@@ -222,6 +335,195 @@ mod tests {
             bit += f.bit_len as u32;
         }
         assert_eq!(bit, 236 * 8);
+    }
+
+    fn names(items: &[Item]) -> Vec<&str> {
+        items.iter().map(|i| i.name.as_ref()).collect()
+    }
+
+    /// Cookie plus the option block a client sends in a DISCOVER: message type,
+    /// a type-1 client identifier holding the MAC, a parameter request list and
+    /// End (RFC 2132 §9.6, §9.14, §9.8).
+    fn discover_block() -> Vec<u8> {
+        let mut v = MAGIC_COOKIE.to_vec();
+        v.extend_from_slice(&[53, 1, 1]);
+        v.extend_from_slice(&[61, 7, 1]);
+        v.extend_from_slice(&CHADDR);
+        v.extend_from_slice(&[55, 4, 1, 3, 6, 15]);
+        v.push(255);
+        v
+    }
+
+    /// A server ACK: mask, two routers, two name servers, lease time, server id.
+    fn ack_block() -> Vec<u8> {
+        let mut v = MAGIC_COOKIE.to_vec();
+        v.extend_from_slice(&[53, 1, 5]);
+        v.extend_from_slice(&[1, 4, 255, 255, 255, 0]);
+        v.extend_from_slice(&[3, 4, 192, 168, 1, 1]);
+        v.extend_from_slice(&[6, 8, 8, 8, 8, 8, 8, 8, 4, 4]);
+        v.extend_from_slice(&[51, 4, 0, 0, 0x0e, 0x10]);
+        v.extend_from_slice(&[54, 4, 192, 168, 1, 1]);
+        v.push(255);
+        v
+    }
+
+    #[test]
+    fn parses_a_discover_option_block() {
+        let items = parse_options(&discover_block());
+        assert_eq!(
+            names(&items),
+            vec!["message-type", "client_id", "param_req_list", "end"]
+        );
+        assert_eq!(items[0].value, ItemValue::Uint(msgtype::DISCOVER));
+        let mut id = vec![1u8];
+        id.extend_from_slice(&CHADDR);
+        assert_eq!(items[1].value, ItemValue::Bytes(id));
+        assert_eq!(items[2].value, ItemValue::Bytes(vec![1, 3, 6, 15]));
+        assert_eq!(items[3].value, ItemValue::Flag);
+    }
+
+    #[test]
+    fn parses_an_ack_option_block() {
+        let items = parse_options(&ack_block());
+        assert_eq!(
+            names(&items),
+            vec![
+                "message-type",
+                "subnet_mask",
+                "router",
+                "name_server",
+                "lease_time",
+                "server_id",
+                "end"
+            ]
+        );
+        assert_eq!(items[0].value, ItemValue::Uint(msgtype::ACK));
+        assert_eq!(
+            items[1].value,
+            ItemValue::Ipv4List(vec![[255, 255, 255, 0]])
+        );
+        assert_eq!(items[2].value, ItemValue::Ipv4List(vec![[192, 168, 1, 1]]));
+        assert_eq!(
+            items[3].value,
+            ItemValue::Ipv4List(vec![[8, 8, 8, 8], [8, 8, 4, 4]])
+        );
+        assert_eq!(items[4].value, ItemValue::Uint(3600));
+        assert_eq!(items[5].value, ItemValue::Ipv4List(vec![[192, 168, 1, 1]]));
+    }
+
+    #[test]
+    fn options_are_reachable_through_dissect() {
+        let mut buf = udp_bootpc_to_bootps();
+        buf.extend_from_slice(&bootp_header());
+        buf.extend_from_slice(&discover_block());
+        let p = Packet::dissect(buf, ProtoId::Udp);
+        let d = p.find_layer(ProtoId::Dhcp).expect("dhcp layer");
+        let items = p.options(d).expect("dhcp options");
+        assert_eq!(items[0], Item::uint("message-type", 53, msgtype::DISCOVER));
+        assert_eq!(items.last().unwrap().name, "end");
+
+        // BOOTP itself has no option region.
+        let b = p.find_layer(ProtoId::Bootp).unwrap();
+        assert!(p.options(b).is_none());
+    }
+
+    #[test]
+    fn truncated_option_region_stops_cleanly() {
+        let full = ack_block();
+        for cut in 0..=full.len() {
+            let items = parse_options(&full[..cut]);
+            // Whatever survives must be a prefix of the complete parse.
+            let whole = parse_options(&full);
+            assert!(items.len() <= whole.len(), "cut {cut} produced extra items");
+            for (a, b) in items.iter().zip(whole.iter()) {
+                assert_eq!(a, b, "cut {cut} decoded differently");
+            }
+        }
+        // A header that is only the cookie, or shorter, has no options.
+        assert!(parse_options(&MAGIC_COOKIE).is_empty());
+        assert!(parse_options(&[]).is_empty());
+        assert!(parse_options(&[99, 130]).is_empty());
+    }
+
+    #[test]
+    fn unknown_code_does_not_stop_the_walk() {
+        let mut v = MAGIC_COOKIE.to_vec();
+        v.extend_from_slice(&[53, 1, 3]);
+        v.extend_from_slice(&[224, 1, 0xaa]); // 224: unassigned in RFC 2132
+        v.extend_from_slice(&[51, 4, 0, 0, 0x0e, 0x10]);
+        v.push(255);
+        let items = parse_options(&v);
+        assert_eq!(
+            names(&items),
+            vec!["message-type", "224", "lease_time", "end"]
+        );
+        assert_eq!(items[1], Item::unknown(224, &[0xaa]));
+        assert_eq!(items[2].value, ItemValue::Uint(3600));
+    }
+
+    #[test]
+    fn pad_bytes_do_not_desynchronise_the_walk() {
+        let mut v = MAGIC_COOKIE.to_vec();
+        v.extend_from_slice(&[0, 0]);
+        v.extend_from_slice(&[53, 1, 2]);
+        v.push(0);
+        v.extend_from_slice(&[58, 4, 0, 0, 0x07, 0x08]);
+        v.extend_from_slice(&[59, 4, 0, 0, 0x0c, 0x4e]);
+        v.push(255);
+        v.extend_from_slice(&[0, 0, 0]); // padding to the minimum BOOTP size
+        let items = parse_options(&v);
+        assert_eq!(
+            names(&items),
+            vec![
+                "pad",
+                "pad",
+                "message-type",
+                "pad",
+                "renewal_time",
+                "rebinding_time",
+                "end"
+            ]
+        );
+        assert_eq!(items[2].value, ItemValue::Uint(msgtype::OFFER));
+        assert_eq!(items[4].value, ItemValue::Uint(1800));
+        assert_eq!(items[5].value, ItemValue::Uint(3150));
+    }
+
+    #[test]
+    fn missing_end_returns_what_was_parsed() {
+        let mut v = MAGIC_COOKIE.to_vec();
+        v.extend_from_slice(&[53, 1, 3]);
+        v.extend_from_slice(&[50, 4, 192, 168, 1, 50]);
+        v.extend_from_slice(&[12, 3, b'p', b'c', b'1']);
+        v.extend_from_slice(&[57, 2, 0x05, 0xdc]);
+        let items = parse_options(&v);
+        assert_eq!(
+            names(&items),
+            vec![
+                "message-type",
+                "requested_addr",
+                "hostname",
+                "max_dhcp_size"
+            ]
+        );
+        assert_eq!(items[0].value, ItemValue::Uint(msgtype::REQUEST));
+        assert_eq!(items[1].value, ItemValue::Ipv4List(vec![[192, 168, 1, 50]]));
+        assert_eq!(items[2].value, ItemValue::Text("pc1".into()));
+        assert_eq!(items[3].value, ItemValue::Uint(1500));
+    }
+
+    #[test]
+    fn address_lists_drop_a_trailing_partial_address() {
+        // Length 6 is not a multiple of four: the stray two octets are ignored.
+        let mut v = MAGIC_COOKIE.to_vec();
+        v.extend_from_slice(&[3, 6, 10, 0, 0, 1, 10, 0]);
+        v.extend_from_slice(&[15, 7, b'l', b'a', b'n', b'.', b'c', b'o', b'm']);
+        v.extend_from_slice(&[28, 4, 10, 0, 0, 255]);
+        v.push(255);
+        let items = parse_options(&v);
+        assert_eq!(items[0].value, ItemValue::Ipv4List(vec![[10, 0, 0, 1]]));
+        assert_eq!(items[1].value, ItemValue::Text("lan.com".into()));
+        assert_eq!(items[2].value, ItemValue::Ipv4List(vec![[10, 0, 0, 255]]));
     }
 
     #[test]
