@@ -117,9 +117,33 @@ pub fn by_name(name: &str) -> Option<ProtoId> {
     ALL.iter().copied().find(|p| desc(*p).name == name)
 }
 
-/// Find a field descriptor by name within a protocol.
+/// Find a field descriptor by name within a protocol. Ignores conditions, so it
+/// sees every field the protocol can ever carry.
 pub fn field_of(id: ProtoId, name: &str) -> Option<&'static FieldDesc> {
     desc(id).fields.iter().find(|f| f.name == name)
+}
+
+/// The fields a header with these bytes actually has. A conditional field whose
+/// predicate rejects the header is absent, not merely zero.
+pub fn active_fields(id: ProtoId, hdr: &[u8]) -> impl Iterator<Item = &'static FieldDesc> + '_ {
+    desc(id).fields.iter().filter(move |f| f.is_active(hdr))
+}
+
+/// Find a field by name among those a given header has. Two fields may share a
+/// name when their conditions are disjoint, so the header picks between them.
+pub fn active_field_of(id: ProtoId, hdr: &[u8], name: &str) -> Option<&'static FieldDesc> {
+    active_fields(id, hdr).find(|f| f.name == name)
+}
+
+/// Names a layer answers to that are served by a parser rather than by the flat
+/// field table: part of the layer's interface, but with no fixed offset.
+pub fn accessor_names(id: ProtoId) -> &'static [&'static str] {
+    match id {
+        // RFC 1035 §4.1: the record sections are variable length and use name
+        // compression, so they are decoded from the whole message on demand.
+        ProtoId::Dns => &["qd", "an", "ns", "ar"],
+        _ => &[],
+    }
 }
 
 #[allow(dead_code, clippy::type_complexity)]

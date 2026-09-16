@@ -16,6 +16,8 @@ pub static FIELDS: &[FieldDesc] = &[
         default: 0xffff_ffff_ffff,
         flags: &[],
         computed: false,
+        cond: None,
+        default_bytes: None,
     },
     FieldDesc::mac("src", 48),
     // Stacking a layer rewrites this. The default names no payload protocol, so

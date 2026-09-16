@@ -37,9 +37,37 @@ pub struct FieldDesc {
     /// True when the engine recomputes this field during serialisation
     /// (checksums, lengths) unless the user pinned it explicitly.
     pub computed: bool,
+    /// When set, the field exists only in headers this predicate accepts. It is
+    /// given the layer's header bytes, so a field can be gated on an earlier
+    /// field of the same header, such as ICMP's type.
+    pub cond: Option<fn(&[u8]) -> bool>,
+    /// Default for fields wider than the 64 bits `default` holds. Written
+    /// verbatim at `bit_off` during construction.
+    pub default_bytes: Option<&'static [u8]>,
 }
 
 impl FieldDesc {
+    /// Restrict this field to headers `c` accepts.
+    pub const fn when(mut self, c: fn(&[u8]) -> bool) -> Self {
+        self.cond = Some(c);
+        self
+    }
+
+    /// Give this field a default too wide for `default`.
+    pub const fn defaulting_to(mut self, b: &'static [u8]) -> Self {
+        self.default_bytes = Some(b);
+        self
+    }
+
+    /// Whether this field is present in a header with these bytes.
+    #[inline]
+    pub fn is_active(&self, hdr: &[u8]) -> bool {
+        match self.cond {
+            Some(c) => c(hdr),
+            None => true,
+        }
+    }
+
     pub const fn uint(name: &'static str, bit_off: u16, bit_len: u16, default: u64) -> Self {
         Self {
             name,
@@ -49,6 +77,8 @@ impl FieldDesc {
             default,
             flags: &[],
             computed: false,
+            cond: None,
+            default_bytes: None,
         }
     }
     pub const fn computed_uint(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
@@ -60,6 +90,8 @@ impl FieldDesc {
             default: 0,
             flags: &[],
             computed: true,
+            cond: None,
+            default_bytes: None,
         }
     }
     pub const fn ipv4(name: &'static str, bit_off: u16, default: u64) -> Self {
@@ -71,6 +103,8 @@ impl FieldDesc {
             default,
             flags: &[],
             computed: false,
+            cond: None,
+            default_bytes: None,
         }
     }
     pub const fn ipv6(name: &'static str, bit_off: u16) -> Self {
@@ -82,6 +116,8 @@ impl FieldDesc {
             default: 0,
             flags: &[],
             computed: false,
+            cond: None,
+            default_bytes: None,
         }
     }
     pub const fn mac(name: &'static str, bit_off: u16) -> Self {
@@ -93,6 +129,8 @@ impl FieldDesc {
             default: 0,
             flags: &[],
             computed: false,
+            cond: None,
+            default_bytes: None,
         }
     }
     pub const fn flags(
@@ -109,6 +147,8 @@ impl FieldDesc {
             default: 0,
             flags: names,
             computed: false,
+            cond: None,
+            default_bytes: None,
         }
     }
     pub const fn var_bytes(name: &'static str, bit_off: u16) -> Self {
@@ -120,6 +160,8 @@ impl FieldDesc {
             default: 0,
             flags: &[],
             computed: false,
+            cond: None,
+            default_bytes: None,
         }
     }
     pub const fn bytes(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
@@ -131,6 +173,8 @@ impl FieldDesc {
             default: 0,
             flags: &[],
             computed: false,
+            cond: None,
+            default_bytes: None,
         }
     }
 }

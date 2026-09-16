@@ -79,7 +79,7 @@ pub fn show(pkt: &Packet) -> String {
     for (i, s) in pkt.layers().iter().enumerate() {
         let d = crate::proto::desc(s.proto);
         out.push_str(&format!("###[ {} ]###\n", d.name));
-        for f in d.fields {
+        for f in crate::proto::active_fields(s.proto, pkt.header(i)) {
             let v = pkt.get_desc(i, f);
             if let FieldValue::Bytes(ref b) = v {
                 if b.is_empty() {

@@ -449,14 +449,20 @@ impl PyPkt {
         self.inner.len()
     }
 
-    /// Field names available on a layer, in header order.
+    /// Field names this layer actually carries, in header order. A conditional
+    /// field absent from this particular header is not listed.
     fn field_names(&self, layer: usize) -> PyResult<Vec<&'static str>> {
-        let s = self
+        let proto = self
             .inner
             .layers()
             .get(layer)
-            .ok_or_else(|| PyIndexError::new_err("layer out of range"))?;
-        Ok(proto::desc(s.proto).fields.iter().map(|f| f.name).collect())
+            .ok_or_else(|| PyIndexError::new_err("layer out of range"))?
+            .proto;
+        let mut out: Vec<&'static str> = proto::active_fields(proto, self.inner.header(layer))
+            .map(|f| f.name)
+            .collect();
+        out.extend_from_slice(proto::accessor_names(proto));
+        Ok(out)
     }
 }
 
@@ -812,6 +818,42 @@ fn make_stack(
     Ok(stack)
 }
 
+/// Apply construction kwargs to a freshly built packet.
+///
+/// Unconditional fields go first, because a conditional field's presence is
+/// decided by an unconditional one (ICMP's `type`), and because that field can
+/// also lengthen the header. Growing the header between the two passes is what
+/// makes `ICMP(type=13, ts_ori=...)` reach octets the fixed template lacks.
+fn apply_all_fields(
+    pkt: &mut CorePacket,
+    ints: &[(usize, String, u64)],
+    strs: &[(usize, String, String)],
+    raws: &[(usize, String, Vec<u8>)],
+) -> PyResult<()> {
+    let (plain_ints, cond_ints): (Vec<_>, Vec<_>) = ints
+        .iter()
+        .cloned()
+        .partition(|(l, n, _)| !is_conditional(pkt, *l, n));
+    let (plain_strs, cond_strs): (Vec<_>, Vec<_>) = strs
+        .iter()
+        .cloned()
+        .partition(|(l, n, _)| !is_conditional(pkt, *l, n));
+    let (plain_raws, cond_raws): (Vec<_>, Vec<_>) = raws
+        .iter()
+        .cloned()
+        .partition(|(l, n, _)| !is_conditional(pkt, *l, n));
+    apply_fields(pkt, &plain_ints, &plain_strs, &plain_raws)?;
+    pkt.refit_headers();
+    apply_fields(pkt, &cond_ints, &cond_strs, &cond_raws)
+}
+
+fn is_conditional(pkt: &CorePacket, layer: usize, name: &str) -> bool {
+    pkt.layers()
+        .get(layer)
+        .and_then(|s| proto::field_of(s.proto, name))
+        .is_some_and(|f| f.cond.is_some())
+}
+
 fn apply_fields(
     pkt: &mut CorePacket,
     ints: &[(usize, String, u64)],
@@ -879,7 +921,7 @@ fn build_and_serialize<'py>(
         let last = stack.len().saturating_sub(1);
         pkt.set_payload(last, &p);
     }
-    apply_fields(&mut pkt, &ints, &strs, &raws)?;
+    apply_all_fields(&mut pkt, &ints, &strs, &raws)?;
     pkt.mark_all_dirty();
     Ok(PyBytes::new_bound(py, pkt.to_bytes()))
 }
@@ -901,7 +943,7 @@ fn build_packet(
         let last = stack.len().saturating_sub(1);
         pkt.set_payload(last, &p);
     }
-    apply_fields(&mut pkt, &ints, &strs, &raws)?;
+    apply_all_fields(&mut pkt, &ints, &strs, &raws)?;
     pkt.mark_all_dirty();
     Ok(PyPkt {
         inner: pkt,
@@ -925,11 +967,10 @@ fn write_pcap(path: &str, packets: Vec<Vec<u8>>, linktype: u32) -> PyResult<()> 
 /// Field names for a layer, in header order.
 #[pyfunction]
 fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
-    Ok(proto::desc(proto_by_name(name)?)
-        .fields
-        .iter()
-        .map(|f| f.name)
-        .collect())
+    let id = proto_by_name(name)?;
+    let mut out: Vec<&'static str> = proto::desc(id).fields.iter().map(|f| f.name).collect();
+    out.extend_from_slice(proto::accessor_names(id));
+    Ok(out)
 }
 
 /// Every layer name the engine knows.

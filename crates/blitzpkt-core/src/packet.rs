@@ -74,9 +74,17 @@ impl Packet {
                     }
                 }
             }
+            let hdr_end = (off + hlen).min(buf.len());
             for f in d.fields {
-                if f.default != 0 {
-                    field::write_bits(&mut buf[off..], f.bit_off, f.bit_len, f.default);
+                if !f.is_active(&buf[off..hdr_end]) {
+                    continue;
+                }
+                if let Some(b) = f.default_bytes {
+                    let a = off + (f.bit_off / 8) as usize;
+                    let n = b.len().min(hdr_end.saturating_sub(a));
+                    buf[a..a + n].copy_from_slice(&b[..n]);
+                } else if f.default != 0 {
+                    field::write_bits(&mut buf[off..hdr_end], f.bit_off, f.bit_len, f.default);
                 }
             }
             // Point the previous layer's demux field at this one, the way
@@ -157,10 +165,12 @@ impl Packet {
         &self.buf[a..]
     }
 
-    /// Read a field from a layer. Decodes only this field.
+    /// Read a field from a layer. Decodes only this field. Returns `None` when
+    /// the layer has no such field, including a conditional field this header
+    /// does not carry.
     pub fn get(&self, layer: usize, name: &str) -> Option<FieldValue> {
-        let s = self.spans.get(layer)?;
-        let f = crate::proto::field_of(s.proto, name)?;
+        let proto = self.spans.get(layer)?.proto;
+        let f = crate::proto::active_field_of(proto, self.header(layer), name)?;
         Some(self.get_desc(layer, f))
     }
 
@@ -174,12 +184,13 @@ impl Packet {
     }
 
     /// Write a field in place. Widths are preserved, so this never reallocates.
-    /// Returns false when the field is unknown for this layer.
+    /// Returns false when the field is unknown for this layer, or conditional
+    /// and absent from this header.
     pub fn set_uint(&mut self, layer: usize, name: &str, val: u64) -> bool {
         let Some(s) = self.spans.get(layer).copied() else {
             return false;
         };
-        let Some(f) = crate::proto::field_of(s.proto, name) else {
+        let Some(f) = crate::proto::active_field_of(s.proto, self.header(layer), name) else {
             return false;
         };
         let a = s.off as usize;
@@ -193,7 +204,7 @@ impl Packet {
         let Some(s) = self.spans.get(layer).copied() else {
             return false;
         };
-        let Some(f) = crate::proto::field_of(s.proto, name) else {
+        let Some(f) = crate::proto::active_field_of(s.proto, self.header(layer), name) else {
             return false;
         };
         let a = s.off as usize + (f.bit_off / 8) as usize;
@@ -213,6 +224,35 @@ impl Packet {
         let link = self.spans[0].proto;
         self.spans = dissect_spans(&self.buf, link);
         self.dirty = u32::MAX;
+    }
+
+    /// Grow any header that is shorter than its own bytes say it should be.
+    /// Construction lays down the fixed part first, so a header whose length
+    /// depends on one of its own fields (ICMP, by type) is short until that
+    /// field has been written. Protocols that write their own length field are
+    /// already consistent and are left alone.
+    pub fn refit_headers(&mut self) {
+        for i in 0..self.spans.len() {
+            let s = self.spans[i];
+            let d = desc(s.proto);
+            if d.set_hlen.is_some() {
+                continue;
+            }
+            let want = (d.header_len)(self.header(i));
+            let have = s.hlen as usize;
+            if want <= have {
+                continue;
+            }
+            let at = (s.off as usize + have).min(self.buf.len());
+            self.buf
+                .splice(at..at, std::iter::repeat(0u8).take(want - have));
+            self.spans[i].hlen = want as u32;
+            for later in self.spans[i + 1..].iter_mut() {
+                later.off += (want - have) as u32;
+            }
+            self.dirty = u32::MAX;
+        }
+        self.refresh_totals();
     }
 
     #[inline]
