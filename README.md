@@ -149,6 +149,49 @@ cap.times()                     # timestamps
 These are the APIs that give the 391.6x figure. They agree exactly with the
 equivalent Python loop, and the test suite asserts that invariant.
 
+## Captures as columns
+
+This is the part scapy has no equivalent for. A capture already lives in Rust as
+one buffer; pulling a few fields out of all of it should not mean building a
+Python object per packet.
+
+```python
+cap = rdpcap("capture.pcap")
+
+cap.columns([("IP", "src"), ("IP", "dst"), ("TCP", "dport")])
+cap.columns([("TCP", "dport")], layer="TCP")
+cap.columns(conds=[("TCP", "dport", "==", 443)])
+cap.to_dict()
+```
+
+One call, one pass, one crossing: each packet is dissected once and every
+requested field read from that dissection. Filters are data rather than
+callbacks, so selection stays in Rust.
+
+Dataframes, each library imported lazily so none of them is a dependency:
+
+```python
+from blitzpkt.columnar import to_polars, to_arrow, to_pandas
+
+df = to_polars(cap)
+```
+
+Install with `pip install 'blitzpkt[polars]'`, or `[arrow]`, or `[pandas]`.
+
+Four columns over the same 549,726-packet capture:
+
+| Approach | Rate | |
+|---|---|---|
+| `columns()`, one pass | 1,922,282 pkt/s | |
+| four separate `field_column()` calls | 1,356,389 pkt/s | 1.4x slower |
+| Python loop over packets | 191,533 pkt/s | 10x slower |
+| scapy loop over packets | 10,365 pkt/s | **185x slower** |
+
+Filtering to TCP first reaches 9,069,129 pkt/s, against a 789x slower scapy
+equivalent. The honest caveat: the win over four `field_column()` calls is only
+1.4x, because once the work is in Rust it is building the Python results that
+dominates, not the dissection.
+
 ## Relationship to scapy
 
 blitzpkt is an independent, clean-room implementation. It shares no code with
