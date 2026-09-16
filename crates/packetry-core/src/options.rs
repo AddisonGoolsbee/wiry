@@ -20,34 +20,30 @@ pub struct Item {
 }
 
 impl Item {
+    fn named(name: &'static str, code: u32, value: ItemValue) -> Self {
+        Self {
+            name: Cow::Borrowed(name),
+            code,
+            value,
+        }
+    }
+
     pub fn flag(name: &'static str, code: u32) -> Self {
-        Self {
-            name: Cow::Borrowed(name),
-            code,
-            value: ItemValue::Flag,
-        }
+        Self::named(name, code, ItemValue::Flag)
     }
+
     pub fn uint(name: &'static str, code: u32, v: u64) -> Self {
-        Self {
-            name: Cow::Borrowed(name),
-            code,
-            value: ItemValue::Uint(v),
-        }
+        Self::named(name, code, ItemValue::Uint(v))
     }
+
     pub fn pair(name: &'static str, code: u32, a: u64, b: u64) -> Self {
-        Self {
-            name: Cow::Borrowed(name),
-            code,
-            value: ItemValue::Pair(a, b),
-        }
+        Self::named(name, code, ItemValue::Pair(a, b))
     }
+
     pub fn bytes(name: &'static str, code: u32, b: &[u8]) -> Self {
-        Self {
-            name: Cow::Borrowed(name),
-            code,
-            value: ItemValue::Bytes(b.to_vec()),
-        }
+        Self::named(name, code, ItemValue::Bytes(b.to_vec()))
     }
+
     pub fn unknown(code: u32, b: &[u8]) -> Self {
         Self {
             name: Cow::Owned(code.to_string()),
@@ -67,13 +63,12 @@ pub(crate) fn be(b: &[u8]) -> u64 {
 
 /// TCP/IPv4 length convention: the length octet counts the code and length
 /// octets themselves, so the payload is `len - 2` bytes. DHCP (RFC 2132 §2)
-/// counts only the option data and so does NOT use this function — using the
-/// wrong convention silently mis-decodes every option. `layers/bootp.rs` has
-/// its own walker.
+/// counts only the option data and so does NOT use this function — the wrong
+/// convention silently mis-decodes every option. `layers/bootp.rs` walks its own.
 ///
 /// `single_byte` names the codes that occupy one byte with no length octet.
-/// Malformed input stops the walk: truncation is normal on a snaplen-clipped
-/// capture, not an error.
+/// Malformed input stops the walk rather than erroring: truncation is normal on
+/// a snaplen-clipped capture.
 pub fn walk_tlv<F>(
     data: &[u8],
     single_byte: &[u8],

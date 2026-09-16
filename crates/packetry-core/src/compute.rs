@@ -23,11 +23,13 @@ pub fn recompute(pkt: &mut Packet) {
     }
 }
 
-/// True when a length field describes more bytes than the buffer holds, which
-/// is what a capture clipped by the snaplen looks like. Nothing derived from
-/// the missing bytes can be recomputed, so what the wire said stands. A packet
-/// deliberately resized is not clipped: its length fields describe the extent
-/// it had before the write, and they are exactly what is being recomputed.
+/// With `content_end`, this gates three behaviours at once: clipped captures,
+/// deliberate resizes, and oversize detection.
+///
+/// True when a length field describes more bytes than the buffer holds, i.e. a
+/// snaplen-clipped capture, where nothing derived from the missing bytes can be
+/// recomputed. A resized packet is not clipped: its lengths describe the extent
+/// before the write, and they are exactly what is being recomputed.
 fn is_clipped(pkt: &Packet) -> bool {
     !pkt.resized
         && pkt.spans.iter().enumerate().any(|(i, s)| {
@@ -37,8 +39,7 @@ fn is_clipped(pkt: &Packet) -> bool {
         })
 }
 
-/// Trailing `Padding` counts towards no enclosing length or checksum, so every
-/// computation stops where it starts.
+/// Trailing `Padding` counts towards no enclosing length or checksum.
 fn content_end(pkt: &Packet) -> usize {
     pkt.spans
         .iter()
@@ -46,11 +47,9 @@ fn content_end(pkt: &Packet) -> usize {
         .map_or(pkt.buf.len(), |s| (s.off as usize).min(pkt.buf.len()))
 }
 
-/// Names the field that cannot describe this packet, when one cannot. Every
-/// length recomputed here is sixteen bits wide (RFC 791 §3.1, RFC 8200 §3,
-/// RFC 768) and so is the length in TCP's and UDP's pseudo-header, so a larger
+/// Every length recomputed here is sixteen bits wide (RFC 791 §3.1, RFC 8200
+/// §3, RFC 768), as is the one in TCP's and UDP's pseudo-header, so a larger
 /// frame has no representation and emitting it modulo 65536 would be a lie.
-/// Nothing is recomputed on a clipped capture, so nothing there can wrap.
 pub fn oversize(pkt: &Packet) -> Option<String> {
     if pkt.len() <= u16::MAX as usize || is_clipped(pkt) {
         return None;
@@ -72,6 +71,10 @@ pub fn oversize(pkt: &Packet) -> Option<String> {
     None
 }
 
+fn put16(buf: &mut [u8], at: usize, v: u16) {
+    buf[at..at + 2].copy_from_slice(&v.to_be_bytes());
+}
+
 fn span_bounds(pkt: &Packet, i: usize) -> (usize, usize, usize) {
     let s = pkt.spans[i];
     let off = s.off as usize;
@@ -86,17 +89,12 @@ fn fix_ipv4(pkt: &mut Packet, i: usize, clipped: bool) {
     }
     if !clipped {
         // RFC 791 §3.1: header plus everything after it.
-        let total = (end - off) as u16;
-        pkt.buf[off + 2] = (total >> 8) as u8;
-        pkt.buf[off + 3] = (total & 0xff) as u8;
+        put16(&mut pkt.buf, off + 2, (end - off) as u16);
     }
 
-    // Computed with the field zeroed.
-    pkt.buf[off + 10] = 0;
-    pkt.buf[off + 11] = 0;
+    put16(&mut pkt.buf, off + 10, 0);
     let c = ck::ones_complement(&pkt.buf[off..off + hlen]);
-    pkt.buf[off + 10] = (c >> 8) as u8;
-    pkt.buf[off + 11] = (c & 0xff) as u8;
+    put16(&mut pkt.buf, off + 10, c);
 }
 
 fn fix_ipv6(pkt: &mut Packet, i: usize, clipped: bool) {
@@ -105,9 +103,7 @@ fn fix_ipv6(pkt: &mut Packet, i: usize, clipped: bool) {
         return;
     }
     // RFC 8200 §3: excludes the fixed 40-octet header.
-    let plen = (end - off - 40) as u16;
-    pkt.buf[off + 4] = (plen >> 8) as u8;
-    pkt.buf[off + 5] = (plen & 0xff) as u8;
+    put16(&mut pkt.buf, off + 4, (end - off - 40) as u16);
 }
 
 fn enclosing_addrs(pkt: &Packet, i: usize) -> Option<(Vec<u8>, Vec<u8>, bool)> {
@@ -155,22 +151,18 @@ fn fix_udp(pkt: &mut Packet, i: usize, clipped: bool) {
     }
     let tlen = end - off;
     // RFC 768: header plus data.
-    pkt.buf[off + 4] = (tlen >> 8) as u8;
-    pkt.buf[off + 5] = (tlen & 0xff) as u8;
+    put16(&mut pkt.buf, off + 4, tlen as u16);
 
-    pkt.buf[off + 6] = 0;
-    pkt.buf[off + 7] = 0;
+    put16(&mut pkt.buf, off + 6, 0);
     let Some(seed) = transport_seed(pkt, i, ipproto::UDP, tlen) else {
         return;
     };
-    let sum = ck::sum16(&pkt.buf[off..end], seed);
-    let mut c = ck::finish(sum);
+    let mut c = ck::finish(ck::sum16(&pkt.buf[off..end], seed));
     // RFC 768: an all-zero checksum means "not computed", so send all ones.
     if c == 0 {
         c = 0xffff;
     }
-    pkt.buf[off + 6] = (c >> 8) as u8;
-    pkt.buf[off + 7] = (c & 0xff) as u8;
+    put16(&mut pkt.buf, off + 6, c);
 }
 
 fn fix_tcp(pkt: &mut Packet, i: usize) {
@@ -179,15 +171,12 @@ fn fix_tcp(pkt: &mut Packet, i: usize) {
         return;
     }
     let tlen = end - off;
-    pkt.buf[off + 16] = 0;
-    pkt.buf[off + 17] = 0;
+    put16(&mut pkt.buf, off + 16, 0);
     let Some(seed) = transport_seed(pkt, i, ipproto::TCP, tlen) else {
         return;
     };
-    let sum = ck::sum16(&pkt.buf[off..end], seed);
-    let c = ck::finish(sum);
-    pkt.buf[off + 16] = (c >> 8) as u8;
-    pkt.buf[off + 17] = (c & 0xff) as u8;
+    let c = ck::finish(ck::sum16(&pkt.buf[off..end], seed));
+    put16(&mut pkt.buf, off + 16, c);
 }
 
 fn fix_icmp(pkt: &mut Packet, i: usize) {
@@ -196,11 +185,9 @@ fn fix_icmp(pkt: &mut Packet, i: usize) {
         return;
     }
     // RFC 792: no pseudo-header.
-    pkt.buf[off + 2] = 0;
-    pkt.buf[off + 3] = 0;
+    put16(&mut pkt.buf, off + 2, 0);
     let c = ck::ones_complement(&pkt.buf[off..end]);
-    pkt.buf[off + 2] = (c >> 8) as u8;
-    pkt.buf[off + 3] = (c & 0xff) as u8;
+    put16(&mut pkt.buf, off + 2, c);
 }
 
 fn fix_icmpv6(pkt: &mut Packet, i: usize) {
@@ -209,16 +196,14 @@ fn fix_icmpv6(pkt: &mut Packet, i: usize) {
         return;
     }
     let tlen = end - off;
-    pkt.buf[off + 2] = 0;
-    pkt.buf[off + 3] = 0;
+    put16(&mut pkt.buf, off + 2, 0);
     // RFC 4443 §2.3: unlike ICMPv4 this covers the IPv6 pseudo-header, so with
     // no enclosing IPv6 layer the checksum stays zeroed.
     let Some(seed) = transport_seed(pkt, i, ipproto::IPV6_ICMP, tlen) else {
         return;
     };
     let c = ck::finish(ck::sum16(&pkt.buf[off..end], seed));
-    pkt.buf[off + 2] = (c >> 8) as u8;
-    pkt.buf[off + 3] = (c & 0xff) as u8;
+    put16(&mut pkt.buf, off + 2, c);
 }
 
 #[cfg(test)]
@@ -299,7 +284,6 @@ mod tests {
         assert_eq!(out.len(), 40);
         assert_eq!(back.get(0, "len").unwrap(), FieldValue::Uint(68));
         assert_eq!(back.get(1, "len").unwrap(), FieldValue::Uint(48));
-        // The header is all there, so its own checksum still holds.
         assert_eq!(ck::ones_complement(&out[..20]), 0);
     }
 }

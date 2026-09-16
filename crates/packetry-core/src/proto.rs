@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 pub struct ProtoId(pub u16);
 
 /// Built-in ids are the first `BUILTIN_COUNT` values and never move: the
-/// numbering is what separates the static table from the registry.
+/// numbering separates the static table from the registry.
 #[allow(non_upper_case_globals)]
 impl ProtoId {
     pub const Raw: ProtoId = ProtoId(0);
@@ -59,9 +59,8 @@ pub struct ProtoDesc {
     /// Bytes appended when `next` is stacked. BOOTP's magic cookie starts the
     /// option area rather than DHCP itself: RFC 2131 §3.
     pub bind_next_bytes: Option<fn(ProtoId) -> &'static [u8]>,
-    /// Total bytes this header claims, its own length included, as read from a
-    /// length field of its own. `None` when the layer has no such field, in
-    /// which case its content runs to the end of what encloses it.
+    /// Total bytes this header's own length field claims, itself included.
+    /// `None` means the content runs to the end of what encloses it.
     pub content_len: Option<fn(&[u8]) -> usize>,
 }
 
@@ -136,8 +135,8 @@ pub fn active_fields(id: ProtoId, hdr: &[u8]) -> impl Iterator<Item = &'static F
     desc(id).fields.iter().filter(move |f| f.is_active(hdr))
 }
 
-/// Two fields may share a name when their conditions are disjoint, so the
-/// header bytes pick between them.
+/// Two fields may share a name when their conditions are disjoint; the header
+/// bytes pick between them.
 pub fn active_field_of(id: ProtoId, hdr: &[u8], name: &str) -> Option<&'static FieldDesc> {
     active_fields(id, hdr).find(|f| f.name == name)
 }
@@ -151,9 +150,8 @@ pub fn accessor_names(id: ProtoId) -> &'static [&'static str] {
     }
 }
 
-/// Layers declared from Python. Registration happens once per class definition
-/// and is never undone, so the owned data is leaked to obtain the `'static`
-/// lifetimes `ProtoDesc` wants and the dissection path stays a pointer read.
+/// Registration happens once per Python class definition and is never undone,
+/// so the owned data is leaked for the `'static` lifetimes `ProtoDesc` wants.
 const MAX_REGISTERED: usize = 1024;
 
 #[allow(clippy::declare_interior_mutable_const)]
@@ -174,8 +172,8 @@ fn registered() -> impl DoubleEndedIterator<Item = &'static ProtoDesc> {
     REGISTRY[..n].iter().filter_map(|slot| slot.get().copied())
 }
 
-/// A layer with no header length of its own: `dissect_spans` raises this to
-/// `min_len`, which registration pins to the declared field width.
+/// `dissect_spans` raises this to `min_len`, which registration pins to the
+/// declared field width.
 fn fixed_len(_: &[u8]) -> usize {
     0
 }
@@ -189,8 +187,7 @@ fn registered_next(_: &[u8]) -> Next {
     Next::Raw
 }
 
-/// `fields` must already hold `'static` names, and `build_len` the width of the
-/// fixed part in bytes.
+/// `build_len` is the width of the fixed part in bytes.
 pub fn register(
     name: String,
     mut fields: Vec<FieldDesc>,
@@ -233,8 +230,7 @@ pub fn register(
     Ok(d.id)
 }
 
-/// A dissection-time dispatch declared from Python: when every condition holds
-/// in the parent's header, `child` follows it.
+/// When every condition holds in the parent's header, `child` follows it.
 struct Bind {
     parent: ProtoId,
     child: ProtoId,
@@ -249,8 +245,7 @@ const NO_BIND: OnceLock<Bind> = OnceLock::new();
 static BINDS: [OnceLock<Bind>; MAX_BINDS] = [NO_BIND; MAX_BINDS];
 static BOUND: AtomicUsize = AtomicUsize::new(0);
 /// Which protocols appear as a parent, so a layer nobody bound under skips the
-/// search entirely. Ids past 64 share a bit, which costs a fruitless search and
-/// never a missed binding.
+/// search. Ids past 64 share a bit: a fruitless search, never a missed binding.
 static BOUND_PARENTS: AtomicU64 = AtomicU64::new(0);
 
 #[inline]
@@ -286,8 +281,7 @@ fn binds() -> impl Iterator<Item = &'static Bind> {
     BINDS[..n].iter().filter_map(|slot| slot.get())
 }
 
-/// The child a declared binding selects for this header, if any. The search
-/// itself is kept out of line, so a layer nothing was bound under pays one
+/// The search is kept out of line, so a layer nothing was bound under pays one
 /// relaxed load and a branch.
 #[inline]
 pub fn bound_next(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
@@ -309,8 +303,8 @@ fn search_binds(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
         .map(|b| b.child)
 }
 
-/// The reverse of `bound_next`: stacking `child` under `parent` writes back the
-/// values that will make dissection find it again.
+/// The reverse of `bound_next`: writes back the values that make dissection
+/// find `child` again.
 #[inline]
 pub fn apply_bind(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if BOUND_PARENTS.load(Ordering::Relaxed) & parent_bit(parent) == 0 {
@@ -334,8 +328,8 @@ pub mod ethertype {
     pub const ARP: u16 = 0x0806;
     pub const DOT1Q: u16 = 0x8100;
     pub const IPV6: u16 = 0x86DD;
-    /// Loopback (Ethernet Configuration Testing Protocol); carries no payload,
-    /// so it is the default for a frame with nothing stacked under it.
+    /// Loopback; carries no payload, so it is the default for a frame with
+    /// nothing stacked under it.
     pub const LOOP: u16 = 0x9000;
 }
 

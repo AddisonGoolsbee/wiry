@@ -1,7 +1,7 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldKind {
     Uint,
-    /// Little-endian integer. Must be a whole number of bytes wide.
+    /// Must be a whole number of bytes wide.
     LeUint,
     Ipv4Addr,
     /// Rendered in RFC 5952 form.
@@ -9,30 +9,30 @@ pub enum FieldKind {
     MacAddr,
     Flags,
     Bytes,
-    /// Raw bytes running to the end of the header.
+    /// Runs to the end of the header.
     VarBytes,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct FieldDesc {
     pub name: &'static str,
-    /// Bit offset from the first byte of this layer's header.
+    /// From the first byte of this layer's header.
     pub bit_off: u16,
     /// Ignored for `VarBytes`.
     pub bit_len: u16,
     pub kind: FieldKind,
     pub default: u64,
-    /// Least-significant bit first. Only used by `FieldKind::Flags`.
+    /// Least-significant bit first.
     pub flags: &'static [&'static str],
-    /// Recomputed during serialisation unless the user pinned it explicitly.
+    /// Recomputed during serialisation unless the user pinned it.
     pub computed: bool,
     /// Given the layer's header bytes, so a field can be gated on an earlier
     /// field of the same header, such as ICMP's type.
     pub cond: Option<fn(&[u8]) -> bool>,
-    /// Default for fields wider than the 64 bits `default` holds.
+    /// For fields wider than the 64 bits `default` holds.
     pub default_bytes: Option<&'static [u8]>,
-    /// `VarBytes` only: the field runs to the end of the whole layer, not just
-    /// to the end of its header, so writing it resizes the packet.
+    /// `VarBytes` only: runs to the end of the whole layer rather than of its
+    /// header, so writing it resizes the packet.
     pub to_end: bool,
 }
 
@@ -55,129 +55,72 @@ impl FieldDesc {
         }
     }
 
+    const fn new(
+        name: &'static str,
+        bit_off: u16,
+        bit_len: u16,
+        kind: FieldKind,
+        default: u64,
+    ) -> Self {
+        Self {
+            name,
+            bit_off,
+            bit_len,
+            kind,
+            default,
+            flags: &[],
+            computed: false,
+            cond: None,
+            default_bytes: None,
+            to_end: false,
+        }
+    }
+
     pub const fn uint(name: &'static str, bit_off: u16, bit_len: u16, default: u64) -> Self {
-        Self {
-            name,
-            bit_off,
-            bit_len,
-            kind: FieldKind::Uint,
-            default,
-            flags: &[],
-            computed: false,
-            cond: None,
-            default_bytes: None,
-            to_end: false,
-        }
+        Self::new(name, bit_off, bit_len, FieldKind::Uint, default)
     }
+
     pub const fn computed_uint(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
-        Self {
-            name,
-            bit_off,
-            bit_len,
-            kind: FieldKind::Uint,
-            default: 0,
-            flags: &[],
-            computed: true,
-            cond: None,
-            default_bytes: None,
-            to_end: false,
-        }
+        let mut f = Self::new(name, bit_off, bit_len, FieldKind::Uint, 0);
+        f.computed = true;
+        f
     }
+
     pub const fn ipv4(name: &'static str, bit_off: u16, default: u64) -> Self {
-        Self {
-            name,
-            bit_off,
-            bit_len: 32,
-            kind: FieldKind::Ipv4Addr,
-            default,
-            flags: &[],
-            computed: false,
-            cond: None,
-            default_bytes: None,
-            to_end: false,
-        }
+        Self::new(name, bit_off, 32, FieldKind::Ipv4Addr, default)
     }
+
     pub const fn ipv6(name: &'static str, bit_off: u16) -> Self {
-        Self {
-            name,
-            bit_off,
-            bit_len: 128,
-            kind: FieldKind::Ipv6Addr,
-            default: 0,
-            flags: &[],
-            computed: false,
-            cond: None,
-            default_bytes: None,
-            to_end: false,
-        }
+        Self::new(name, bit_off, 128, FieldKind::Ipv6Addr, 0)
     }
+
     pub const fn mac(name: &'static str, bit_off: u16) -> Self {
-        Self {
-            name,
-            bit_off,
-            bit_len: 48,
-            kind: FieldKind::MacAddr,
-            default: 0,
-            flags: &[],
-            computed: false,
-            cond: None,
-            default_bytes: None,
-            to_end: false,
-        }
+        Self::new(name, bit_off, 48, FieldKind::MacAddr, 0)
     }
+
     pub const fn flags(
         name: &'static str,
         bit_off: u16,
         bit_len: u16,
         names: &'static [&'static str],
     ) -> Self {
-        Self {
-            name,
-            bit_off,
-            bit_len,
-            kind: FieldKind::Flags,
-            default: 0,
-            flags: names,
-            computed: false,
-            cond: None,
-            default_bytes: None,
-            to_end: false,
-        }
+        let mut f = Self::new(name, bit_off, bit_len, FieldKind::Flags, 0);
+        f.flags = names;
+        f
     }
+
     pub const fn var_bytes(name: &'static str, bit_off: u16) -> Self {
-        Self {
-            name,
-            bit_off,
-            bit_len: 0,
-            kind: FieldKind::VarBytes,
-            default: 0,
-            flags: &[],
-            computed: false,
-            cond: None,
-            default_bytes: None,
-            to_end: false,
-        }
+        Self::new(name, bit_off, 0, FieldKind::VarBytes, 0)
     }
-    /// `var_bytes` for a layer whose header is the whole layer, so the field
-    /// has no end of its own and a write to it resizes the packet.
+
     pub const fn var_bytes_to_end(name: &'static str, bit_off: u16) -> Self {
         let mut f = Self::var_bytes(name, bit_off);
         f.to_end = true;
         f
     }
+
     pub const fn bytes(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
-        Self {
-            name,
-            bit_off,
-            bit_len,
-            kind: FieldKind::Bytes,
-            default: 0,
-            flags: &[],
-            computed: false,
-            cond: None,
-            default_bytes: None,
-            to_end: false,
-        }
+        Self::new(name, bit_off, bit_len, FieldKind::Bytes, 0)
     }
 }
 
@@ -246,9 +189,8 @@ pub fn write_bits(buf: &mut [u8], bit_off: u16, bit_len: u16, val: u64) {
     if bit_len == 0 || end > buf.len() * 8 {
         return;
     }
-    // An integer fills the low-order 64 bits of a field wider than that and
-    // zeroes the rest, so `IPv6.src = 1` is `::1`. Shifting a u64 by the full
-    // width instead would repeat the value every 64 bits.
+    // An integer fills the low-order 64 bits of a wider field and zeroes the
+    // rest, so `IPv6.src = 1` is `::1`.
     if bit_len > 64 {
         for i in start..end - 64 {
             buf[i / 8] &= !(1u8 << (7 - (i % 8)));
@@ -256,7 +198,7 @@ pub fn write_bits(buf: &mut [u8], bit_off: u16, bit_len: u16, val: u64) {
         write_bits(buf, (end - 64) as u16, 64, val);
         return;
     }
-    if start % 8 == 0 && bit_len % 8 == 0 && bit_len <= 64 {
+    if start % 8 == 0 && bit_len % 8 == 0 {
         let b0 = start / 8;
         let n = (bit_len / 8) as usize;
         for i in 0..n {
@@ -285,9 +227,8 @@ fn fixed_bytes<const N: usize>(hdr: &[u8], bit_off: u16) -> [u8; N] {
     out
 }
 
-/// Converts between a field's value and the bits on the wire. Little-endian
-/// fields are byte-reversed; the operation is its own inverse, so both
-/// directions go through here.
+/// Byte-reverses a little-endian field. Its own inverse, so both directions
+/// go through here.
 #[inline]
 pub fn wire_uint(f: &FieldDesc, v: u64) -> u64 {
     if f.kind != FieldKind::LeUint {
