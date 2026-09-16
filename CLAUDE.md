@@ -208,20 +208,44 @@ parallel by separate agents. Each owns its own file, follows the pattern in
 Shared files (`proto.rs`, `packet.rs`, `options.rs`, the PyO3 crate) are edited by
 the orchestrator only, to avoid concurrent-edit conflicts.
 
-## 9. Current state and what is next
+## 9. Current state
 
-Done: the core engine, all thirteen layers in scope, Python bindings and facade,
-pcap I/O, CI, wheel building, benchmark and parity harnesses.
+All thirteen in-scope layers are complete, including TCP/IPv4/DHCP options in
+both directions, DNS record sections with name compression, and pcap plus pcapng
+reading. Field names match scapy exactly across all eleven audited layers, zero
+missing and zero extra.
 
-In progress: TCP/IPv4 options, DHCP options, DNS record sections with name
-compression, pcapng reading.
+Beyond parity:
 
-**Next, and the most strategically important item: `fields_desc` extensibility
-(E3)** — defining new protocol layers from Python. This is the feature that makes
-people choose Scapy over faster alternatives, and shipping without it repeats the
-exact mistake that killed pypacker. A Rust core that cannot be extended from
-Python is a dead end regardless of its benchmark.
+- **Columnar API.** `columns()` extracts many fields in one pass and one
+  crossing; filters are data, not callbacks, so selection stays in Rust. This is
+  the differentiator, since scapy has no equivalent. Dataframe exports to polars,
+  arrow and pandas are optional extras, never dependencies.
+- **Fuzzing.** Seven libFuzzer targets plus seeded property tests that run on
+  stable as part of `cargo test`. Both crates forbid unsafe.
+- **Two parity harnesses.** `dev/parity_check.py` covers dissection over real
+  captures; `dev/build_matrix.py` enumerates construction. Both must stay at
+  100%. The second exists because the first alone let a dropped payload survive
+  a green suite: read-path coverage does not imply write-path coverage.
 
-The design to follow is pydantic-core's: Python declares layers as **data**, and
-a Rust interpreter executes that description. Do not put a Python callback in the
-dissection hot loop.
+### What remains
+
+The live-capture surface (`sniff`, `send`, `sr`) is deliberately out of scope
+and its API shape is reserved so adding it stays additive.
+
+Known gaps are enumerated in `DEVIATIONS.md`. The notable ones: two default
+values where scapy reads the live interface or ships a sample DNS question;
+conditions that would need to see a layer other than their own; DHCP option 82
+sub-options; pcapng writing; and SACK blocks not split into edge pairs.
+
+### Conventions worth not rediscovering
+
+- Read paths and write paths need separate test coverage. They have separate
+  harnesses for a reason.
+- TLV length octets do not mean the same thing in every protocol. TCP and IPv4
+  count the code and length octets; DHCP counts only the payload. The wrong rule
+  mis-decodes silently rather than failing.
+- A timing assertion placed after the call it measures cannot catch a hang. Run
+  the suspect work on a worker thread with a deadline.
+- Benchmarks report lazy and eager modes, compare identical packet sets, and
+  measure memory in isolated processes, because `ru_maxrss` is a high-water mark.
