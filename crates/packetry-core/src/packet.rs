@@ -202,7 +202,12 @@ impl Packet {
             return false;
         };
         let a = s.off as usize + (f.bit_off / 8) as usize;
-        let room = self.buf.len().saturating_sub(a);
+        let mut room = self.buf.len().saturating_sub(a);
+        // An oversized value is truncated to the field, never spilled into the
+        // next one. A variable-length field has no width of its own.
+        if f.bit_len > 0 {
+            room = room.min((f.bit_len / 8) as usize);
+        }
         let n = val.len().min(room);
         self.buf[a..a + n].copy_from_slice(&val[..n]);
         // A fixed-width field is replaced, not overwritten in part: a short
@@ -431,6 +436,21 @@ mod tests {
             p.get(0, "chaddr").unwrap(),
             FieldValue::Bytes(vec![9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         );
+    }
+
+    #[test]
+    fn an_oversized_value_is_truncated_to_the_field() {
+        let mut p = Packet::build(&[ProtoId::Ipv4]);
+        assert!(p.set_bytes(0, "src", &[1, 2, 3, 4, 5, 6, 7, 8]));
+        assert_eq!(p.get(0, "src").unwrap(), FieldValue::Ipv4([1, 2, 3, 4]));
+        assert_eq!(p.get(0, "dst").unwrap(), FieldValue::Ipv4([127, 0, 0, 1]));
+
+        let mut e = Packet::build(&[ProtoId::Ether, ProtoId::Ipv4]);
+        let (ty, dst) = (e.get(0, "type").unwrap(), e.get(0, "dst").unwrap());
+        assert!(e.set_bytes(0, "src", &[0xaa; 12]));
+        assert_eq!(e.get(0, "src").unwrap(), FieldValue::Mac([0xaa; 6]));
+        assert_eq!(e.get(0, "dst").unwrap(), dst);
+        assert_eq!(e.get(0, "type").unwrap(), ty);
     }
 
     #[test]

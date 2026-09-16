@@ -103,6 +103,17 @@ def test_mac_strings_accept_both_separators(pkt, mac):
     assert Ether(bytes(pkt))[Ether].dst == mac.replace("-", ":").lower()
 
 
+def test_an_oversized_byte_value_is_truncated_to_its_field(pkt):
+    pkt[IP].src = b"\x01\x02\x03\x04\x05\x06\x07\x08"
+    assert pkt[IP].src == "1.2.3.4"
+    assert pkt[IP].dst == "10.0.0.2"
+
+    pkt[Ether].src = b"\xaa" * 12
+    assert pkt[Ether].src == "aa:aa:aa:aa:aa:aa"
+    assert pkt[Ether].dst == "00:11:22:33:44:55"
+    assert pkt[Ether].type == 0x0800
+
+
 @pytest.mark.parametrize(
     "written,read_back",
     [
