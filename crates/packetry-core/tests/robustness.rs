@@ -5,8 +5,8 @@
 use packetry_core::layers::dns;
 use packetry_core::options::{self, Item};
 use packetry_core::packet::Packet;
-use packetry_core::proto::{desc, ProtoId};
-use packetry_core::{pcap, pcapng, show};
+use packetry_core::proto::{self, desc, ProtoId};
+use packetry_core::{parse, pcap, pcapng, show};
 use std::time::{Duration, Instant};
 
 /// Fixed so a failure is reproducible; printed in every assertion message.
@@ -122,6 +122,54 @@ fn exercise(pkt: &mut Packet, what: &str) {
     let _ = show::show(pkt);
     let _ = pkt.to_bytes();
     check_spans(pkt, what);
+    exercise_writes(pkt, what);
+}
+
+/// Values of every shape a write accepts. Strings go through `parse::value_for`
+/// exactly as the Python facade sends them.
+const WRITE_STRS: [&str; 4] = ["1.2.3.4", "00:11:22:33:44:55", "::1", "SA"];
+
+/// The write half of the engine carries the same never-panic contract as the
+/// read half, and only a write pass tests it. Runs on a copy, after the read
+/// assertions have seen the input pristine.
+fn exercise_writes(pkt: &Packet, what: &str) {
+    for i in 0..pkt.layers().len() {
+        let proto = pkt.layers()[i].proto;
+        let names: Vec<&'static str> = proto::active_fields(proto, pkt.header(i))
+            .map(|f| f.name)
+            .collect();
+        for name in names {
+            // One copy per field: writing a field can deactivate the
+            // conditional fields after it, which would leave them untested.
+            let mut p = pkt.clone();
+            for v in [0u64, 1, u64::MAX] {
+                p.set_uint(i, name, v);
+            }
+            for b in [&[][..], &[0xa5][..], &[0x5a; 24][..]] {
+                p.set_bytes(i, name, b);
+            }
+            for s in WRITE_STRS {
+                let Some(f) = proto::active_field_of(proto, p.header(i), name) else {
+                    continue;
+                };
+                match parse::value_for(f, s) {
+                    Some(parse::ValueBits::Uint(v)) => p.set_uint(i, name, v),
+                    Some(parse::ValueBits::Bytes(b)) => p.set_bytes(i, name, &b),
+                    None => false,
+                };
+            }
+            let _ = p.to_bytes();
+            check_spans(&p, what);
+        }
+    }
+
+    let mut q = pkt.clone();
+    if !q.layers().is_empty() {
+        q.set_payload(q.layers().len() - 1, b"written payload");
+        q.refit_headers();
+        let _ = q.to_bytes();
+        check_spans(&q, what);
+    }
 }
 
 // Valid packets, hand-built from the RFC layouts and not from any tool.
@@ -224,9 +272,25 @@ fn eth_dhcp() -> Vec<u8> {
     v
 }
 
+/// RFC 792 Timestamp: the only built-in whose fields are declared past the
+/// minimum header, so truncating it is what reaches a write past the buffer.
+fn eth_ip_icmp_timestamp() -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]);
+    v.extend_from_slice(&[0x08, 0x00]);
+    v.extend_from_slice(&[0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00]);
+    v.extend_from_slice(&[0x40, 0x01, 0x00, 0x00]);
+    v.extend_from_slice(&[10, 0, 0, 1, 10, 0, 0, 2]);
+    v.extend_from_slice(&[13, 0, 0x00, 0x00, 0x12, 0x34, 0x00, 0x01]);
+    v.extend_from_slice(&[0, 0, 0x10, 0x00, 0, 0, 0x20, 0x00, 0, 0, 0x30, 0x00]);
+    v
+}
+
 fn valid_frames() -> Vec<(&'static str, Vec<u8>)> {
     vec![
         ("eth/ip/tcp", eth_ip_tcp()),
+        ("eth/ip/icmp timestamp", eth_ip_icmp_timestamp()),
         ("eth/ip/tcp+options", eth_ip_tcp_options()),
         ("eth/ip/udp/dns", eth_ip_udp_dns()),
         ("eth/arp", eth_arp()),

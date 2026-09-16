@@ -246,6 +246,16 @@ pub fn write_bits(buf: &mut [u8], bit_off: u16, bit_len: u16, val: u64) {
     if bit_len == 0 || end > buf.len() * 8 {
         return;
     }
+    // An integer fills the low-order 64 bits of a field wider than that and
+    // zeroes the rest, so `IPv6.src = 1` is `::1`. Shifting a u64 by the full
+    // width instead would repeat the value every 64 bits.
+    if bit_len > 64 {
+        for i in start..end - 64 {
+            buf[i / 8] &= !(1u8 << (7 - (i % 8)));
+        }
+        write_bits(buf, (end - 64) as u16, 64, val);
+        return;
+    }
     if start % 8 == 0 && bit_len % 8 == 0 && bit_len <= 64 {
         let b0 = start / 8;
         let n = (bit_len / 8) as usize;
@@ -341,6 +351,13 @@ mod tests {
         assert_eq!(b[0], 0x45);
         write_bits(&mut b, 8, 16, 0xbeef);
         assert_eq!(read_bits(&b, 8, 16), 0xbeef);
+    }
+
+    #[test]
+    fn an_integer_fills_the_low_64_bits_of_a_wider_field() {
+        let mut b = [0xffu8; 16];
+        write_bits(&mut b, 0, 128, 1);
+        assert_eq!(b, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
     }
 
     #[test]

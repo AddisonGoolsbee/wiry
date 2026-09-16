@@ -206,7 +206,11 @@ impl Packet {
         let Some(f) = crate::proto::active_field_of(s.proto, self.header(layer), name) else {
             return false;
         };
-        let a = s.off as usize + (f.bit_off / 8) as usize;
+        // A conditional field may be declared past the end of a header this
+        // short: ICMP's timestamps sit at byte 16 of a message whose minimum is
+        // 8. Clamping the start refuses such a write instead of panicking,
+        // which is the rule `write_bits` already follows.
+        let a = (s.off as usize + (f.bit_off / 8) as usize).min(self.buf.len());
         if f.to_end {
             self.replace_to_end(layer, a, val);
             return true;
@@ -573,6 +577,14 @@ mod tests {
                 FieldValue::Uint(8 + len as u64)
             );
         }
+    }
+
+    #[test]
+    fn a_field_declared_past_a_clipped_header_is_refused_not_written() {
+        // RFC 792 Timestamp: ts_tx sits at byte 16 of a message clipped to 8.
+        let mut p = Packet::dissect(vec![13, 0, 0, 0, 0, 0, 0, 0], ProtoId::Icmp);
+        assert!(p.set_bytes(0, "ts_tx", &[1, 2, 3, 4]));
+        assert_eq!(p.len(), 8);
     }
 
     #[test]

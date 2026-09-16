@@ -176,3 +176,12 @@ def test_dissecting_under_ip_keeps_the_conditional_fields():
     assert bytes(pkt)[34:] == inner
     assert pkt[ICMP].ts_rx == 0x2000
     assert pkt[ICMP].id == 7
+
+
+@pytest.mark.parametrize("value", [b"\x01\x02\x03\x04", 0x1234, "4660"])
+def test_a_field_past_a_clipped_header_is_refused_not_a_crash(value):
+    # A snaplen-clipped Timestamp message: ts_tx is declared at byte 16 of a
+    # header that stops at 8.
+    pkt = ICMP(b"\x0d" + bytes(7))
+    pkt[ICMP].ts_tx = value
+    assert len(bytes(pkt)) == 8

@@ -2,8 +2,8 @@
 //! ever points outside the buffer it came from.
 
 use packetry_core::packet::Packet;
-use packetry_core::proto::{desc, ProtoId};
-use packetry_core::show;
+use packetry_core::proto::{self, desc, ProtoId};
+use packetry_core::{parse, show};
 
 pub const ALL_PROTOS: [ProtoId; 14] = [
     ProtoId::Raw,
@@ -61,4 +61,50 @@ pub fn exercise(pkt: &mut Packet) {
     let _ = show::show(pkt);
     let _ = pkt.to_bytes();
     check_spans(pkt);
+    exercise_writes(pkt);
+}
+
+/// Values of every shape a write accepts. Strings go through `parse::value_for`
+/// exactly as the Python facade sends them.
+const WRITE_STRS: [&str; 4] = ["1.2.3.4", "00:11:22:33:44:55", "::1", "SA"];
+
+/// The write half of the engine carries the same never-panic contract as the
+/// read half, and only a write pass tests it. Runs on a copy, after the read
+/// assertions have seen the input pristine.
+pub fn exercise_writes(pkt: &Packet) {
+    let mut p = pkt.clone();
+    for i in 0..p.layers().len() {
+        let proto = p.layers()[i].proto;
+        let names: Vec<&'static str> = proto::active_fields(proto, p.header(i))
+            .map(|f| f.name)
+            .collect();
+        for name in names {
+            for v in [0u64, 1, u64::MAX] {
+                p.set_uint(i, name, v);
+            }
+            for b in [&[][..], &[0xa5][..], &[0x5a; 24][..]] {
+                p.set_bytes(i, name, b);
+            }
+            for s in WRITE_STRS {
+                let Some(f) = proto::active_field_of(proto, p.header(i), name) else {
+                    continue;
+                };
+                match parse::value_for(f, s) {
+                    Some(parse::ValueBits::Uint(v)) => p.set_uint(i, name, v),
+                    Some(parse::ValueBits::Bytes(b)) => p.set_bytes(i, name, &b),
+                    None => false,
+                };
+            }
+        }
+        let _ = p.to_bytes();
+        check_spans(&p);
+    }
+
+    let mut q = pkt.clone();
+    if !q.layers().is_empty() {
+        q.set_payload(q.layers().len() - 1, b"written payload");
+        q.refit_headers();
+        let _ = q.to_bytes();
+        check_spans(&q);
+    }
 }
