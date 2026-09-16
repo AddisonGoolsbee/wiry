@@ -37,27 +37,32 @@ between runs; these are from the lower of two.
 
 | Workload | scapy | packetry | |
 |---|---|---|---|
-| Read + 2 fields per packet | 11,141 pkt/s | 222,126 pkt/s | **19.9x** |
-| Same, bulk column API | 11,141 pkt/s | 4,362,903 pkt/s | **391.6x** |
-| Dissect + re-serialise | 10,655 pkt/s | 625,220 pkt/s | **58.7x** |
-| Build + serialise Ether/IP/TCP | 4,571 pkt/s | 142,744 pkt/s | **31.2x** |
+| Read + 2 fields per packet | 11,490 pkt/s | 196,892 pkt/s | **17.1x** |
+| Same, bulk column API | 11,490 pkt/s | 4,071,061 pkt/s | **354.3x** |
+| Dissect + re-serialise | 11,347 pkt/s | 626,076 pkt/s | **55.2x** |
+| Build + serialise Ether/IP/TCP | 4,641 pkt/s | 120,557 pkt/s | **26.0x** |
 
 Memory, each measured in its own process (`python dev/bench_memory.py <pcap>`):
 
 | | packets held | peak RSS | per packet |
 |---|---|---|---|
-| scapy | 200,000 | 1,334 MB | 6.67 KB |
-| packetry | 549,726 | 339 MB | **0.62 KB** |
+| scapy | 200,000 | 1,318 MB | 6.59 KB |
+| packetry | 549,726 | 347 MB | **0.63 KB** |
 
 packetry read the entire 549,726-packet file and extracted a field from every
-packet in 0.24 s. scapy took 18.82 s to do the same for 200,000 of them.
+packet in 0.21 s. scapy took 18.23 s to do the same for 200,000 of them.
 
-Two honest caveats about these numbers:
+Three honest caveats about these numbers:
 
-- **The 391.6x is a different API, not the same one made faster.** It is
+- **The 354.3x is a different API, not the same one made faster.** It is
   `field_column`, which does whole-capture work in one crossing of the Rust
-  boundary. The like-for-like per-packet loop number is 19.9x. Both are reported
+  boundary. The like-for-like per-packet loop number is 17.1x. Both are reported
   above and both are in the benchmark script.
+- **These figures fell as correctness work landed.** An earlier build read at
+  19.9x and built at 31.2x. Bounds checks, Ethernet-trailer handling and a rich
+  flag type cost roughly 10% on the per-packet paths. That trade was worth it:
+  the same work fixed length and checksum corruption on 1,568 of 14,261 real
+  packets.
 - **packetry currently implements fewer protocols than scapy.** Speed and
   coverage are not the same axis. The benchmark only touches Ethernet, IPv4, TCP
   and UDP, which both libraries fully implement, so the comparison is on shared
@@ -225,12 +230,12 @@ Four columns over the same 549,726-packet capture:
 
 | Approach | Rate | |
 |---|---|---|
-| `columns()`, one pass | 1,922,282 pkt/s | |
-| four separate `field_column()` calls | 1,356,389 pkt/s | 1.4x slower |
-| Python loop over packets | 191,533 pkt/s | 10x slower |
-| scapy loop over packets | 10,365 pkt/s | **185x slower** |
+| `columns()`, one pass | 1,946,683 pkt/s | |
+| four separate `field_column()` calls | 1,345,818 pkt/s | 1.4x slower |
+| Python loop over packets | 179,148 pkt/s | 10.9x slower |
+| scapy loop over packets | 10,609 pkt/s | **183x slower** |
 
-Filtering to TCP first reaches 9,069,129 pkt/s, against a 789x slower scapy
+Filtering to TCP first reaches 8,779,263 pkt/s, against a 758x slower scapy
 equivalent. The honest caveat: the win over four `field_column()` calls is only
 1.4x, because once the work is in Rust it is building the Python results that
 dominates, not the dissection.
