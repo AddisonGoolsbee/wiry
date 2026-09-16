@@ -7,17 +7,17 @@ use std::time::Instant;
 fuzz_target!(|data: &[u8]| {
     let start = Instant::now();
     let r = dns::parse_records(data);
-    // Name compression lets the input point anywhere in the message, so the
-    // only defence against a decompression bomb is that this returns at all.
+    // Name compression lets the input point anywhere in the message, so
+    // returning at all is the defence against a decompression bomb.
     assert!(
         start.elapsed().as_secs() < 2,
         "parse_records took too long on {} bytes",
         data.len()
     );
 
-    // Record count is the wrong quantity: a bomb of 65,535 two-octet pointers
-    // stays well under the input size while decoding hundreds of MB of names.
-    // Decoded name bytes are what the message has no other bound on.
+    // Record count is the wrong quantity: 65,535 two-octet pointers stay under
+    // the input size while decoding hundreds of MB. Name bytes are the only
+    // quantity the message has no other bound on.
     let names: usize = r.qd.iter().map(|q| q.qname.len()).sum::<usize>()
         + r.an
             .iter()

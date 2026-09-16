@@ -19,7 +19,7 @@ fuzz_target!(|data: &[u8]| {
         let mut pkt = Packet::dissect(rec.data.to_vec(), link);
         packetry_fuzz::exercise(&mut pkt);
     }
-    // Each record costs a 16-byte header, so the count is bounded by the file.
+    // Each record costs a 16-byte header.
     assert!(seen <= data.len() / 16 + 1);
     assert_eq!(pcap::count(data).unwrap(), seen);
 });

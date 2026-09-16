@@ -1,6 +1,7 @@
 //! Robustness properties over malformed input: every parser returns what it
-//! managed, never panics and never loops forever. Same contract as the `fuzz/`
-//! targets, with deterministic inputs so it runs in ordinary `cargo test`.
+//! managed, never panics and never loops forever. The same contract as
+//! `fuzz/src/lib.rs`, with deterministic inputs so it runs under `cargo test`;
+//! the two sets of assertions must stay in step.
 
 use packetry_core::layers::dns;
 use packetry_core::options::{self, Item};
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 /// Fixed so a failure is reproducible; printed in every assertion message.
 const SEED: u64 = 0x2545_F491_4F6C_DD1D;
 
-/// Loose enough not to flake on a loaded CI runner, tight enough that an
+/// Loose enough not to flake on a loaded runner, tight enough that an
 /// unbounded walk trips it.
 const BUDGET: Duration = Duration::from_secs(20);
 
@@ -50,8 +51,8 @@ impl Rng {
     }
 }
 
-/// Runs `f` on a worker thread: a parser that loops forever would otherwise
-/// hang the whole run instead of failing.
+/// Runs `f` on a worker thread, so a parser that loops forever fails rather
+/// than hanging the run.
 fn within<F: FnOnce() + Send + 'static>(limit: Duration, what: &'static str, f: F) {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -115,10 +116,10 @@ fn exercise(pkt: &mut Packet, what: &str) {
             let v = pkt.get_desc(i, f);
             let _ = show::render_value(&v);
             let _ = v.as_uint();
-            // A lookup by name answers with the field this header carries,
-            // which is neither this one when the condition is false nor this
-            // one when another field shares the name under a disjoint
-            // condition (ICMP).
+            // A lookup by name answers with the field this header carries, so
+            // compare only when that resolves back to this one: a false
+            // condition, or another field sharing the name under a disjoint
+            // condition (ICMP), both give a different answer.
             if proto::active_field_of(proto, pkt.header(i), f.name)
                 .is_some_and(|a| std::ptr::eq(a, f))
             {
@@ -180,8 +181,6 @@ fn exercise_writes(pkt: &Packet, what: &str) {
         check_spans(&q, what);
     }
 }
-
-// Valid packets, hand-built from the RFC layouts and not from any tool.
 
 fn eth_ip_tcp() -> Vec<u8> {
     let mut v = Vec::new();
@@ -465,8 +464,6 @@ fn random_input_round_trips_to_a_fixed_point() {
     }
 }
 
-// DNS name compression: the highest-value adversarial surface.
-
 fn dns_header(qd: u16, an: u16, ns: u16, ar: u16) -> Vec<u8> {
     let mut v = vec![0xab, 0xcd, 0x81, 0x80];
     v.extend_from_slice(&qd.to_be_bytes());
@@ -484,7 +481,7 @@ fn ptr(target: usize) -> [u8; 2] {
 fn dns_adversarial_compression_pointers_terminate() {
     let mut cases: Vec<(&str, Vec<u8>)> = Vec::new();
 
-    // Self-referential: the pointer at 12 names offset 12.
+    // Self-referential: 12 -> 12.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&ptr(12));
     m.extend_from_slice(&[0, 1, 0, 1]);
@@ -497,19 +494,19 @@ fn dns_adversarial_compression_pointers_terminate() {
     m.extend_from_slice(&[0, 1, 0, 1]);
     cases.push(("mutually referential", m));
 
-    // Forward pointer into later, unparsed bytes.
+    // Forward pointer.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&ptr(40));
     m.extend_from_slice(&[0u8; 40]);
     cases.push(("forward", m));
 
-    // Target past the end of the message.
+    // Out of bounds.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&ptr(0x3fff));
     m.extend_from_slice(&[0, 1, 0, 1]);
     cases.push(("out of bounds", m));
 
-    // Every pointer here is individually legal, so only the jump cap stops it.
+    // Every pointer is individually legal, so only the jump cap stops it.
     let mut m = dns_header(1, 0, 0, 0);
     for i in 0..600 {
         let t = if i == 0 { 12 } else { 12 + (i - 1) * 2 };
@@ -519,7 +516,7 @@ fn dns_adversarial_compression_pointers_terminate() {
     m.splice(12..14, ptr(last).iter().copied());
     cases.push(("long backwards chain", m));
 
-    // Alternating a real label with a backwards jump: a decompression bomb.
+    // Label/jump alternation: a decompression bomb.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&[4, b'a', b'a', b'a', b'a']);
     for _ in 0..200 {
@@ -529,26 +526,22 @@ fn dns_adversarial_compression_pointers_terminate() {
     }
     cases.push(("label/jump alternation", m));
 
-    // Reserved label types 0b01 and 0b10.
     for (name, top) in [("reserved 0b01", 0x40u8), ("reserved 0b10", 0x80u8)] {
         let mut m = dns_header(1, 0, 0, 0);
         m.extend_from_slice(&[top | 0x0a, 0, 0, 1, 0, 1]);
         cases.push((name, m));
     }
 
-    // Header lies about the section counts.
     let mut m = dns_header(0xffff, 0xffff, 0xffff, 0xffff);
     m.extend_from_slice(&[1, b'a', 0, 0, 1, 0, 1]);
     cases.push(("count lie", m));
 
-    // Maximal counts over a buffer that is all pointers.
     let mut m = dns_header(0xffff, 0xffff, 0xffff, 0xffff);
     for i in 0..2000 {
         m.extend_from_slice(&ptr(12 + (i % 8)));
     }
     cases.push(("pointer field", m));
 
-    // RDLENGTH reaching past the record and into the next one.
     let mut m = dns_header(0, 1, 0, 0);
     m.extend_from_slice(&[1, b'a', 0]);
     m.extend_from_slice(&[0, 6, 0, 1, 0, 0, 0, 0]); // SOA, ttl 0
@@ -577,9 +570,8 @@ fn dns_random_and_mutated_messages_terminate() {
 
     for i in 0..6000 {
         let data = match i % 3 {
-            // Pure random.
             0 => rng.bytes_below(300),
-            // A real message with random mutations, biased towards pointers.
+            // A real message mutated, biased towards pointers.
             1 => {
                 let mut d = base[dns_off..].to_vec();
                 for _ in 0..1 + rng.below(4) {
@@ -592,7 +584,6 @@ fn dns_random_and_mutated_messages_terminate() {
                 }
                 d
             }
-            // A valid header over random record bytes.
             _ => {
                 let mut d = dns_header(
                     (rng.next_u64() >> 24) as u16,
@@ -653,8 +644,8 @@ fn option_regions_never_hang_or_over_read() {
                 let items = options::walk_tlv(data, single, end, |c, p| {
                     Item::uint("o", c as u32, p.iter().map(|b| *b as u64).sum())
                 });
-                // Every item consumes at least one octet, so a walk that fails
-                // to advance shows up here rather than as a hang.
+                // Every item consumes an octet, so a non-advancing walk trips
+                // this rather than hanging.
                 assert!(
                     items.len() <= data.len(),
                     "walk_tlv emitted more items than octets (#{i}, seed {SEED:#x})"
@@ -775,7 +766,6 @@ fn capture_readers_survive_corruption() {
     assert_eq!(read_all_pcap(&pcap_ok), frames.len());
     assert_eq!(read_all_pcapng(&png_ok), frames.len());
 
-    // Truncate at every offset.
     for cut in 0..=pcap_ok.len() {
         read_all_pcap(&pcap_ok[..cut]);
     }
@@ -783,8 +773,8 @@ fn capture_readers_survive_corruption() {
         read_all_pcapng(&png_ok[..cut]);
     }
 
-    // Corrupt single bytes with extreme values, concentrating on the length
-    // and offset fields that drive the walk.
+    // Extreme single-byte values, concentrating on the length and offset
+    // fields that drive the walk.
     let mut rng = Rng::new(SEED ^ 0xcafe);
     let start = Instant::now();
     for i in 0..6000 {
@@ -810,7 +800,7 @@ fn capture_readers_survive_corruption() {
         }
     }
 
-    // Pure noise, including buffers that happen to start with a valid magic.
+    // Noise, including buffers that start with a valid magic.
     for _ in 0..2000 {
         let mut data = rng.bytes_below(200);
         read_all_pcap(&data);

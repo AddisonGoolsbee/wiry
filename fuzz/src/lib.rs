@@ -1,5 +1,7 @@
 //! Shared assertions: dissection does not panic, it terminates, and no span
-//! ever points outside the buffer it came from.
+//! points outside the buffer it came from. packetry-core's
+//! `tests/robustness.rs` keeps a deterministic copy of these; the two must
+//! stay in step.
 
 use packetry_core::packet::Packet;
 use packetry_core::proto::{self, desc, ProtoId};
@@ -37,13 +39,12 @@ pub fn check_spans(pkt: &Packet) {
     }
 }
 
-/// Reads every field of every layer, plus the option region and the serialised
+/// Reads every field of every layer, the option region and the serialised
 /// bytes: an out-of-bounds read inside the engine panics here.
 pub fn exercise(pkt: &mut Packet) {
     check_spans(pkt);
-    let n = pkt.layers().len();
     let total = pkt.len();
-    for i in 0..n {
+    for i in 0..pkt.layers().len() {
         let proto = pkt.layers()[i].proto;
         assert!(pkt.header(i).len() <= total);
         assert!(pkt.payload(i).len() <= total);
@@ -52,10 +53,10 @@ pub fn exercise(pkt: &mut Packet) {
             let v = pkt.get_desc(i, f);
             let _ = show::render_value(&v);
             let _ = v.as_uint();
-            // A lookup by name answers with the field this header carries,
-            // which is neither this one when the condition is false nor this
-            // one when another field shares the name under a disjoint
-            // condition (ICMP).
+            // A lookup by name answers with the field this header carries, so
+            // compare only when that resolves back to this one: a false
+            // condition, or another field sharing the name under a disjoint
+            // condition (ICMP), both give a different answer.
             if proto::active_field_of(proto, pkt.header(i), f.name)
                 .is_some_and(|a| std::ptr::eq(a, f))
             {
@@ -63,7 +64,6 @@ pub fn exercise(pkt: &mut Packet) {
             }
         }
         let _ = pkt.options(i);
-        assert!(pkt.has_layer(proto));
     }
     let _ = show::summary(pkt);
     let _ = show::show(pkt);
@@ -80,13 +80,15 @@ const WRITE_STRS: [&str; 4] = ["1.2.3.4", "00:11:22:33:44:55", "::1", "SA"];
 /// read half, and only a write pass tests it. Runs on a copy, after the read
 /// assertions have seen the input pristine.
 pub fn exercise_writes(pkt: &Packet) {
-    let mut p = pkt.clone();
-    for i in 0..p.layers().len() {
-        let proto = p.layers()[i].proto;
-        let names: Vec<&'static str> = proto::active_fields(proto, p.header(i))
+    for i in 0..pkt.layers().len() {
+        let proto = pkt.layers()[i].proto;
+        let names: Vec<&'static str> = proto::active_fields(proto, pkt.header(i))
             .map(|f| f.name)
             .collect();
         for name in names {
+            // One copy per field: writing a field can deactivate the
+            // conditional fields after it, which would leave them untested.
+            let mut p = pkt.clone();
             for v in [0u64, 1, u64::MAX] {
                 p.set_uint(i, name, v);
             }
@@ -103,9 +105,9 @@ pub fn exercise_writes(pkt: &Packet) {
                     None => false,
                 };
             }
+            let _ = p.to_bytes();
+            check_spans(&p);
         }
-        let _ = p.to_bytes();
-        check_spans(&p);
     }
 
     let mut q = pkt.clone();

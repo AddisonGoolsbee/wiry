@@ -19,8 +19,7 @@ fuzz_target!(|data: &[u8]| {
         let mut pkt = Packet::dissect(rec.data.to_vec(), link);
         packetry_fuzz::exercise(&mut pkt);
     }
-    // The smallest block is 12 bytes of framing, so an unbounded walk blows
-    // this assertion.
+    // The smallest block is 12 bytes of framing.
     assert!(seen <= data.len() / 12 + 1);
     assert_eq!(pcapng::count(data).unwrap(), seen);
 });
