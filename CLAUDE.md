@@ -221,6 +221,13 @@ Beyond parity:
   crossing; filters are data, not callbacks, so selection stays in Rust. This is
   the differentiator, since scapy has no equivalent. Dataframe exports to polars,
   arrow and pandas are optional extras, never dependencies.
+- **Layers declared from Python (E3).** pydantic-core's design: Python describes
+  a layer as data and the Rust interpreter executes it, so nothing crosses back
+  per packet or per field. `ProtoId` is a newtype over `u16` whose built-in
+  values keep the static dispatch table and whose higher values index a leaked,
+  append-only registry, which is why a declared layer costs a built-in one
+  nothing. This is the feature whose absence killed pypacker; do not let a Python
+  callback into the dissection loop while extending it.
 - **Fuzzing.** Seven libFuzzer targets plus seeded property tests that run on
   stable as part of `cargo test`. Both crates forbid unsafe.
 - **Two parity harnesses.** `dev/parity_check.py` covers dissection over real

@@ -79,11 +79,13 @@ Beyond the fixed headers:
   `ts_ori`/`ts_rx`/`ts_tx`, an unreachable has `nexthopmtu`, and asking a message
   for a field its type does not define is an error rather than a wrong answer.
 - **pcap and pcapng** both read, dispatched on the file's own magic.
+- **Layers you define yourself**, declared in Python and executed in Rust; see
+  below.
 
 Verified against scapy 2.7.0 on a real 14,261-packet capture: 3,000 of 3,000
 layer chains agree, 32,982 of 32,982 field comparisons are equal, and 3,000 of
 3,000 packets round-trip byte-identical, and every field name scapy defines for
-these layers exists here. 150 Rust and 380 Python tests pass.
+these layers exists here. 158 Rust and 399 Python tests pass.
 
 Offline only for now. There is no `sniff()` or `send()` yet; see
 [DEVIATIONS.md](DEVIATIONS.md) S2 for why and what the plan is.
@@ -148,6 +150,46 @@ cap.times()                     # timestamps
 
 These are the APIs that give the 391.6x figure. They agree exactly with the
 equivalent Python loop, and the test suite asserts that invariant.
+
+## Your own protocol layers
+
+A layer you declare is data, not code. Python hands the description to Rust once,
+at class-definition time, and the same dissector that runs the built-in layers
+runs yours — nothing crosses back into Python per packet or per field.
+
+```python
+from packetry import Packet, bind_layers, IP, UDP
+from packetry.fields import ByteField, BitField, ShortField, IntField, IPField
+
+class MyProto(Packet):
+    name = "MyProto"
+    fields_desc = [
+        ByteField("version", 1),
+        BitField("flags", 0, 4),
+        BitField("reserved", 0, 4),
+        ShortField("length", 0),
+        IntField("magic", 0xDEADBEEF),
+        IPField("peer", "0.0.0.0"),
+    ]
+
+bind_layers(UDP, MyProto, dport=9999)
+
+pkt = IP()/UDP()/MyProto(version=2, peer="10.0.0.1")   # dport set by the binding
+back = IP(bytes(pkt))
+back[MyProto].peer          # '10.0.0.1'
+MyProto in back             # True
+```
+
+From there it is an ordinary layer: `/` stacking, `pkt[MyProto]`, `in`, field
+get and set, `show()`, `summary()`, `bytes()`, dissection out of a capture, and
+the columnar API (`cap.columns([("MyProto", "version")])`).
+
+`packetry.fields` has `ByteField`, `ShortField`, `IntField`, `LongField`, their
+`X` and `LE` variants, `BitField`, `FlagsField`, `IPField`, `IP6Field`,
+`MACField`, `StrFixedLenField` and `StrField`. Bit offsets come from summing
+widths in declaration order, so bit fields may straddle octets as long as the
+layer totals a whole number of bytes. See [DEVIATIONS.md](DEVIATIONS.md) E3 for
+what a declared layer cannot yet express.
 
 ## Captures as columns
 
