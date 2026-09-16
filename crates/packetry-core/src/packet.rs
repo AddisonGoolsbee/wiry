@@ -202,8 +202,18 @@ impl Packet {
             return false;
         };
         let a = s.off as usize + (f.bit_off / 8) as usize;
-        let n = val.len().min(self.buf.len().saturating_sub(a));
+        let room = self.buf.len().saturating_sub(a);
+        let n = val.len().min(room);
         self.buf[a..a + n].copy_from_slice(&val[..n]);
+        // A fixed-width field is replaced, not overwritten in part: a short
+        // value would otherwise leave the tail of the previous one behind. A
+        // variable-length one has no end of its own, so it keeps what follows.
+        if f.bit_len > 0 {
+            let end = (a + (f.bit_len / 8) as usize).min(self.buf.len());
+            if end > a + n {
+                self.buf[a + n..end].fill(0);
+            }
+        }
         self.mark_dirty(layer);
         true
     }
@@ -389,6 +399,38 @@ mod tests {
     fn short_input_becomes_raw_not_panic() {
         let p = Packet::dissect(vec![0x00, 0x11], ProtoId::Ether);
         assert_eq!(p.layers()[0].proto, ProtoId::Raw);
+    }
+
+    #[test]
+    fn a_bound_registered_layer_is_built_and_dissected_again() {
+        use crate::proto::{bind, field_of, register};
+        let id = register("PktDemo".into(), vec![FieldDesc::uint("v", 0, 8, 7)], 1).unwrap();
+        bind(
+            ProtoId::Udp,
+            id,
+            vec![(field_of(ProtoId::Udp, "dport").unwrap(), 4242)],
+        )
+        .unwrap();
+
+        let mut built = Packet::build(&[ProtoId::Ipv4, ProtoId::Udp, id]);
+        assert_eq!(built.get(1, "dport").unwrap(), FieldValue::Uint(4242));
+        let bytes = built.to_bytes().to_vec();
+
+        let back = Packet::dissect(bytes, ProtoId::Ipv4);
+        let got: Vec<_> = back.layers().iter().map(|s| s.proto).collect();
+        assert_eq!(got, vec![ProtoId::Ipv4, ProtoId::Udp, id]);
+        assert_eq!(back.get(2, "v").unwrap(), FieldValue::Uint(7));
+    }
+
+    #[test]
+    fn a_short_value_replaces_a_fixed_width_field_rather_than_part_of_it() {
+        let mut p = Packet::build(&[ProtoId::Bootp]);
+        assert!(p.set_bytes(0, "chaddr", &[1, 2, 3, 4, 5, 6, 7, 8]));
+        assert!(p.set_bytes(0, "chaddr", &[9, 9]));
+        assert_eq!(
+            p.get(0, "chaddr").unwrap(),
+            FieldValue::Bytes(vec![9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        );
     }
 
     #[test]

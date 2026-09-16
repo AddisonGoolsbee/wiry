@@ -225,7 +225,9 @@ def test_known_layers_matches_the_exported_classes():
     names = known_layers()
     assert names[0] == "Ether"
     assert {"IP", "IPv6", "TCP", "UDP", "ICMP", "ARP", "Raw"} <= set(names)
-    for name in names:
+    # A layer declared from Python is known too, but lives in its own module.
+    for name in packetry._LAYERS:
+        assert name in names
         assert getattr(packetry, name)._name == name
 
 
@@ -246,7 +248,7 @@ def test_public_names_are_exported():
                  "hexdump", "hexdump_str", "ls", "known_layers"):
         assert name in packetry.__all__
         assert hasattr(packetry, name)
-    assert set(known_layers()) <= set(packetry.__all__)
+    assert set(packetry._LAYERS) <= set(packetry.__all__)
 
 
 def test_raw_helper_is_the_same_as_bytes(pkt):
