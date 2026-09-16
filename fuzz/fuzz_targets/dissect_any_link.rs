@@ -1,8 +1,8 @@
 #![no_main]
 
+use libfuzzer_sys::fuzz_target;
 use packetry_core::packet::Packet;
 use packetry_fuzz::ALL_PROTOS;
-use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     let Some((sel, body)) = data.split_first() else {

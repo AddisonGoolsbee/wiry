@@ -161,6 +161,24 @@ const MAX_JUMPS: usize = 64;
 /// can cause.
 const MAX_NAME_OCTETS: usize = 255;
 
+/// Every other decoded byte comes from a byte of the message, but a name does
+/// not: a two-octet pointer yields up to 255 octets, and 65,535 records of them
+/// turn a 2.75 MB message into hundreds of MB. One message may decode this many
+/// name bytes in total, which is orders of magnitude above any real message.
+pub const MAX_DECODED_NAME_BYTES: usize = 256 * 1024;
+
+/// What a record contributes to the decompression budget. RDATA that is not a
+/// name is bounded by its own RDLENGTH, so it costs nothing.
+pub fn decoded_name_bytes(rr: &ResourceRecord) -> usize {
+    rr.rrname.len()
+        + match &rr.rdata {
+            RData::Name(n) => n.len(),
+            RData::Mx { exchange, .. } => exchange.len(),
+            RData::Soa { mname, rname, .. } => mname.len() + rname.len(),
+            _ => 0,
+        }
+}
+
 fn be16(b: &[u8], off: usize) -> Option<u16> {
     let s = b.get(off..off + 2)?;
     Some(u16::from_be_bytes([s[0], s[1]]))
@@ -337,8 +355,9 @@ fn decode_soa(msg: &[u8], start: usize, end: usize) -> Option<RData> {
 
 /// `msg` must be the whole message starting at the 12-byte header, because
 /// compression pointers are offsets from that origin. Parsing stops at the
-/// first record that cannot be decoded and returns what was read; the header's
-/// section counts are an upper bound only.
+/// first record that cannot be decoded, or once the message has spent its
+/// decompression budget, and returns what was read; the header's section counts
+/// are an upper bound only.
 pub fn parse_records(msg: &[u8]) -> Records {
     let mut out = Records::default();
     if msg.len() < 12 {
@@ -352,9 +371,14 @@ pub fn parse_records(msg: &[u8]) -> Records {
     ];
 
     let mut pos = 12usize;
+    let mut budget = MAX_DECODED_NAME_BYTES;
     for _ in 0..counts[0] {
         match read_question(msg, pos) {
             Some((q, next)) => {
+                let Some(left) = budget.checked_sub(q.qname.len()) else {
+                    return out;
+                };
+                budget = left;
                 out.qd.push(q);
                 pos = next;
             }
@@ -367,6 +391,10 @@ pub fn parse_records(msg: &[u8]) -> Records {
         for _ in 0..counts[i + 1] {
             match read_rr(msg, pos) {
                 Some((rr, next)) => {
+                    let Some(left) = budget.checked_sub(decoded_name_bytes(&rr)) else {
+                        break 'sections;
+                    };
+                    budget = left;
                     section.push(rr);
                     pos = next;
                 }
@@ -833,6 +861,58 @@ mod tests {
         let mut ok = header(1, 0, 0, 0);
         ok.extend_from_slice(&question(&name(&labels[..3]), rtype::A, 1));
         assert_eq!(parse_records(&ok).qd.len(), 1);
+    }
+
+    /// Every section full of two-octet pointers to one maximal name: 2.75 MB of
+    /// input that decoded to 568 MB of output before the budget existed.
+    fn decompression_bomb() -> Vec<u8> {
+        let mut msg = header(0xffff, 0xffff, 0xffff, 0xffff);
+        // Octets no UTF-8 sequence can start, so each decodes to a three-byte
+        // replacement character: the amplification is in the lossy decode too.
+        let mut long = Vec::new();
+        for _ in 0..3 {
+            long.push(63u8);
+            long.extend(std::iter::repeat(0xffu8).take(63));
+        }
+        long.push(0);
+        msg.extend_from_slice(&question(&long, rtype::A, 1));
+        for _ in 1..0xffff {
+            msg.extend_from_slice(&question(&[0xc0, 0x0c], rtype::A, 1));
+        }
+        for _ in 0..3 * 0xffff {
+            msg.extend_from_slice(&record(&[0xc0, 0x0c], rtype::A, 1, 0, &[]));
+        }
+        msg
+    }
+
+    #[test]
+    fn a_decompression_bomb_spends_a_bounded_budget() {
+        let msg = decompression_bomb();
+        let r = parse_records(&msg);
+        let decoded: usize = r.qd.iter().map(|q| q.qname.len()).sum::<usize>()
+            + r.an
+                .iter()
+                .chain(&r.ns)
+                .chain(&r.ar)
+                .map(decoded_name_bytes)
+                .sum::<usize>();
+        assert!(decoded <= MAX_DECODED_NAME_BYTES, "decoded {decoded} bytes");
+        // The budget, not the section counts, is what stopped it.
+        assert!(r.qd.len() < 0xffff);
+        assert!(decoded > MAX_DECODED_NAME_BYTES / 2);
+    }
+
+    #[test]
+    fn an_ordinary_message_is_nowhere_near_the_budget() {
+        let r = parse_records(&referral());
+        let decoded: usize = r.qd.iter().map(|q| q.qname.len()).sum::<usize>()
+            + r.an
+                .iter()
+                .chain(&r.ns)
+                .chain(&r.ar)
+                .map(decoded_name_bytes)
+                .sum::<usize>();
+        assert!(decoded * 1000 < MAX_DECODED_NAME_BYTES);
     }
 
     #[test]

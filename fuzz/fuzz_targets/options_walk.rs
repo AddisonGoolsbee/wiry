@@ -1,9 +1,9 @@
 #![no_main]
 
+use libfuzzer_sys::fuzz_target;
 use packetry_core::options::{self, Item};
 use packetry_core::packet::Packet;
 use packetry_core::proto::ProtoId;
-use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     // A TCP header whose option region is the fuzz input, reached through the

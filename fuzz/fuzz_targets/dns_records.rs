@@ -1,7 +1,7 @@
 #![no_main]
 
-use packetry_core::layers::dns;
 use libfuzzer_sys::fuzz_target;
+use packetry_core::layers::dns;
 use std::time::Instant;
 
 fuzz_target!(|data: &[u8]| {
@@ -15,10 +15,21 @@ fuzz_target!(|data: &[u8]| {
         data.len()
     );
 
-    // Each record consumes at least one byte, so the header's section counts
-    // cannot make the output larger than the input.
-    let n = r.qd.len() + r.an.len() + r.ns.len() + r.ar.len();
-    assert!(n <= data.len(), "more records than bytes");
+    // Record count is the wrong quantity: a bomb of 65,535 two-octet pointers
+    // stays well under the input size while decoding hundreds of MB of names.
+    // Decoded name bytes are what the message has no other bound on.
+    let names: usize = r.qd.iter().map(|q| q.qname.len()).sum::<usize>()
+        + r.an
+            .iter()
+            .chain(&r.ns)
+            .chain(&r.ar)
+            .map(dns::decoded_name_bytes)
+            .sum::<usize>();
+    assert!(
+        names <= dns::MAX_DECODED_NAME_BYTES,
+        "decoded {names} name bytes from {} input bytes",
+        data.len()
+    );
 
     for q in &r.qd {
         assert!(q.qname.len() <= 1024);

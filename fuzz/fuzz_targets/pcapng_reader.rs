@@ -1,8 +1,8 @@
 #![no_main]
 
+use libfuzzer_sys::fuzz_target;
 use packetry_core::packet::Packet;
 use packetry_core::{pcap, pcapng};
-use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     let Ok(reader) = pcapng::Reader::new(data) else {
