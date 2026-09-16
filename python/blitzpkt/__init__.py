@@ -53,6 +53,13 @@ class _LayerView:
             parsed = rust.options(self._idx)
             if parsed is not None:
                 return parsed
+        # DNS question and record sections. Compression pointers are offsets
+        # from the start of the message, so this is parsed on demand rather
+        # than being part of the flat field table.
+        if field in ("qd", "an", "ns", "ar"):
+            recs = rust.dns_records(self._idx)
+            if recs is not None:
+                return recs[field]
         try:
             return rust.get_field(self._idx, field)
         except KeyError as exc:

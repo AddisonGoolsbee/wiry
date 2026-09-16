@@ -16,7 +16,7 @@ use blitzpkt_core::proto::{self, ProtoId};
 use blitzpkt_core::show;
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyList};
+use pyo3::types::{PyBytes, PyDict, PyList};
 use std::sync::Arc;
 
 fn proto_by_name(name: &str) -> PyResult<ProtoId> {
@@ -153,6 +153,83 @@ impl PyPkt {
             out.append((it.name.as_ref(), v)).ok()?;
         }
         Some(out.unbind())
+    }
+
+    /// Parsed DNS question and resource-record sections.
+    /// Returns None when the layer is not DNS.
+    fn dns_records(&self, py: Python<'_>, layer: usize) -> PyResult<Option<PyObject>> {
+        use blitzpkt_core::layers::dns::{self, RData};
+        let Some(span) = self.inner.layers().get(layer) else {
+            return Ok(None);
+        };
+        if span.proto != ProtoId::Dns {
+            return Ok(None);
+        }
+        // Compression pointers are offsets from the start of the DNS message,
+        // so the parser needs the whole message, not just the header.
+        let recs = dns::parse_records(self.inner.layer_bytes(layer));
+
+        let rdata_to_py = |rd: &RData| -> PyObject {
+            match rd {
+                RData::A(b) => format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3]).into_py(py),
+                RData::Aaaa(b) => show::render_ipv6(b).into_py(py),
+                RData::Name(s) => s.into_py(py),
+                RData::Txt(v) => v.clone().into_py(py),
+                RData::Mx { pref, exchange } => (*pref, exchange.clone()).into_py(py),
+                RData::Soa {
+                    mname,
+                    rname,
+                    serial,
+                    refresh,
+                    retry,
+                    expire,
+                    minimum,
+                } => {
+                    let d = PyDict::new_bound(py);
+                    let _ = d.set_item("mname", mname);
+                    let _ = d.set_item("rname", rname);
+                    let _ = d.set_item("serial", serial);
+                    let _ = d.set_item("refresh", refresh);
+                    let _ = d.set_item("retry", retry);
+                    let _ = d.set_item("expire", expire);
+                    let _ = d.set_item("minimum", minimum);
+                    d.into()
+                }
+                RData::Other(b) => PyBytes::new_bound(py, b).into(),
+            }
+        };
+
+        let rrs = |v: &[dns::ResourceRecord]| -> PyResult<Py<PyList>> {
+            let out = PyList::empty_bound(py);
+            for r in v {
+                let d = PyDict::new_bound(py);
+                d.set_item("rrname", &r.rrname)?;
+                d.set_item("type", dns::rtype_name(r.rtype))?;
+                d.set_item("rtype", r.rtype)?;
+                d.set_item("rclass", r.rclass)?;
+                d.set_item("ttl", r.ttl)?;
+                d.set_item("rdata", rdata_to_py(&r.rdata))?;
+                out.append(d)?;
+            }
+            Ok(out.unbind())
+        };
+
+        let qd = PyList::empty_bound(py);
+        for q in &recs.qd {
+            let d = PyDict::new_bound(py);
+            d.set_item("qname", &q.qname)?;
+            d.set_item("qtype", q.qtype)?;
+            d.set_item("type", dns::rtype_name(q.qtype))?;
+            d.set_item("qclass", q.qclass)?;
+            qd.append(d)?;
+        }
+
+        let out = PyDict::new_bound(py);
+        out.set_item("qd", qd)?;
+        out.set_item("an", rrs(&recs.an)?)?;
+        out.set_item("ns", rrs(&recs.ns)?)?;
+        out.set_item("ar", rrs(&recs.ar)?)?;
+        Ok(Some(out.into()))
     }
 
     /// Payload bytes beneath a layer.
@@ -325,18 +402,31 @@ impl PyPktList {
 #[pyfunction]
 fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
     let data = std::fs::read(path)?;
+    // Dispatch on the file's own magic so callers do not have to know or care
+    // which capture format they were handed.
     let (index, link, nanos) = py
         .allow_threads(|| -> Result<_, String> {
-            let r = pcap::Reader::new(&data).map_err(|e| e.to_string())?;
-            let link = pcap::link_to_proto(r.header.linktype);
-            let nanos = r.header.nanos;
-            let mut index = Vec::new();
             let base = data.as_ptr() as usize;
-            for rec in pcap::Reader::new(&data).map_err(|e| e.to_string())? {
-                let off = (rec.data.as_ptr() as usize - base) as u32;
-                index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
+            let mut index = Vec::new();
+            if blitzpkt_core::pcapng::is_pcapng(&data) {
+                let r = blitzpkt_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())?;
+                let link = pcap::link_to_proto(r.header.linktype);
+                let nanos = r.header.nanos();
+                for rec in blitzpkt_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())? {
+                    let off = (rec.data.as_ptr() as usize - base) as u32;
+                    index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
+                }
+                Ok((index, link, nanos))
+            } else {
+                let r = pcap::Reader::new(&data).map_err(|e| e.to_string())?;
+                let link = pcap::link_to_proto(r.header.linktype);
+                let nanos = r.header.nanos;
+                for rec in pcap::Reader::new(&data).map_err(|e| e.to_string())? {
+                    let off = (rec.data.as_ptr() as usize - base) as u32;
+                    index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
+                }
+                Ok((index, link, nanos))
             }
-            Ok((index, link, nanos))
         })
         .map_err(PyValueError::new_err)?;
 

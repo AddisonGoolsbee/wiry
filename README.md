@@ -32,7 +32,8 @@ actually index.
 
 Measured against scapy 2.7.0 on `bigFlows.pcap`, a public 256 MB capture of
 549,726 real packets from the tcpreplay project. Apple M1 Pro, 8 cores,
-macOS 26.6, CPython 3.13.5. Reproduce with `python dev/bench.py <pcap>`.
+macOS 26.6, CPython 3.13.5. Reproduce with `python dev/bench.py <pcap>`. Figures vary a few percent
+between runs; these are from the lower of two.
 
 | Workload | scapy | blitzpkt | |
 |---|---|---|---|
@@ -64,13 +65,21 @@ Two honest caveats about these numbers:
 
 ## What works
 
-Ethernet, 802.1Q VLAN, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS headers,
-BOOTP and DHCP. Anything else dissects to `Raw`, exactly as scapy does for
-protocols it lacks, so bytes always round-trip unchanged.
+Ethernet, 802.1Q VLAN, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP and
+DHCP. Anything else dissects to `Raw`, exactly as scapy does for protocols it
+lacks, so bytes always round-trip unchanged.
 
-Verified against scapy 2.7.0 on a real 14,261-packet capture: 2,000 of 2,000
-layer chains agree, 21,982 of 21,982 field comparisons are equal, and 2,000 of
-2,000 packets round-trip byte-identical.
+Beyond the fixed headers:
+
+- **TCP, IPv4 and DHCP options** parse into a named list: `pkt[TCP].options`
+  gives `[('MSS', 1460), ('SAckOK', None), ('WScale', 7)]`.
+- **DNS question and record sections**, including name compression, via
+  `pkt[DNS].qd` and `pkt[DNS].an`.
+- **pcap and pcapng** both read, dispatched on the file's own magic.
+
+Verified against scapy 2.7.0 on a real 14,261-packet capture: 3,000 of 3,000
+layer chains agree, 32,982 of 32,982 field comparisons are equal, and 3,000 of
+3,000 packets round-trip byte-identical. 128 Rust and 304 Python tests pass.
 
 Offline only for now. There is no `sniff()` or `send()` yet; see
 [DEVIATIONS.md](DEVIATIONS.md) S2 for why and what the plan is.
