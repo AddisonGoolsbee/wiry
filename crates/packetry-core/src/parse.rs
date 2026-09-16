@@ -94,7 +94,8 @@ pub fn ipv6(s: &str) -> Option<[u8; 16]> {
 pub fn flags(s: &str, names: &[&str]) -> u64 {
     let mut v = 0u64;
     for (i, n) in names.iter().enumerate() {
-        if s.contains(n) {
+        // An unassigned bit carries an empty name, which every string contains.
+        if !n.is_empty() && s.contains(n) {
             v |= 1 << i;
         }
     }
@@ -174,5 +175,11 @@ mod tests {
         assert_eq!(flags("S", names), 0b10);
         assert_eq!(flags("SA", names), 0b1_0010);
         assert_eq!(flags("", names), 0);
+    }
+
+    #[test]
+    fn unnamed_bits_stay_clear() {
+        let names: &[&str] = &["", "", "", "B"];
+        assert_eq!(flags("B", names), 0b1000);
     }
 }

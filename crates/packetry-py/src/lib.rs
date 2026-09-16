@@ -928,6 +928,16 @@ fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
     Ok(out)
 }
 
+/// Bit names of a flag field, least significant first. `None` for any other
+/// kind of field, which is what tells the facade not to wrap the value.
+#[pyfunction]
+fn flag_names(name: &str, field: &str) -> PyResult<Option<Vec<&'static str>>> {
+    let id = proto_by_name(name)?;
+    Ok(proto::field_of(id, field)
+        .filter(|f| f.kind == FieldKind::Flags)
+        .map(|f| f.flags.to_vec()))
+}
+
 #[pyfunction]
 fn known_layers() -> Vec<&'static str> {
     proto::known_layers()
@@ -1058,6 +1068,7 @@ fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_packet, m)?)?;
     m.add_function(wrap_pyfunction!(build_and_serialize, m)?)?;
     m.add_function(wrap_pyfunction!(layer_fields, m)?)?;
+    m.add_function(wrap_pyfunction!(flag_names, m)?)?;
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
     m.add_function(wrap_pyfunction!(register_layer, m)?)?;
     m.add_function(wrap_pyfunction!(bind_layer, m)?)?;

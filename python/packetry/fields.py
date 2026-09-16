@@ -177,7 +177,7 @@ class FlagsField(Field):
     def spec(self) -> tuple:
         v = self.default
         if isinstance(v, str):
-            v = sum(1 << i for i, n in enumerate(self.names) if n in v)
+            v = sum(1 << i for i, n in enumerate(self.names) if n and n in v)
         return (self.name, self.size, self.kind, int(v or 0), None, list(self.names))
 
 

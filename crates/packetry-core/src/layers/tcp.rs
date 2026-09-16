@@ -4,8 +4,9 @@ use crate::field::FieldDesc;
 use crate::options::{be, walk_tlv, Item};
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
-/// Control bits, least significant first.
-pub static FLAG_NAMES: &[&str] = &["F", "S", "R", "P", "A", "U", "E", "C"];
+/// Control bits, least significant first. The ninth, NS (RFC 3540), takes the
+/// low bit of the field RFC 9293 §3.1 otherwise reserves.
+pub static FLAG_NAMES: &[&str] = &["F", "S", "R", "P", "A", "U", "E", "C", "N"];
 
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("sport", 0, 16, 20),
@@ -13,12 +14,12 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("seq", 32, 32, 0),
     FieldDesc::uint("ack", 64, 32, 0),
     FieldDesc::uint("dataofs", 96, 4, 5),
-    FieldDesc::uint("reserved", 100, 4, 0),
+    FieldDesc::uint("reserved", 100, 3, 0),
     // Defaults to SYN, as packet-crafting tools conventionally do.
     FieldDesc {
         name: "flags",
-        bit_off: 104,
-        bit_len: 8,
+        bit_off: 103,
+        bit_len: 9,
         kind: crate::field::FieldKind::Flags,
         default: 0b0000_0010,
         flags: FLAG_NAMES,

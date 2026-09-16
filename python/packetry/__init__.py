@@ -9,9 +9,9 @@ from . import _packetry as _b
 __version__ = _b.__version__
 
 __all__ = [
-    "Packet", "PacketList", "rdpcap", "wrpcap", "PcapReader", "raw", "hexdump",
-    "hexdump_str", "ls", "known_layers", "bind_layers", "to_arrow", "to_polars",
-    "to_pandas",
+    "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "PcapReader",
+    "raw", "hexdump", "hexdump_str", "ls", "known_layers", "bind_layers",
+    "to_arrow", "to_polars", "to_pandas",
 ]
 
 _COLUMNAR = ("to_arrow", "to_polars", "to_pandas")
@@ -26,6 +26,157 @@ def __getattr__(name: str) -> Any:
 
 def _is_bytes(x: Any) -> bool:
     return isinstance(x, (bytes, bytearray, memoryview))
+
+
+def _to_bytes(x: Any) -> bytes:
+    """Byte-oriented strings encode as latin-1, so every code point below 256
+    survives as the octet of the same value."""
+    if isinstance(x, str):
+        return x.encode("latin-1")
+    return bytes(x)
+
+
+_FLAG_NAMES: dict[tuple[str, str], tuple[str, ...] | None] = {}
+
+# Read paths test this before anything else, so a field that is a flag field
+# nowhere costs one set lookup and no crossing.
+_FLAG_FIELDS: set[str] = set()
+
+
+def _bits_from(text: str, names: Sequence[str]) -> int:
+    # An unassigned bit carries an empty name, which every string contains.
+    return sum(1 << i for i, n in enumerate(names) if n and n in text)
+
+
+def _flag_names(layer: str, field: str) -> tuple[str, ...] | None:
+    names = _FLAG_NAMES.get((layer, field), ())
+    if names == ():
+        got = _b.flag_names(layer, field)
+        names = tuple(got) if got else None
+        _FLAG_NAMES[(layer, field)] = names
+    return names
+
+
+class FlagValue:
+    """A flag field: an integer, a set of named bits and a string at once.
+
+    Naming bits is what the wire format means, so `.SA` is the AND of the two
+    bits rather than an equality test. Assigning to a bit writes through to the
+    packet the value was read from.
+    """
+
+    __slots__ = ("_names", "_bits", "_owner", "_layer", "_field")
+
+    def __init__(self, bits: int, names: Sequence[str], owner: Any = None,
+                 layer: int = 0, field: str = ""):
+        object.__setattr__(self, "_bits", int(bits))
+        object.__setattr__(self, "_names", tuple(names))
+        object.__setattr__(self, "_owner", owner)
+        object.__setattr__(self, "_layer", layer)
+        object.__setattr__(self, "_field", field)
+
+    @classmethod
+    def from_str(cls, text: str, names: Sequence[str], owner: Any = None,
+                 layer: int = 0, field: str = "") -> "FlagValue":
+        return cls(_bits_from(text, names), names, owner, layer, field)
+
+    def _coerce(self, other: Any) -> int:
+        if isinstance(other, FlagValue):
+            return other._bits
+        if isinstance(other, str):
+            return _bits_from(other, self._names)
+        return int(other)
+
+    def _mask(self, attr: str) -> int | None:
+        """The bits named by a run of concatenated flag names, longest first so
+        a name that starts with another still matches whole."""
+        mask = 0
+        at = 0
+        while at < len(attr):
+            best, width = -1, 0
+            for i, n in enumerate(self._names):
+                if n and len(n) > width and attr.startswith(n, at):
+                    best, width = i, len(n)
+            if best < 0:
+                return None
+            mask |= 1 << best
+            at += width
+        return mask if attr else None
+
+    def __getattr__(self, attr: str) -> bool:
+        if attr.startswith("_"):
+            raise AttributeError(attr)
+        mask = self._mask(attr)
+        if mask is None:
+            raise AttributeError(f"no flag {attr!r}")
+        return self._bits & mask == mask
+
+    def __setattr__(self, attr: str, value: Any) -> None:
+        if attr.startswith("_"):
+            object.__setattr__(self, attr, value)
+            return
+        mask = self._mask(attr)
+        if mask is None:
+            raise AttributeError(f"no flag {attr!r}")
+        self._replace(self._bits | mask if value else self._bits & ~mask)
+
+    def _replace(self, bits: int) -> "FlagValue":
+        object.__setattr__(self, "_bits", bits)
+        if self._owner is not None:
+            self._owner._set(self._layer, self._field, bits)
+        return self
+
+    def _detached(self, bits: int) -> "FlagValue":
+        return FlagValue(bits, self._names)
+
+    def __int__(self) -> int:
+        return self._bits
+
+    def __index__(self) -> int:
+        return self._bits
+
+    def __bool__(self) -> bool:
+        return self._bits != 0
+
+    def __str__(self) -> str:
+        return "".join(n for i, n in enumerate(self._names) if self._bits >> i & 1)
+
+    def __repr__(self) -> str:
+        return f"<Flag {self._bits} ({self})>"
+
+    def __iter__(self) -> Iterator[str]:
+        return (n for i, n in enumerate(self._names) if n and self._bits >> i & 1)
+
+    def __eq__(self, other: object) -> bool:
+        try:
+            return self._bits == self._coerce(other)
+        except (TypeError, ValueError):
+            return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._bits)
+
+    def __and__(self, other: Any) -> "FlagValue":
+        return self._detached(self._bits & self._coerce(other))
+
+    def __or__(self, other: Any) -> "FlagValue":
+        return self._detached(self._bits | self._coerce(other))
+
+    def __xor__(self, other: Any) -> "FlagValue":
+        return self._detached(self._bits ^ self._coerce(other))
+
+    __rand__ = __and__
+    __ror__ = __or__
+    __rxor__ = __xor__
+
+    def __iand__(self, other: Any) -> "FlagValue":
+        return self._replace(self._bits & self._coerce(other))
+
+    def __ior__(self, other: Any) -> "FlagValue":
+        return self._replace(self._bits | self._coerce(other))
+
+    def __ixor__(self, other: Any) -> "FlagValue":
+        return self._replace(self._bits ^ self._coerce(other))
 
 
 class _LayerView:
@@ -60,11 +211,18 @@ class _LayerView:
             if recs is not None:
                 return recs[field]
         try:
-            return rust.get_field(self._idx, field)
+            value = rust.get_field(self._idx, field)
         except KeyError as exc:
             raise AttributeError(
                 f"{self._name} has no field {field!r}"
             ) from exc
+        if field in _FLAG_FIELDS:
+            names = _flag_names(self._name, field)
+            if names is not None:
+                return FlagValue.from_str(
+                    value, names, self._pkt, self._idx, field
+                )
+        return value
 
     def raw_options(self) -> Any:
         """The unparsed option bytes, for layers whose options are parsed."""
@@ -295,6 +453,9 @@ class _PacketMeta(type):
 
         lname = ns.get("name", cname)
         _b.register_layer(lname, specs(desc))
+        _FLAG_FIELDS.update(
+            f.name for f in desc if getattr(f, "kind", None) == "flags"
+        )
         var = [f for f in desc if getattr(f, "kind", None) == "varbytes"]
         if var:
             _VAR_FIELD[lname] = (var[-1].name, var[-1].default)
@@ -372,7 +533,7 @@ class Packet(metaclass=_PacketMeta):
                     continue
                 if var is not None and k == var[0]:
                     continue
-                if isinstance(v, bool):
+                if isinstance(v, (bool, FlagValue)):
                     ints.append((i, k, int(v)))
                 elif isinstance(v, int):
                     ints.append((i, k, v))
@@ -427,7 +588,7 @@ class Packet(metaclass=_PacketMeta):
 
     def _set(self, layer: int, field: str, value: Any) -> None:
         if self._rust is not None:
-            if isinstance(value, bool):
+            if isinstance(value, (bool, FlagValue)):
                 self._rust.set_field(layer, field, int(value))
             elif isinstance(value, int):
                 self._rust.set_field(layer, field, value)
@@ -491,7 +652,12 @@ class Packet(metaclass=_PacketMeta):
         names = self.layers()
         for i, n in enumerate(names):
             if field in _b.layer_fields(n):
-                return self._materialize().get_field(i, field)
+                value = self._materialize().get_field(i, field)
+                if field in _FLAG_FIELDS:
+                    flags = _flag_names(n, field)
+                    if flags is not None:
+                        return FlagValue.from_str(value, flags, self, i, field)
+                return value
         raise AttributeError(f"no field {field!r} in {' / '.join(names)}")
 
     def __setattr__(self, field: str, value: Any) -> None:
@@ -550,6 +716,7 @@ for _n in _b.known_layers():
     _LAYERS[_n] = _make_layer(_n)
     globals()[_n] = _LAYERS[_n]
     __all__.append(_n)
+    _FLAG_FIELDS.update(f for f in _b.layer_fields(_n) if _b.flag_names(_n, f))
 
 
 def known_layers() -> list[str]:
