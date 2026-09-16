@@ -6,13 +6,12 @@
 //! Getting this wrong is the failure mode that has sunk other Rust-core rewrites.
 
 #![forbid(unsafe_code)]
-
 // The #[pymethods]/#[pyfunction] trampolines pyo3 0.22 generates convert PyErr
 // to PyErr, which clippy flags as useless_conversion at each function's span.
 #![allow(clippy::useless_conversion)]
 
-use blitzpkt_core::field::FieldValue;
-use blitzpkt_core::packet::Packet as CorePacket;
+use blitzpkt_core::field::{self, FieldDesc, FieldValue};
+use blitzpkt_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use blitzpkt_core::pcap;
 use blitzpkt_core::proto::{self, ProtoId};
 use blitzpkt_core::show;
@@ -35,6 +34,189 @@ fn value_to_py(py: Python<'_>, v: &FieldValue) -> PyObject {
         FieldValue::Flags { .. } => show::render_value(v).into_py(py),
         FieldValue::Bytes(b) => PyBytes::new_bound(py, b).into(),
     }
+}
+
+// ---- columnar extraction ---------------------------------------------------
+//
+// One pass over the capture pulling every requested field, with the predicate
+// evaluated here rather than in Python. A Python callback per packet, or one
+// pass per field, would put the boundary back in the hot loop.
+
+/// Pseudo-layer carrying per-record metadata that is not in the packet bytes.
+const FRAME: &str = "Frame";
+
+#[derive(Clone, Copy)]
+enum ColSpec {
+    Field(ProtoId, &'static FieldDesc),
+    Time,
+    Len,
+    Num,
+}
+
+#[derive(Clone, Copy)]
+enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl CmpOp {
+    fn parse(s: &str) -> PyResult<Self> {
+        Ok(match s {
+            "==" | "=" | "eq" => CmpOp::Eq,
+            "!=" | "ne" => CmpOp::Ne,
+            "<" | "lt" => CmpOp::Lt,
+            "<=" | "le" => CmpOp::Le,
+            ">" | "gt" => CmpOp::Gt,
+            ">=" | "ge" => CmpOp::Ge,
+            _ => return Err(PyValueError::new_err(format!("unknown operator {s:?}"))),
+        })
+    }
+
+    fn test<T: PartialOrd>(self, a: T, b: T) -> bool {
+        match self {
+            CmpOp::Eq => a == b,
+            CmpOp::Ne => a != b,
+            CmpOp::Lt => a < b,
+            CmpOp::Le => a <= b,
+            CmpOp::Gt => a > b,
+            CmpOp::Ge => a >= b,
+        }
+    }
+}
+
+enum CondVal {
+    Uint(u64),
+    Bytes(Vec<u8>),
+}
+
+struct Cond {
+    proto: ProtoId,
+    field: &'static FieldDesc,
+    op: CmpOp,
+    val: CondVal,
+}
+
+/// Rows selected by a query: a layer that must be present, plus field tests.
+/// A test against a layer the packet does not have is false, never true.
+struct Query {
+    layer: Option<ProtoId>,
+    conds: Vec<Cond>,
+}
+
+impl Query {
+    fn is_empty(&self) -> bool {
+        self.layer.is_none() && self.conds.is_empty()
+    }
+
+    fn matches(&self, buf: &[u8], spans: &[LayerSpan]) -> bool {
+        if let Some(l) = self.layer {
+            if !spans.iter().any(|s| s.proto == l) {
+                return false;
+            }
+        }
+        self.conds.iter().all(|c| {
+            let Some(s) = spans.iter().find(|s| s.proto == c.proto) else {
+                return false;
+            };
+            let v = decode_span(buf, s, c.field);
+            match &c.val {
+                CondVal::Uint(n) => v.as_uint().is_some_and(|x| c.op.test(x, *n)),
+                CondVal::Bytes(b) => raw_bytes(&v).is_some_and(|x| c.op.test(x, b.as_slice())),
+            }
+        })
+    }
+}
+
+/// Decode one field straight out of the capture buffer, without copying the
+/// packet. Clamped exactly as `Packet::get_desc` clamps, so the bulk path and
+/// the per-packet path cannot disagree.
+#[inline]
+fn decode_span(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> FieldValue {
+    let a = s.off as usize;
+    let b = (a + s.hlen as usize).min(buf.len());
+    field::decode(&buf[a..b], f)
+}
+
+fn raw_bytes(v: &FieldValue) -> Option<&[u8]> {
+    match v {
+        FieldValue::Ipv4(b) => Some(b),
+        FieldValue::Ipv6(b) => Some(b),
+        FieldValue::Mac(b) => Some(b),
+        FieldValue::Bytes(b) => Some(b),
+        _ => None,
+    }
+}
+
+fn resolve_spec(layer: &str, name: &str) -> PyResult<ColSpec> {
+    if layer == FRAME {
+        return match name {
+            "time" => Ok(ColSpec::Time),
+            "len" => Ok(ColSpec::Len),
+            "num" => Ok(ColSpec::Num),
+            _ => Err(PyKeyError::new_err(format!(
+                "no field {name:?} on {FRAME}; expected time, len or num"
+            ))),
+        };
+    }
+    let id = proto_by_name(layer)?;
+    let f = proto::field_of(id, name)
+        .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} on {layer}")))?;
+    Ok(ColSpec::Field(id, f))
+}
+
+fn build_query(
+    py: Python<'_>,
+    layer: Option<&str>,
+    conds: Vec<(String, String, String, PyObject)>,
+) -> PyResult<Query> {
+    let layer = match layer {
+        Some(l) => Some(proto_by_name(l)?),
+        None => None,
+    };
+    let mut out = Vec::with_capacity(conds.len());
+    for (lname, fname, op, val) in conds {
+        let proto = proto_by_name(&lname)?;
+        let f = proto::field_of(proto, &fname)
+            .ok_or_else(|| PyKeyError::new_err(format!("no field {fname:?} on {lname}")))?;
+        let v = val.bind(py);
+        let cv = if let Ok(n) = v.extract::<u64>() {
+            CondVal::Uint(n)
+        } else if let Ok(b) = v.extract::<Vec<u8>>() {
+            CondVal::Bytes(b)
+        } else if let Ok(s) = v.extract::<String>() {
+            match blitzpkt_core::parse::value_for(f, &s) {
+                Some(blitzpkt_core::parse::ValueBits::Uint(n)) => CondVal::Uint(n),
+                Some(blitzpkt_core::parse::ValueBits::Bytes(b)) => CondVal::Bytes(b),
+                None => {
+                    return Err(PyValueError::new_err(format!(
+                        "cannot parse {s:?} for field {fname:?}"
+                    )))
+                }
+            }
+        } else {
+            return Err(PyValueError::new_err(format!(
+                "unsupported comparison value for {lname}.{fname}"
+            )));
+        };
+        out.push(Cond {
+            proto,
+            field: f,
+            op: CmpOp::parse(&op)?,
+            val: cv,
+        });
+    }
+    Ok(Query { layer, conds: out })
+}
+
+/// One extracted value. `Time` is the only column that is not a field value.
+enum Cell {
+    Null,
+    Val(FieldValue),
+    Time(f64),
 }
 
 /// A dissected packet.
@@ -287,9 +469,36 @@ pub struct PyPktList {
     index: Vec<(u32, u32, u32, u32)>,
     link: ProtoId,
     nanos: bool,
+    /// Positions in the original capture, set when this list is a filtered view.
+    nums: Option<Vec<u32>>,
 }
 
 impl PyPktList {
+    fn num_at(&self, i: usize) -> u32 {
+        match &self.nums {
+            Some(n) => n[i],
+            None => i as u32,
+        }
+    }
+
+    /// Positions in this list whose packets satisfy the query.
+    fn matching(&self, py: Python<'_>, q: &Query) -> Vec<u32> {
+        let buf = &self.buf;
+        let idx = &self.index;
+        let link = self.link;
+        py.allow_threads(|| {
+            idx.iter()
+                .enumerate()
+                .filter(|(_, (off, len, _, _))| {
+                    let a = *off as usize;
+                    let bytes = &buf[a..a + *len as usize];
+                    q.matches(bytes, &dissect_spans(bytes, link))
+                })
+                .map(|(i, _)| i as u32)
+                .collect()
+        })
+    }
+
     fn dissect_at(&self, i: usize) -> PyPkt {
         let (off, len, sec, frac) = self.index[i];
         let a = off as usize;
@@ -374,6 +583,117 @@ impl PyPktList {
         Ok(out.unbind())
     }
 
+    /// Extract many fields across the whole capture in ONE pass and ONE crossing.
+    ///
+    /// Each packet is dissected once and every requested field read from it,
+    /// rather than one pass per field. `layer` and `conds` select rows; both are
+    /// evaluated in Rust, so filtered extraction never materialises the packets
+    /// it rejects. Returns one list per spec, in spec order.
+    #[pyo3(signature = (specs, layer = None, conds = Vec::new()))]
+    fn columns(
+        &self,
+        py: Python<'_>,
+        specs: Vec<(String, String)>,
+        layer: Option<&str>,
+        conds: Vec<(String, String, String, PyObject)>,
+    ) -> PyResult<Py<PyList>> {
+        let resolved: Vec<ColSpec> = specs
+            .iter()
+            .map(|(l, f)| resolve_spec(l, f))
+            .collect::<PyResult<_>>()?;
+        let q = build_query(py, layer, conds)?;
+
+        let buf = &self.buf;
+        let idx = &self.index;
+        let link = self.link;
+        let div = if self.nanos { 1e9 } else { 1e6 };
+        let nums = self.nums.as_deref();
+        let dissect = !q.is_empty() || resolved.iter().any(|s| matches!(s, ColSpec::Field(..)));
+
+        let cols: Vec<Vec<Cell>> = py.allow_threads(|| {
+            let mut cols: Vec<Vec<Cell>> = resolved
+                .iter()
+                .map(|_| Vec::with_capacity(idx.len()))
+                .collect();
+            for (row, (off, len, sec, frac)) in idx.iter().enumerate() {
+                let a = *off as usize;
+                let bytes = &buf[a..a + *len as usize];
+                let spans = if dissect {
+                    dissect_spans(bytes, link)
+                } else {
+                    Spans::new()
+                };
+                if !q.matches(bytes, &spans) {
+                    continue;
+                }
+                for (c, spec) in resolved.iter().enumerate() {
+                    cols[c].push(match spec {
+                        ColSpec::Time => Cell::Time(*sec as f64 + *frac as f64 / div),
+                        ColSpec::Len => Cell::Val(FieldValue::Uint(*len as u64)),
+                        ColSpec::Num => {
+                            Cell::Val(FieldValue::Uint(nums.map_or(row as u64, |n| n[row] as u64)))
+                        }
+                        ColSpec::Field(id, f) => match spans.iter().find(|s| s.proto == *id) {
+                            Some(s) => Cell::Val(decode_span(bytes, s, f)),
+                            None => Cell::Null,
+                        },
+                    });
+                }
+            }
+            cols
+        });
+
+        let out = PyList::empty_bound(py);
+        for col in &cols {
+            let l = PyList::empty_bound(py);
+            for cell in col {
+                match cell {
+                    Cell::Null => l.append(py.None())?,
+                    Cell::Val(v) => l.append(value_to_py(py, v))?,
+                    Cell::Time(t) => l.append(*t)?,
+                }
+            }
+            out.append(l)?;
+        }
+        Ok(out.unbind())
+    }
+
+    /// Positions in this list whose packets satisfy the query.
+    #[pyo3(signature = (layer = None, conds = Vec::new()))]
+    fn filter_indices(
+        &self,
+        py: Python<'_>,
+        layer: Option<&str>,
+        conds: Vec<(String, String, String, PyObject)>,
+    ) -> PyResult<Vec<u32>> {
+        let q = build_query(py, layer, conds)?;
+        Ok(self.matching(py, &q))
+    }
+
+    /// A view over the matching packets. Shares the capture buffer: no copy.
+    #[pyo3(signature = (layer = None, conds = Vec::new()))]
+    fn filter(
+        &self,
+        py: Python<'_>,
+        layer: Option<&str>,
+        conds: Vec<(String, String, String, PyObject)>,
+    ) -> PyResult<PyPktList> {
+        let q = build_query(py, layer, conds)?;
+        let keep = self.matching(py, &q);
+        Ok(PyPktList {
+            buf: Arc::clone(&self.buf),
+            index: keep.iter().map(|&i| self.index[i as usize]).collect(),
+            link: self.link,
+            nanos: self.nanos,
+            nums: Some(keep.iter().map(|&i| self.num_at(i as usize)).collect()),
+        })
+    }
+
+    /// Positions of these packets in the capture they were filtered from.
+    fn nums(&self) -> Vec<u32> {
+        (0..self.index.len()).map(|i| self.num_at(i)).collect()
+    }
+
     /// Timestamps for every packet, as floating seconds.
     fn times(&self) -> Vec<f64> {
         let div = if self.nanos { 1e9 } else { 1e6 };
@@ -437,6 +757,7 @@ fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
         index,
         link,
         nanos,
+        nums: None,
     })
 }
 
