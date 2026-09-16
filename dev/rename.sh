@@ -3,6 +3,11 @@
 # working tree because it rewrites every tracked file in place.
 set -euo pipefail
 
+# git on this machine shims through Xcode, whose licence may be unaccepted.
+if [ -d /Library/Developer/CommandLineTools ]; then
+  export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+fi
+
 cd "$(dirname "$0")/.."
 
 if [ -n "$(git status --porcelain)" ]; then
