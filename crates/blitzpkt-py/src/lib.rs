@@ -1,13 +1,9 @@
-//! Python bindings.
-//!
-//! Boundary rule: cross at file or list granularity, never per field and never
-//! per packet in bulk paths. A capture stays in Rust as one buffer plus an index;
-//! Python objects are minted only for the packets somebody actually touches.
-//! Getting this wrong is the failure mode that has sunk other Rust-core rewrites.
+//! Python bindings. The boundary is crossed at file or list granularity, never
+//! per field and never per packet in bulk paths.
 
 #![forbid(unsafe_code)]
-// The #[pymethods]/#[pyfunction] trampolines pyo3 0.22 generates convert PyErr
-// to PyErr, which clippy flags as useless_conversion at each function's span.
+// pyo3 0.22's generated trampolines convert PyErr to PyErr, which clippy flags
+// as useless_conversion at each function's span.
 #![allow(clippy::useless_conversion)]
 
 use blitzpkt_core::field::{self, FieldDesc, FieldValue};
@@ -30,17 +26,10 @@ fn value_to_py(py: Python<'_>, v: &FieldValue) -> PyObject {
         FieldValue::Ipv4(_) | FieldValue::Ipv6(_) | FieldValue::Mac(_) => {
             show::render_value(v).into_py(py)
         }
-        // Flags render as their letter string, matching how packet tools show them.
         FieldValue::Flags { .. } => show::render_value(v).into_py(py),
         FieldValue::Bytes(b) => PyBytes::new_bound(py, b).into(),
     }
 }
-
-// ---- columnar extraction ---------------------------------------------------
-//
-// One pass over the capture pulling every requested field, with the predicate
-// evaluated here rather than in Python. A Python callback per packet, or one
-// pass per field, would put the boundary back in the hot loop.
 
 /// Pseudo-layer carrying per-record metadata that is not in the packet bytes.
 const FRAME: &str = "Frame";
@@ -100,7 +89,6 @@ struct Cond {
     val: CondVal,
 }
 
-/// Rows selected by a query: a layer that must be present, plus field tests.
 /// A test against a layer the packet does not have is false, never true.
 struct Query {
     layer: Option<ProtoId>,
@@ -133,10 +121,8 @@ impl Query {
     }
 }
 
-/// Decode one field straight out of the capture buffer, without copying the
-/// packet. Clamped exactly as `Packet::get_desc` clamps, so the bulk path and
-/// the per-packet path cannot disagree. `None` when this header does not carry
-/// the field, which for a conditional field varies packet by packet.
+/// Clamped exactly as `Packet::get_desc` clamps, so the bulk path and the
+/// per-packet path cannot disagree.
 #[inline]
 fn decode_span(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<FieldValue> {
     let a = s.off as usize;
@@ -216,14 +202,12 @@ fn build_query(
     Ok(Query { layer, conds: out })
 }
 
-/// One extracted value. `Time` is the only column that is not a field value.
 enum Cell {
     Null,
     Val(FieldValue),
     Time(f64),
 }
 
-/// A dissected packet.
 #[pyclass(name = "Pkt")]
 pub struct PyPkt {
     inner: CorePacket,
@@ -233,7 +217,7 @@ pub struct PyPkt {
 
 #[pymethods]
 impl PyPkt {
-    /// Layer names, outermost first.
+    /// Outermost first.
     fn layer_names(&self) -> Vec<&'static str> {
         self.inner.layers().iter().map(|s| s.proto.name()).collect()
     }
@@ -246,7 +230,6 @@ impl PyPkt {
         Ok(self.inner.find_layer(proto_by_name(name)?))
     }
 
-    /// Read one field. Decodes only that field.
     fn get_field(&self, py: Python<'_>, layer: usize, name: &str) -> PyResult<PyObject> {
         match self.inner.get(layer, name) {
             Some(v) => Ok(value_to_py(py, &v)),
@@ -256,7 +239,6 @@ impl PyPkt {
         }
     }
 
-    /// Read a field by layer name rather than index.
     fn get_field_by_layer(
         &self,
         py: Python<'_>,
@@ -280,7 +262,6 @@ impl PyPkt {
         Ok(())
     }
 
-    /// Set a field from its textual form (addresses, flag letters).
     fn set_field_str(&mut self, layer: usize, name: &str, val: &str) -> PyResult<()> {
         let span = self
             .inner
@@ -318,9 +299,8 @@ impl PyPkt {
         self.inner.set_payload(layer, data);
     }
 
-    /// Parsed options for a layer, as (name, value) pairs.
-    /// None means the protocol has no option region at all, which is different
-    /// from an empty list meaning it has one and it is empty.
+    /// `None` means the protocol has no option region at all, unlike an empty
+    /// list, which means it has one and it is empty.
     fn options(&self, py: Python<'_>, layer: usize) -> Option<Py<PyList>> {
         use blitzpkt_core::options::ItemValue;
         let items = self.inner.options(layer)?;
@@ -343,8 +323,7 @@ impl PyPkt {
         Some(out.unbind())
     }
 
-    /// Parsed DNS question and resource-record sections.
-    /// Returns None when the layer is not DNS.
+    /// `None` when the layer is not DNS.
     fn dns_records(&self, py: Python<'_>, layer: usize) -> PyResult<Option<PyObject>> {
         use blitzpkt_core::layers::dns::{self, RData};
         let Some(span) = self.inner.layers().get(layer) else {
@@ -353,8 +332,7 @@ impl PyPkt {
         if span.proto != ProtoId::Dns {
             return Ok(None);
         }
-        // Compression pointers are offsets from the start of the DNS message,
-        // so the parser needs the whole message, not just the header.
+        // Compression pointers are offsets from the start of the DNS message.
         let recs = dns::parse_records(self.inner.layer_bytes(layer));
 
         let rdata_to_py = |rd: &RData| -> PyObject {
@@ -420,12 +398,10 @@ impl PyPkt {
         Ok(Some(out.into()))
     }
 
-    /// Payload bytes beneath a layer.
     fn payload<'py>(&self, py: Python<'py>, layer: usize) -> Bound<'py, PyBytes> {
         PyBytes::new_bound(py, self.inner.payload(layer))
     }
 
-    /// Serialise, recomputing lengths and checksums.
     // &mut self is required: CorePacket::to_bytes caches computed checksums in place.
     #[allow(clippy::wrong_self_convention)]
     fn to_bytes<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
@@ -436,8 +412,8 @@ impl PyPkt {
         show::show(&self.inner)
     }
 
-    /// An independent copy. Used when stacking onto a dissected packet, where
-    /// rebuilding from a field spec would lose variable-length header content.
+    /// Used when stacking onto a dissected packet, where rebuilding from a
+    /// field spec would lose variable-length header content.
     fn copy(&self) -> PyPkt {
         PyPkt {
             inner: self.inner.clone(),
@@ -453,8 +429,7 @@ impl PyPkt {
         self.inner.len()
     }
 
-    /// Field names this layer actually carries, in header order. A conditional
-    /// field absent from this particular header is not listed.
+    /// A conditional field absent from this particular header is not listed.
     fn field_names(&self, layer: usize) -> PyResult<Vec<&'static str>> {
         let proto = self
             .inner
@@ -470,8 +445,8 @@ impl PyPkt {
     }
 }
 
-/// A capture held entirely in Rust: one buffer plus a record index.
-/// Indexing mints a Python object for that packet only.
+/// One buffer plus a record index. Indexing mints a Python object for that
+/// packet only.
 #[pyclass(name = "PktList")]
 pub struct PyPktList {
     buf: Arc<Vec<u8>>,
@@ -491,7 +466,6 @@ impl PyPktList {
         }
     }
 
-    /// Positions in this list whose packets satisfy the query.
     fn matching(&self, py: Python<'_>, q: &Query) -> Vec<u32> {
         let buf = &self.buf;
         let idx = &self.index;
@@ -537,14 +511,11 @@ impl PyPktList {
         Ok(self.dissect_at(i as usize))
     }
 
-    /// Count packets containing a layer, without crossing into Python per packet.
-    /// This is the shape of API that keeps the speedup: one call, whole capture.
     fn count_layer(&self, py: Python<'_>, name: &str) -> PyResult<usize> {
         let id = proto_by_name(name)?;
         let buf = Arc::clone(&self.buf);
         let idx = self.index.clone();
         let link = self.link;
-        // Release the GIL: this is pure Rust work over the whole capture.
         Ok(py.allow_threads(move || {
             idx.iter()
                 .filter(|(off, len, _, _)| {
@@ -558,7 +529,6 @@ impl PyPktList {
         }))
     }
 
-    /// Extract one field across the whole capture in a single crossing.
     /// Packets lacking the layer yield None.
     fn field_column(&self, py: Python<'_>, layer_name: &str, field: &str) -> PyResult<Py<PyList>> {
         let id = proto_by_name(layer_name)?;
@@ -593,12 +563,9 @@ impl PyPktList {
         Ok(out.unbind())
     }
 
-    /// Extract many fields across the whole capture in ONE pass and ONE crossing.
-    ///
-    /// Each packet is dissected once and every requested field read from it,
-    /// rather than one pass per field. `layer` and `conds` select rows; both are
-    /// evaluated in Rust, so filtered extraction never materialises the packets
-    /// it rejects. Returns one list per spec, in spec order.
+    /// One pass, one crossing: each packet is dissected once and every
+    /// requested field read from it. `layer` and `conds` select rows in Rust,
+    /// so rejected packets are never materialised. One list per spec, in order.
     #[pyo3(signature = (specs, layer = None, conds = Vec::new()))]
     fn columns(
         &self,
@@ -668,7 +635,6 @@ impl PyPktList {
         Ok(out.unbind())
     }
 
-    /// Positions in this list whose packets satisfy the query.
     #[pyo3(signature = (layer = None, conds = Vec::new()))]
     fn filter_indices(
         &self,
@@ -680,7 +646,7 @@ impl PyPktList {
         Ok(self.matching(py, &q))
     }
 
-    /// A view over the matching packets. Shares the capture buffer: no copy.
+    /// Shares the capture buffer: no copy.
     #[pyo3(signature = (layer = None, conds = Vec::new()))]
     fn filter(
         &self,
@@ -699,7 +665,7 @@ impl PyPktList {
         })
     }
 
-    /// The first `n` packets, as a view sharing the capture buffer.
+    /// Shares the capture buffer: no copy.
     fn head(&self, n: usize) -> PyPktList {
         let k = n.min(self.index.len());
         PyPktList {
@@ -711,12 +677,11 @@ impl PyPktList {
         }
     }
 
-    /// Positions of these packets in the capture they were filtered from.
+    /// Positions in the capture these packets were filtered from.
     fn nums(&self) -> Vec<u32> {
         (0..self.index.len()).map(|i| self.num_at(i)).collect()
     }
 
-    /// Timestamps for every packet, as floating seconds.
     fn times(&self) -> Vec<f64> {
         let div = if self.nanos { 1e9 } else { 1e6 };
         self.index
@@ -725,7 +690,6 @@ impl PyPktList {
             .collect()
     }
 
-    /// Raw bytes of one packet without dissecting it.
     fn raw_at<'py>(&self, py: Python<'py>, i: usize) -> PyResult<Bound<'py, PyBytes>> {
         let (off, len, _, _) = *self
             .index
@@ -741,13 +705,11 @@ impl PyPktList {
     }
 }
 
-/// Read a pcap file. Records are indexed but not dissected, so this is close to
-/// the cost of reading the file.
+/// Records are indexed but not dissected. Dispatches on the file's own magic,
+/// so pcap and pcapng are interchangeable here.
 #[pyfunction]
 fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
     let data = std::fs::read(path)?;
-    // Dispatch on the file's own magic so callers do not have to know or care
-    // which capture format they were handed.
     let (index, link, nanos) = py
         .allow_threads(|| -> Result<_, String> {
             let base = data.as_ptr() as usize;
@@ -783,7 +745,6 @@ fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
     })
 }
 
-/// Dissect a single buffer.
 #[pyfunction]
 #[pyo3(signature = (data, link = "Ether"))]
 fn dissect(data: &[u8], link: &str) -> PyResult<PyPkt> {
@@ -793,7 +754,6 @@ fn dissect(data: &[u8], link: &str) -> PyResult<PyPkt> {
     })
 }
 
-/// Build a packet from a stack of layer names using default field values.
 #[pyfunction]
 fn build_stack(names: Vec<String>) -> PyResult<PyPkt> {
     let mut stack = Vec::with_capacity(names.len());
@@ -806,7 +766,6 @@ fn build_stack(names: Vec<String>) -> PyResult<PyPkt> {
     })
 }
 
-/// Resolve layer names into a build stack, attaching any option bytes.
 fn make_stack(
     names: &[String],
     opts: &[(usize, Vec<u8>)],
@@ -822,12 +781,10 @@ fn make_stack(
     Ok(stack)
 }
 
-/// Apply construction kwargs to a freshly built packet.
-///
-/// Unconditional fields go first, because a conditional field's presence is
-/// decided by an unconditional one (ICMP's `type`), and because that field can
-/// also lengthen the header. Growing the header between the two passes is what
-/// makes `ICMP(type=13, ts_ori=...)` reach octets the fixed template lacks.
+/// Unconditional fields go first: a conditional field's presence is decided by
+/// an unconditional one (ICMP's `type`), which can also lengthen the header.
+/// Growing it between the two passes is what makes `ICMP(type=13, ts_ori=...)`
+/// reach octets the fixed template lacks.
 fn apply_all_fields(
     pkt: &mut CorePacket,
     ints: &[(usize, String, u64)],
@@ -902,12 +859,8 @@ fn apply_fields(
     Ok(())
 }
 
-/// Build and fully serialise a packet in ONE crossing of the boundary.
-///
-/// This is the fast construction path: the facade accumulates a layer stack and
-/// its field assignments in Python, then hands the whole thing over once. Doing
-/// it field by field would put an FFI call in the hot loop, which is exactly the
-/// mistake that erases the speedup.
+/// One crossing: the facade accumulates the layer stack and its field
+/// assignments in Python and hands the whole thing over once.
 #[pyfunction]
 #[pyo3(signature = (names, ints, strs, raws, payload = None, opts = Vec::new()))]
 fn build_and_serialize<'py>(
@@ -930,7 +883,7 @@ fn build_and_serialize<'py>(
     Ok(PyBytes::new_bound(py, pkt.to_bytes()))
 }
 
-/// Same as `build_and_serialize` but returns the packet for further inspection.
+/// `build_and_serialize`, but returning the packet for further inspection.
 #[pyfunction]
 #[pyo3(signature = (names, ints, strs, raws, payload = None, opts = Vec::new()))]
 fn build_packet(
@@ -955,7 +908,6 @@ fn build_packet(
     })
 }
 
-/// Write packets to a pcap file.
 #[pyfunction]
 #[pyo3(signature = (path, packets, linktype = 1))]
 fn write_pcap(path: &str, packets: Vec<Vec<u8>>, linktype: u32) -> PyResult<()> {
@@ -968,7 +920,6 @@ fn write_pcap(path: &str, packets: Vec<Vec<u8>>, linktype: u32) -> PyResult<()> 
     Ok(())
 }
 
-/// Field names for a layer, in header order.
 #[pyfunction]
 fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
     let id = proto_by_name(name)?;
@@ -977,7 +928,6 @@ fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
     Ok(out)
 }
 
-/// Every layer name the engine knows.
 #[pyfunction]
 fn known_layers() -> Vec<&'static str> {
     const ALL: &[ProtoId] = &[
