@@ -21,8 +21,8 @@ pub static FIELDS: &[FieldDesc] = &[
     // Zero until a transport layer is stacked under it, which rewrites it.
     FieldDesc::uint("proto", 72, 8, 0),
     FieldDesc::computed_uint("chksum", 80, 16),
-    FieldDesc::ipv4("src", 96, 0),
-    FieldDesc::ipv4("dst", 128, 0),
+    FieldDesc::ipv4("src", 96, 0x7f00_0001),
+    FieldDesc::ipv4("dst", 128, 0x7f00_0001),
     FieldDesc::var_bytes("options", 160),
 ];
 

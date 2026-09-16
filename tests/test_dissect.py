@@ -52,7 +52,7 @@ def test_dissects_a_vlan_tagged_frame():
     pkt = Ether(VLAN_IP)
     assert pkt.layers() == ["Ether", "Dot1Q", "IP"]
     assert pkt[Ether].type == 0x8100
-    assert (pkt[Dot1Q].prio, pkt[Dot1Q].id, pkt[Dot1Q].vlan) == (3, 0, 100)
+    assert (pkt[Dot1Q].prio, pkt[Dot1Q].dei, pkt[Dot1Q].vlan) == (3, 0, 100)
     assert pkt[Dot1Q].type == 0x0800
     assert pkt[IP].src == "10.0.0.1"
 

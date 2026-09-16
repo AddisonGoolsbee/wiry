@@ -13,7 +13,7 @@ use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
 
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("prio", 0, 3, 0),
-    FieldDesc::uint("id", 3, 1, 0),
+    FieldDesc::uint("dei", 3, 1, 0),
     FieldDesc::uint("vlan", 4, 12, 1),
     // Zero until a layer is stacked under the tag, which rewrites it.
     FieldDesc::uint("type", 16, 16, 0),
@@ -95,7 +95,7 @@ mod tests {
         assert_eq!(got, vec![ProtoId::Ether, ProtoId::Dot1Q, ProtoId::Ipv4]);
         assert_eq!(p.layers()[1].hlen, 4);
         assert_eq!(p.get(1, "prio").unwrap(), FieldValue::Uint(3));
-        assert_eq!(p.get(1, "id").unwrap(), FieldValue::Uint(0));
+        assert_eq!(p.get(1, "dei").unwrap(), FieldValue::Uint(0));
         assert_eq!(p.get(1, "vlan").unwrap(), FieldValue::Uint(100));
         assert_eq!(p.get(1, "type").unwrap(), FieldValue::Uint(0x0800));
         assert_eq!(p.get(2, "src").unwrap(), FieldValue::Ipv4([10, 0, 0, 1]));
@@ -108,14 +108,14 @@ mod tests {
         assert_eq!(p.get(1, "type").unwrap(), FieldValue::Uint(0x0800));
 
         assert!(p.set_uint(1, "prio", 7));
-        assert!(p.set_uint(1, "id", 1));
+        assert!(p.set_uint(1, "dei", 1));
         assert!(p.set_uint(1, "vlan", 4095));
 
         let bytes = p.to_bytes().to_vec();
         assert_eq!(bytes[14..16], [0xff, 0xff]); // 111 1 1111 1111 1111
         let q = Packet::dissect(bytes, ProtoId::Ether);
         assert_eq!(q.get(1, "prio").unwrap(), FieldValue::Uint(7));
-        assert_eq!(q.get(1, "id").unwrap(), FieldValue::Uint(1));
+        assert_eq!(q.get(1, "dei").unwrap(), FieldValue::Uint(1));
         assert_eq!(q.get(1, "vlan").unwrap(), FieldValue::Uint(4095));
         assert_eq!(q.layers()[2].proto, ProtoId::Ipv4);
     }
