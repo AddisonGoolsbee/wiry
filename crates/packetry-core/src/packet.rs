@@ -493,6 +493,19 @@ mod tests {
     }
 
     #[test]
+    fn a_length_shorter_than_its_own_header_bounds_nothing() {
+        // Segmentation offload leaves a zero total length in real captures.
+        for len in [0u16, 5] {
+            let mut v = sample();
+            v[16..18].copy_from_slice(&len.to_be_bytes());
+            let p = Packet::dissect(v.clone(), ProtoId::Ether);
+            assert!(!p.has_layer(ProtoId::Padding), "len {len}");
+            let got: Vec<_> = p.layers().iter().map(|s| s.proto).collect();
+            assert_eq!(got, vec![ProtoId::Ether, ProtoId::Ipv4, ProtoId::Tcp]);
+        }
+    }
+
+    #[test]
     fn an_oversized_value_is_truncated_to_the_field() {
         let mut p = Packet::build(&[ProtoId::Ipv4]);
         assert!(p.set_bytes(0, "src", &[1, 2, 3, 4, 5, 6, 7, 8]));
