@@ -1,5 +1,4 @@
-//! TCP. Header layout from RFC 9293 section 3.1. Control-bit names follow the
-//! conventional single-letter abbreviations used across packet tooling.
+//! TCP header layout from RFC 9293 §3.1.
 
 use crate::field::FieldDesc;
 use crate::options::{be, walk_tlv, Item};

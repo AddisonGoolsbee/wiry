@@ -1,4 +1,4 @@
-//! UDP. Header layout from RFC 768.
+//! UDP header layout from RFC 768.
 
 use crate::field::FieldDesc;
 use crate::proto::{ports, Next, ProtoDesc, ProtoId};

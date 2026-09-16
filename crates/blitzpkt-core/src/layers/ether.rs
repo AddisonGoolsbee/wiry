@@ -1,5 +1,5 @@
-//! Ethernet II framing. Layout from IEEE 802.3 clause 3; EtherType values from
-//! the IANA "ETHER TYPES" registry.
+//! Ethernet II framing from IEEE 802.3 clause 3; EtherType values from the
+//! IANA "ETHER TYPES" registry.
 
 use crate::field::FieldDesc;
 use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};

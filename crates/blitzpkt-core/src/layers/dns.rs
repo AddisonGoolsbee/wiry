@@ -199,7 +199,6 @@ fn read_name(msg: &[u8], pos: usize) -> Option<(String, usize)> {
                 }
                 at = stop;
             }
-            // Compression pointer: 14-bit offset from the start of the message.
             0xc0 => {
                 let lo = *msg.get(at + 1)?;
                 let target = (((len & 0x3f) as usize) << 8) | lo as usize;
@@ -558,7 +557,6 @@ mod tests {
 
     #[test]
     fn parses_a_response_with_an_a_record() {
-        // Uncompressed answer name, TTL 300, RDLENGTH 4, RDATA 93.184.216.34.
         let msg: Vec<u8> = vec![
             0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x07, b'e',
             b'x', b'a', b'm', b'p', b'l', b'e', 0x03, b'c', b'o', b'm', 0x00, 0x00, 0x01, 0x00,

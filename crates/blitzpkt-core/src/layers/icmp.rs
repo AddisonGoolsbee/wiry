@@ -1,6 +1,6 @@
-//! ICMPv4. The Type / Code / Checksum prefix is common to every message (RFC
-//! 792); what the four octets after it mean depends on the type, so those fields
-//! are conditional:
+//! RFC 792 gives every ICMPv4 message the same Type / Code / Checksum prefix;
+//! what the four octets after it mean depends on the type, so those fields are
+//! conditional:
 //!
 //! | Type          | Octets 4..8                          | Source        |
 //! |---------------|--------------------------------------|---------------|

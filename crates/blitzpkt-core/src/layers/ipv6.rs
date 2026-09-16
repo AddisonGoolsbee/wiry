@@ -1,5 +1,5 @@
-//! IPv6. Header layout from RFC 8200 section 3; Next Header values from the
-//! IANA "Protocol Numbers" registry.
+//! IPv6 header layout from RFC 8200 §3; Next Header values from the IANA
+//! "Protocol Numbers" registry.
 
 use crate::field::FieldDesc;
 use crate::proto::{ipproto, Next, ProtoDesc, ProtoId};

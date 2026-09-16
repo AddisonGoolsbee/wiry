@@ -1,5 +1,5 @@
-//! IPv4. Header layout from RFC 791 section 3.1; protocol numbers from the
-//! IANA "Protocol Numbers" registry.
+//! IPv4 header layout from RFC 791 §3.1; protocol numbers from the IANA
+//! "Protocol Numbers" registry.
 
 use crate::field::FieldDesc;
 use crate::options::{be, walk_tlv, Item};
