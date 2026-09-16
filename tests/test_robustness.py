@@ -53,6 +53,19 @@ def test_a_bytes_like_load_still_builds(load):
     assert bytes(packetry.Raw(load=load)) == b"ab"
 
 
+@pytest.mark.parametrize("length", [2**34, 2**16, 8192, -1, True, "4", 4.0])
+def test_an_undeclarable_field_width_is_refused_before_it_allocates(length):
+    with pytest.raises(ValueError):
+        packetry.fields.StrFixedLenField("x", b"", length=length)
+
+
+def test_the_widest_declarable_field_still_works():
+    f = packetry.fields.StrFixedLenField(
+        "x", b"ab", length=packetry.fields.MAX_FIELD_OCTETS
+    )
+    assert len(f.spec()[4]) == packetry.fields.MAX_FIELD_OCTETS
+
+
 def dns_bomb() -> bytes:
     """2.75 MB claiming 65,535 records in every section, each a two-octet
     pointer to one maximal name of octets that decode three bytes wide."""

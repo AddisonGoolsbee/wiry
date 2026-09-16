@@ -137,10 +137,25 @@ class MACField(Field):
         return (self.name, 48, self.kind, 0, b, [])
 
 
+#: A declared layer carries its bit offsets in a u16, so this is the widest
+#: field Rust can describe. Checked here because padding a default out to the
+#: declared width would otherwise allocate that much first.
+MAX_FIELD_OCTETS = 0xFFFF // 8
+
+
 class StrFixedLenField(Field):
     kind = "bytes"
 
     def __init__(self, name: str, default: Any = b"", length: int = 0):
+        if isinstance(length, bool) or not isinstance(length, int) or length < 0:
+            raise ValueError(
+                f"{name}: length must be a non-negative integer, not {length!r}"
+            )
+        if length > MAX_FIELD_OCTETS:
+            raise ValueError(
+                f"{name}: length {length} is over the {MAX_FIELD_OCTETS} octets "
+                "a declared field can describe"
+            )
         super().__init__(name, default, length * 8)
         self.length = length
 
