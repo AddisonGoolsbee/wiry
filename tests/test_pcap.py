@@ -2,7 +2,7 @@
 
 import pytest
 
-from blitzpkt import (
+from packetry import (
     ARP, Dot1Q, Ether, ICMP, IP, IPv6, PacketList, PcapReader, Raw, TCP, UDP,
     rdpcap, wrpcap,
 )

@@ -4,8 +4,8 @@ import struct
 
 import pytest
 
-import blitzpkt
-from blitzpkt import (
+import packetry
+from packetry import (
     ARP, DHCP, DNS, BOOTP, Dot1Q, Ether, ICMP, ICMPv6, IP, IPv6, Packet,
     Padding, Raw, TCP, UDP,
 )
@@ -33,7 +33,7 @@ def test_slash_groups_the_same_either_way():
     ],
 )
 def test_single_layer_serialises_to_its_header_size(name, size):
-    assert len(bytes(getattr(blitzpkt, name)())) == size
+    assert len(bytes(getattr(packetry, name)())) == size
 
 
 @pytest.mark.parametrize(

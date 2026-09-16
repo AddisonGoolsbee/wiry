@@ -2,11 +2,11 @@
 //! managed, never panics and never loops forever. Same contract as the `fuzz/`
 //! targets, with deterministic inputs so it runs in ordinary `cargo test`.
 
-use blitzpkt_core::layers::dns;
-use blitzpkt_core::options::{self, Item};
-use blitzpkt_core::packet::Packet;
-use blitzpkt_core::proto::{desc, ProtoId};
-use blitzpkt_core::{pcap, pcapng, show};
+use packetry_core::layers::dns;
+use packetry_core::options::{self, Item};
+use packetry_core::packet::Packet;
+use packetry_core::proto::{desc, ProtoId};
+use packetry_core::{pcap, pcapng, show};
 use std::time::{Duration, Instant};
 
 /// Fixed so a failure is reproducible; printed in every assertion message.

@@ -19,8 +19,8 @@ def rss_mb():
     return r / (1024*1024) if sys.platform == "darwin" else r / 1024
 
 t0 = time.perf_counter()
-if which == "blitzpkt":
-    import blitzpkt as B
+if which == "packetry":
+    import packetry as B
     pl = B.rdpcap(path)
     n = len(pl)
     # Touch a field on every packet so the comparison is like for like.
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     print(f"  {'library':<10} {'packets':>10} {'IP pkts':>10} {'time':>9} {'peak RSS':>11}")
 
     rows = {}
-    for which in ("blitzpkt", "scapy"):
+    for which in ("packetry", "scapy"):
         out, err = run(which, path, limit)
         if out is None:
             print(f"  {which:<10} FAILED: {err}")
@@ -77,11 +77,11 @@ if __name__ == "__main__":
         rows[which] = (n, dt, rss)
         print(f"  {which:<10} {n:>10,} {touched:>10,} {dt:>8.2f}s {rss:>10,.0f} MB")
 
-    if "blitzpkt" in rows and "scapy" in rows:
-        bn, bt, br = rows["blitzpkt"]
+    if "packetry" in rows and "scapy" in rows:
+        bn, bt, br = rows["packetry"]
         sn, st, sr = rows["scapy"]
         print()
-        print(f"  blitzpkt processed {bn / sn:,.1f}x the packets")
-        print(f"  memory per packet: blitzpkt {br * 1e3 / bn:,.2f} KB "
+        print(f"  packetry processed {bn / sn:,.1f}x the packets")
+        print(f"  memory per packet: packetry {br * 1e3 / bn:,.2f} KB "
               f"vs scapy {sr * 1e3 / sn:,.2f} KB "
               f"({(sr / sn) / (br / bn):,.0f}x less)")

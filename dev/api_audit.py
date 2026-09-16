@@ -6,7 +6,7 @@ Run: python dev/api_audit.py
 
 import sys
 
-import blitzpkt as B
+import packetry as B
 
 try:
     import scapy.all as S

@@ -1,4 +1,4 @@
-# blitzpkt — project context and decisions
+# packetry — project context and decisions
 
 Orientation for anyone (human or model) picking this up. It records **why**
 things are the way they are, so decisions do not get silently reversed.
@@ -166,7 +166,7 @@ The audience for this project will pull a benchmark apart, and should. Rules:
    549k packets against a loop over 100k and produced a flattering, wrong ratio.
 3. **Measure memory in isolated subprocesses.** `ru_maxrss` is a high-water mark,
    so co-hosting two libraries makes the second inherit the first's peak.
-4. **Benchmark only on shared ground.** blitzpkt implements fewer protocols than
+4. **Benchmark only on shared ground.** packetry implements fewer protocols than
    Scapy; the benchmark touches Ethernet, IPv4, TCP and UDP, which both fully
    implement. Say so in the README, because speed and coverage are different axes.
 5. **Publish the script and the corpus.** `dev/bench.py`, `dev/bench_memory.py`,
@@ -191,7 +191,7 @@ MAC, which needs interface introspection that is out of scope (logged as E9).
 
 ## 7. Naming
 
-`blitzpkt` is **provisional**. It was verified free on PyPI, crates.io and GitHub
+`packetry` is **provisional**. It was verified free on PyPI, crates.io and GitHub
 at the time of choosing, but nothing is registered. Renaming is cheap now and
 expensive after publication.
 

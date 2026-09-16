@@ -16,7 +16,7 @@ Status key: **OPEN** = still a gap · **CLOSED** = resolved, kept for history.
 | S2 | No live capture or injection in v1 (`sniff`, `send`, `sendp`, `sr`, `sr1`, `srp`) | Requires raw sockets, root, and per-OS backends; untestable in CI. Parse/build is where the measured 1000x lives. API shape is reserved so capture is additive, not breaking. | OPEN |
 | S3 | Standalone, clean-room, no Scapy import at runtime | Scapy is GPL-2.0-only. Importing it would relicense this project and forfeit both commercial adopters and the Rust crates.io audience. | CLOSED |
 | S4 | Unimplemented protocols dissect to `Raw`, exactly as Scapy does for layers it lacks | Preserves correct round-trip bytes for everything, at any depth. | CLOSED |
-| S5 | Name `blitzpkt` is provisional and not yet registered on PyPI/crates.io/GitHub | Deliberately not squatting until the project is real. | OPEN |
+| S5 | Name `packetry` is provisional and not yet registered on PyPI/crates.io/GitHub | Deliberately not squatting until the project is real. | OPEN |
 
 ## Provenance policy (licensing-critical)
 
@@ -46,5 +46,5 @@ running Scapy, because a machine-generated corpus derived from GPL code is a gre
 | # | Item | Status |
 |---|---|---|
 | C1 | Checksum recomputation implemented for IPv4/TCP/UDP/ICMP/ICMPv6 only | OPEN |
-| C2 | Fuzzing: 7 libFuzzer targets in `fuzz/` (dissection, DNS records, pcap, pcapng, TLV options, serialise round-trip) plus seeded property tests in `crates/blitzpkt-core/tests/robustness.rs` that run on stable | Remaining: no continuous fuzzing, and no coverage-guided corpus beyond the hand-written seeds | PARTIAL |
+| C2 | Fuzzing: 7 libFuzzer targets in `fuzz/` (dissection, DNS records, pcap, pcapng, TLV options, serialise round-trip) plus seeded property tests in `crates/packetry-core/tests/robustness.rs` that run on stable | Remaining: no continuous fuzzing, and no coverage-guided corpus beyond the hand-written seeds | PARTIAL |
 | C3 | Endianness assumed little-endian host; big-endian hosts untested | OPEN |

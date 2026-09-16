@@ -5,8 +5,8 @@ import contextlib
 
 import pytest
 
-import blitzpkt
-from blitzpkt import (
+import packetry
+from packetry import (
     ARP, Dot1Q, Ether, ICMP, IP, IPv6, TCP, UDP, hexdump_str, known_layers, ls, raw,
 )
 from helpers import ETHER_IP_TCP
@@ -213,7 +213,7 @@ def test_hexdump_str_accepts_raw_bytes_and_a_width():
 
 
 def test_hexdump_prints(capsys):
-    blitzpkt.hexdump(b"AB")
+    packetry.hexdump(b"AB")
     assert capsys.readouterr().out == hexdump_str(b"AB")
 
 
@@ -226,7 +226,7 @@ def test_known_layers_matches_the_exported_classes():
     assert names[0] == "Ether"
     assert {"IP", "IPv6", "TCP", "UDP", "ICMP", "ARP", "Raw"} <= set(names)
     for name in names:
-        assert getattr(blitzpkt, name)._name == name
+        assert getattr(packetry, name)._name == name
 
 
 def test_ls_lists_layers_and_fields():
@@ -244,9 +244,9 @@ def test_ls_lists_layers_and_fields():
 def test_public_names_are_exported():
     for name in ("Packet", "PacketList", "rdpcap", "wrpcap", "PcapReader", "raw",
                  "hexdump", "hexdump_str", "ls", "known_layers"):
-        assert name in blitzpkt.__all__
-        assert hasattr(blitzpkt, name)
-    assert set(known_layers()) <= set(blitzpkt.__all__)
+        assert name in packetry.__all__
+        assert hasattr(packetry, name)
+    assert set(known_layers()) <= set(packetry.__all__)
 
 
 def test_raw_helper_is_the_same_as_bytes(pkt):

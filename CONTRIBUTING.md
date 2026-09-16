@@ -1,8 +1,8 @@
-# Contributing to blitzpkt
+# Contributing to packetry
 
 ## Provenance policy (read this before writing any protocol layer)
 
-blitzpkt is a **clean-room** implementation. It is API-compatible with Scapy and
+packetry is a **clean-room** implementation. It is API-compatible with Scapy and
 shares no code with it.
 
 Scapy is licensed **GPL-2.0-only**. Reimplementing its *API* is settled fair use

@@ -15,7 +15,7 @@ import os
 import sys
 import time
 
-import blitzpkt as B
+import packetry as B
 
 try:
     import scapy.all as S
@@ -62,7 +62,7 @@ def bench(path, limit):
         return checksum(cols.values())
 
     dt, want = timed(bulk)
-    results["columns"] = row("blitzpkt  columns()  one pass", dt, n, str(want))
+    results["columns"] = row("packetry  columns()  one pass", dt, n, str(want))
 
     def four_calls():
         cols = [cap.field_column(layer, field) for layer, field in SPECS]
@@ -70,7 +70,7 @@ def bench(path, limit):
 
     dt, got = timed(four_calls)
     assert got == want, (got, want)
-    results["field_column"] = row("blitzpkt  field_column() x4", dt, n)
+    results["field_column"] = row("packetry  field_column() x4", dt, n)
 
     def py_loop():
         cols = [[] for _ in SPECS]
@@ -81,7 +81,7 @@ def bench(path, limit):
 
     dt, got = timed(py_loop)
     assert got == want, (got, want)
-    results["loop"] = row("blitzpkt  per-packet Python loop", dt, n)
+    results["loop"] = row("packetry  per-packet Python loop", dt, n)
 
     if HAVE_SCAPY:
         def scapy_loop():
@@ -115,7 +115,7 @@ def bench_filtered(path, limit):
         return len(cols["TCP.dport"])
 
     dt, hits = timed(bulk)
-    row("blitzpkt  columns(layer='TCP')", dt, n, f"({hits:,} tcp rows)")
+    row("packetry  columns(layer='TCP')", dt, n, f"({hits:,} tcp rows)")
 
     def py_loop():
         out = []
@@ -126,7 +126,7 @@ def bench_filtered(path, limit):
 
     dt, got = timed(py_loop)
     assert got == hits
-    row("blitzpkt  per-packet Python loop", dt, n)
+    row("packetry  per-packet Python loop", dt, n)
 
     if HAVE_SCAPY:
         def scapy_loop():
@@ -162,6 +162,6 @@ if __name__ == "__main__":
     limit = int(sys.argv[2]) if len(sys.argv) > 2 else 10**9
     print(f"file: {pcap}  ({os.path.getsize(pcap) / 1e6:,.1f} MB)")
     if not HAVE_SCAPY:
-        print("scapy not installed; showing blitzpkt numbers only")
+        print("scapy not installed; showing packetry numbers only")
     summarise(bench(pcap, limit))
     bench_filtered(pcap, limit)

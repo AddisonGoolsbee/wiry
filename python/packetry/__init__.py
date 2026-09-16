@@ -1,10 +1,10 @@
-"""blitzpkt: fast packet dissection and crafting with a familiar API."""
+"""packetry: fast packet dissection and crafting with a familiar API."""
 
 from __future__ import annotations
 
 from typing import Any, Iterator, Sequence
 
-from . import _blitzpkt as _b
+from . import _packetry as _b
 
 __version__ = _b.__version__
 

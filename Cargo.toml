@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/blitzpkt-core", "crates/blitzpkt-py"]
+members = ["crates/packetry-core", "crates/packetry-py"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/blitzpkt/blitzpkt"
+repository = "https://github.com/packetry/packetry"
 rust-version = "1.75"
 
 [workspace.dependencies]

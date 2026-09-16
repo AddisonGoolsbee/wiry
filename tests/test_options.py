@@ -8,7 +8,7 @@ import struct
 
 import pytest
 
-from blitzpkt import DHCP, IP, TCP, UDP, BOOTP, Ether, Raw
+from packetry import DHCP, IP, TCP, UDP, BOOTP, Ether, Raw
 
 
 def _tcp_with(opts: bytes) -> bytes:

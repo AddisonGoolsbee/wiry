@@ -6,11 +6,11 @@
 // as useless_conversion at each function's span.
 #![allow(clippy::useless_conversion)]
 
-use blitzpkt_core::field::{self, FieldDesc, FieldValue};
-use blitzpkt_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
-use blitzpkt_core::pcap;
-use blitzpkt_core::proto::{self, ProtoId};
-use blitzpkt_core::show;
+use packetry_core::field::{self, FieldDesc, FieldValue};
+use packetry_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
+use packetry_core::pcap;
+use packetry_core::proto::{self, ProtoId};
+use packetry_core::show;
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList};
@@ -178,9 +178,9 @@ fn build_query(
         } else if let Ok(b) = v.extract::<Vec<u8>>() {
             CondVal::Bytes(b)
         } else if let Ok(s) = v.extract::<String>() {
-            match blitzpkt_core::parse::value_for(f, &s) {
-                Some(blitzpkt_core::parse::ValueBits::Uint(n)) => CondVal::Uint(n),
-                Some(blitzpkt_core::parse::ValueBits::Bytes(b)) => CondVal::Bytes(b),
+            match packetry_core::parse::value_for(f, &s) {
+                Some(packetry_core::parse::ValueBits::Uint(n)) => CondVal::Uint(n),
+                Some(packetry_core::parse::ValueBits::Bytes(b)) => CondVal::Bytes(b),
                 None => {
                     return Err(PyValueError::new_err(format!(
                         "cannot parse {s:?} for field {fname:?}"
@@ -271,12 +271,12 @@ impl PyPkt {
             .ok_or_else(|| PyIndexError::new_err("layer out of range"))?;
         let f = proto::active_field_of(span.proto, self.inner.header(layer), name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
-        match blitzpkt_core::parse::value_for(f, val) {
-            Some(blitzpkt_core::parse::ValueBits::Uint(v)) => {
+        match packetry_core::parse::value_for(f, val) {
+            Some(packetry_core::parse::ValueBits::Uint(v)) => {
                 self.inner.set_uint(layer, name, v);
                 Ok(())
             }
-            Some(blitzpkt_core::parse::ValueBits::Bytes(b)) => {
+            Some(packetry_core::parse::ValueBits::Bytes(b)) => {
                 self.inner.set_bytes(layer, name, &b);
                 Ok(())
             }
@@ -302,7 +302,7 @@ impl PyPkt {
     /// `None` means the protocol has no option region at all, unlike an empty
     /// list, which means it has one and it is empty.
     fn options(&self, py: Python<'_>, layer: usize) -> Option<Py<PyList>> {
-        use blitzpkt_core::options::ItemValue;
+        use packetry_core::options::ItemValue;
         let items = self.inner.options(layer)?;
         let out = PyList::empty_bound(py);
         for it in &items {
@@ -325,7 +325,7 @@ impl PyPkt {
 
     /// `None` when the layer is not DNS.
     fn dns_records(&self, py: Python<'_>, layer: usize) -> PyResult<Option<PyObject>> {
-        use blitzpkt_core::layers::dns::{self, RData};
+        use packetry_core::layers::dns::{self, RData};
         let Some(span) = self.inner.layers().get(layer) else {
             return Ok(None);
         };
@@ -521,7 +521,7 @@ impl PyPktList {
                 .filter(|(off, len, _, _)| {
                     let a = *off as usize;
                     let b = a + *len as usize;
-                    blitzpkt_core::packet::dissect_spans(&buf[a..b], link)
+                    packetry_core::packet::dissect_spans(&buf[a..b], link)
                         .iter()
                         .any(|s| s.proto == id)
                 })
@@ -714,11 +714,11 @@ fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
         .allow_threads(|| -> Result<_, String> {
             let base = data.as_ptr() as usize;
             let mut index = Vec::new();
-            if blitzpkt_core::pcapng::is_pcapng(&data) {
-                let r = blitzpkt_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())?;
+            if packetry_core::pcapng::is_pcapng(&data) {
+                let r = packetry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())?;
                 let link = pcap::link_to_proto(r.header.linktype);
                 let nanos = r.header.nanos();
-                for rec in blitzpkt_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())? {
+                for rec in packetry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())? {
                     let off = (rec.data.as_ptr() as usize - base) as u32;
                     index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
                 }
@@ -835,11 +835,11 @@ fn apply_fields(
             .ok_or_else(|| PyIndexError::new_err("layer out of range"))?;
         let f = proto::active_field_of(span.proto, pkt.header(*layer), name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
-        match blitzpkt_core::parse::value_for(f, s) {
-            Some(blitzpkt_core::parse::ValueBits::Uint(v)) => {
+        match packetry_core::parse::value_for(f, s) {
+            Some(packetry_core::parse::ValueBits::Uint(v)) => {
                 pkt.set_uint(*layer, name, v);
             }
-            Some(blitzpkt_core::parse::ValueBits::Bytes(b)) => {
+            Some(packetry_core::parse::ValueBits::Bytes(b)) => {
                 pkt.set_bytes(*layer, name, &b);
             }
             None => {
@@ -950,7 +950,7 @@ fn known_layers() -> Vec<&'static str> {
 }
 
 #[pymodule]
-fn _blitzpkt(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPkt>()?;
     m.add_class::<PyPktList>()?;
     m.add_function(wrap_pyfunction!(read_pcap, m)?)?;

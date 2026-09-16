@@ -1,5 +1,5 @@
 [package]
-name = "blitzpkt-fuzz"
+name = "packetry-fuzz"
 version = "0.0.0"
 edition = "2021"
 publish = false
@@ -13,14 +13,14 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-blitzpkt-core = { path = "../crates/blitzpkt-core" }
+packetry-core = { path = "../crates/packetry-core" }
 
 [profile.release]
 debug = 1
 panic = "abort"
 
 [lib]
-name = "blitzpkt_fuzz"
+name = "packetry_fuzz"
 path = "src/lib.rs"
 
 [[bin]]

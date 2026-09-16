@@ -1,23 +1,23 @@
 #![no_main]
 
-use blitzpkt_core::options::{self, Item};
-use blitzpkt_core::packet::Packet;
-use blitzpkt_core::proto::ProtoId;
+use packetry_core::options::{self, Item};
+use packetry_core::packet::Packet;
+use packetry_core::proto::ProtoId;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     // A TCP header whose option region is the fuzz input, reached through the
     // layer's own option parser.
     let mut pkt = Packet::build_with(&[(ProtoId::Tcp, Some(data.to_vec()))]);
-    blitzpkt_fuzz::exercise(&mut pkt);
+    packetry_fuzz::exercise(&mut pkt);
 
     // IPv4 options take the same TLV convention through a different layer.
     let mut pkt = Packet::build_with(&[(ProtoId::Ipv4, Some(data.to_vec())), (ProtoId::Udp, None)]);
-    blitzpkt_fuzz::exercise(&mut pkt);
+    packetry_fuzz::exercise(&mut pkt);
 
     // DHCP uses the other length convention and its own walker.
     let mut pkt = Packet::dissect(data.to_vec(), ProtoId::Dhcp);
-    blitzpkt_fuzz::exercise(&mut pkt);
+    packetry_fuzz::exercise(&mut pkt);
 
     // The primitive itself, with a decoder that touches every payload byte.
     for single in [&[0u8, 1u8][..], &[][..]] {

@@ -1,6 +1,6 @@
 #![no_main]
 
-use blitzpkt_core::layers::dns;
+use packetry_core::layers::dns;
 use libfuzzer_sys::fuzz_target;
 use std::time::Instant;
 

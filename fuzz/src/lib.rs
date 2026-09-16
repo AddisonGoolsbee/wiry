@@ -1,9 +1,9 @@
 //! Shared assertions: dissection does not panic, it terminates, and no span
 //! ever points outside the buffer it came from.
 
-use blitzpkt_core::packet::Packet;
-use blitzpkt_core::proto::{desc, ProtoId};
-use blitzpkt_core::show;
+use packetry_core::packet::Packet;
+use packetry_core::proto::{desc, ProtoId};
+use packetry_core::show;
 
 pub const ALL_PROTOS: [ProtoId; 14] = [
     ProtoId::Raw,

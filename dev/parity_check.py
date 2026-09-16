@@ -10,7 +10,7 @@ Run: python dev/parity_check.py <pcap> [limit]
 
 import sys
 
-import blitzpkt as B
+import packetry as B
 
 try:
     import scapy.all as S
@@ -70,7 +70,7 @@ def check_build():
         else:
             fail += 1
             print(f"  DIFFER {label}")
-            print(f"     blitzpkt: {hx(a)}")
+            print(f"     packetry: {hx(a)}")
             print(f"     scapy   : {hx(b)}")
             for i, (x, y) in enumerate(zip(a, b)):
                 if x != y:
@@ -110,7 +110,7 @@ def check_dissect(path, limit):
                     theirs.append(nm)
                 cur = cur.payload if cur.payload else None
 
-            # Compare only the prefix blitzpkt claims to implement.
+            # Compare only the prefix packetry claims to implement.
             known = set(B.known_layers())
             theirs_known = [t for t in theirs if t in known]
             common = min(len(mine), len(theirs_known))

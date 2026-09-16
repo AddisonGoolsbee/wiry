@@ -1,5 +1,5 @@
 [package]
-name = "blitzpkt-core"
+name = "packetry-core"
 description = "Fast, clean-room packet dissection and construction engine"
 version.workspace = true
 edition.workspace = true

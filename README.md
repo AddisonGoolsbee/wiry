@@ -1,9 +1,9 @@
-# blitzpkt
+# packetry
 
 Fast packet dissection and crafting for Python. Rust core, familiar API.
 
 ```python
-from blitzpkt import *
+from packetry import *
 
 pkt = Ether()/IP(dst="10.0.0.1")/TCP(dport=443, flags="S")
 pkt.show()
@@ -22,7 +22,7 @@ Packet dissection in Python is slow for a structural reason: every field of ever
 layer becomes a Python object, whether or not you read it. Reading two fields out
 of a capture costs you the whole object graph.
 
-blitzpkt keeps a packet as one byte buffer plus a small table of
+packetry keeps a packet as one byte buffer plus a small table of
 `(protocol, offset, header length)` spans. Dissection walks the layer chain
 touching only the bytes needed to find each next header. Field values decode on
 demand. A capture stays in Rust; Python objects appear only for packets you
@@ -35,7 +35,7 @@ Measured against scapy 2.7.0 on `bigFlows.pcap`, a public 256 MB capture of
 macOS 26.6, CPython 3.13.5. Reproduce with `python dev/bench.py <pcap>`. Figures vary a few percent
 between runs; these are from the lower of two.
 
-| Workload | scapy | blitzpkt | |
+| Workload | scapy | packetry | |
 |---|---|---|---|
 | Read + 2 fields per packet | 11,141 pkt/s | 222,126 pkt/s | **19.9x** |
 | Same, bulk column API | 11,141 pkt/s | 4,362,903 pkt/s | **391.6x** |
@@ -47,9 +47,9 @@ Memory, each measured in its own process (`python dev/bench_memory.py <pcap>`):
 | | packets held | peak RSS | per packet |
 |---|---|---|---|
 | scapy | 200,000 | 1,334 MB | 6.67 KB |
-| blitzpkt | 549,726 | 339 MB | **0.62 KB** |
+| packetry | 549,726 | 339 MB | **0.62 KB** |
 
-blitzpkt read the entire 549,726-packet file and extracted a field from every
+packetry read the entire 549,726-packet file and extracted a field from every
 packet in 0.24 s. scapy took 18.82 s to do the same for 200,000 of them.
 
 Two honest caveats about these numbers:
@@ -58,7 +58,7 @@ Two honest caveats about these numbers:
   `field_column`, which does whole-capture work in one crossing of the Rust
   boundary. The like-for-like per-packet loop number is 19.9x. Both are reported
   above and both are in the benchmark script.
-- **blitzpkt currently implements fewer protocols than scapy.** Speed and
+- **packetry currently implements fewer protocols than scapy.** Speed and
   coverage are not the same axis. The benchmark only touches Ethernet, IPv4, TCP
   and UDP, which both libraries fully implement, so the comparison is on shared
   ground. See the supported surface below.
@@ -91,13 +91,13 @@ Offline only for now. There is no `sniff()` or `send()` yet; see
 ## Install
 
 ```sh
-pip install blitzpkt        # not yet published
+pip install packetry        # not yet published
 ```
 
 From source:
 
 ```sh
-git clone https://github.com/blitzpkt/blitzpkt && cd blitzpkt
+git clone https://github.com/packetry/packetry && cd packetry
 pip install maturin && maturin develop --release
 ```
 
@@ -106,7 +106,7 @@ pip install maturin && maturin develop --release
 The surface intentionally mirrors what people already type.
 
 ```python
-from blitzpkt import *
+from packetry import *
 
 # construct
 p = Ether(dst="00:11:22:33:44:55")/IP(src="10.0.0.1", dst="10.0.0.2")/TCP(dport=80)
@@ -171,12 +171,12 @@ callbacks, so selection stays in Rust.
 Dataframes, each library imported lazily so none of them is a dependency:
 
 ```python
-from blitzpkt.columnar import to_polars, to_arrow, to_pandas
+from packetry.columnar import to_polars, to_arrow, to_pandas
 
 df = to_polars(cap)
 ```
 
-Install with `pip install 'blitzpkt[polars]'`, or `[arrow]`, or `[pandas]`.
+Install with `pip install 'packetry[polars]'`, or `[arrow]`, or `[pandas]`.
 
 Four columns over the same 549,726-packet capture:
 
@@ -194,7 +194,7 @@ dominates, not the dissection.
 
 ## Relationship to scapy
 
-blitzpkt is an independent, clean-room implementation. It shares no code with
+packetry is an independent, clean-room implementation. It shares no code with
 scapy.
 
 scapy is licensed GPL-2.0. Reimplementing an API is settled fair use
@@ -205,11 +205,11 @@ IANA registry, cited in a comment at the top of each layer module, and
 contributors are asked not to read scapy's source while writing the equivalent
 layer. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-That is why blitzpkt can be MIT OR Apache-2.0, which means it can go into
+That is why packetry can be MIT OR Apache-2.0, which means it can go into
 products that GPL would exclude, and the Rust core is usable from Rust.
 
 scapy is a far more capable tool and will remain so. If you need its protocol
-breadth, its interactive shell, or live capture, use scapy. Use blitzpkt when
+breadth, its interactive shell, or live capture, use scapy. Use packetry when
 you are moving a lot of packets offline and the dissection cost is what hurts.
 
 ## License

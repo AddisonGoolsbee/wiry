@@ -8,10 +8,10 @@ import sys
 
 import pytest
 
-from blitzpkt import (
+from packetry import (
     ARP, Dot1Q, Ether, ICMP, IP, IPv6, PacketList, Raw, TCP, UDP, rdpcap, wrpcap,
 )
-from blitzpkt import columnar
+from packetry import columnar
 
 
 def sample_packets():
@@ -237,11 +237,11 @@ def test_exports_explain_themselves_when_the_library_is_missing(
 
 
 def test_the_exports_are_reachable_from_the_package():
-    import blitzpkt
+    import packetry
 
     for name in ("to_arrow", "to_polars", "to_pandas"):
-        assert name in blitzpkt.__all__
-        assert getattr(blitzpkt, name) is getattr(columnar, name)
+        assert name in packetry.__all__
+        assert getattr(packetry, name) is getattr(columnar, name)
 
 
 def test_arrow_export(capture):
