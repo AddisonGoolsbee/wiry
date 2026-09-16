@@ -63,8 +63,7 @@ def bench_read(path, limit):
     dt, (n, tcp) = timed(blitz_lazy)
     results["packetry"] = row("packetry  per-packet loop", dt, n, f"({tcp} tcp)")
 
-    # Bulk mode works over the whole capture, so its rate is per packet it
-    # actually processed.
+    # Bulk mode works over the whole capture, so the rate is per packet.
     def blitz_bulk():
         pl = B.rdpcap(path)
         col = pl.field_column("TCP", "dport")

@@ -1,13 +1,10 @@
 """Field classes for declaring your own layer.
 
-A field is a declaration, not code: it carries a name, a width in bits, a kind
-and a default. Subclassing ``Packet`` with a ``fields_desc`` hands that
-description to Rust once, at class-definition time, and the dissector executes
-it from then on without ever calling back into Python.
-
-Widths are summed in declaration order to give each field its bit offset, so
-bit fields may straddle byte boundaries as long as the layer as a whole is a
-whole number of bytes.
+A field carries a name, a width in bits, a kind and a default. Subclassing
+``Packet`` with a ``fields_desc`` hands the description to Rust once, at
+class-definition time. Widths are summed in declaration order to give each
+field its bit offset, so bit fields may straddle byte boundaries as long as the
+layer as a whole is a whole number of bytes.
 """
 
 from __future__ import annotations
@@ -137,9 +134,9 @@ class MACField(Field):
         return (self.name, 48, self.kind, 0, b, [])
 
 
-#: A declared layer carries its bit offsets in a u16, so this is the widest
-#: field Rust can describe. Checked here because padding a default out to the
-#: declared width would otherwise allocate that much first.
+#: Bit offsets are a u16, so this is the widest field Rust can describe.
+#: Checked here because padding a default to the declared width would
+#: otherwise allocate that much first.
 MAX_FIELD_OCTETS = 0xFFFF // 8
 
 

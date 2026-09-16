@@ -53,7 +53,7 @@ def bench(path, limit):
     print(f"\n=== FOUR COLUMNS FROM {n:,} PACKETS ===")
     results = {}
 
-    # Both sides must cover identical packet sets: a bulk call over the whole
+    # Both sides must cover identical packet sets, or a bulk call over the whole
     # capture against a loop over a prefix gives a flattering, wrong ratio.
     cap = pl.head(n)
 

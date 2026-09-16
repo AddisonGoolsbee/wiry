@@ -66,7 +66,7 @@ def test_raw_option_bytes_remain_available():
 
 
 def test_a_layer_without_an_option_region_reports_none_shaped_result():
-    # UDP has no option region, so the attribute falls through to the field table.
+    # UDP has no option region, so the attribute falls through to the fields.
     pkt = Ether(_tcp_with(b""))
     with pytest.raises(AttributeError):
         _ = pkt[Ether].options
@@ -165,16 +165,15 @@ def test_dhcp_address_option_decodes():
 
 
 def test_bootp_option_field_is_the_magic_cookie():
-    # RFC 2131 §3: the cookie ends the BOOTP header and introduces the DHCP
-    # options, so it is what BOOTP's own option field holds.
+    # RFC 2131 §3: the cookie ends the BOOTP header, so it is what BOOTP's own
+    # option field holds.
     pkt = UDP(_dhcp_frame(bytes([255])))
     assert BOOTP in pkt
     assert pkt[BOOTP].options == bytes([99, 130, 83, 99])
     assert pkt[DHCP].raw_options() == bytes([255])
 
 
-# RFC 2132 §9.13: option 60 is the vendor class identifier, which the parser
-# has no name for, so it is labelled with its code in decimal.
+# RFC 2132 §9.13: option 60 is unnamed here, so it is labelled with its code.
 DHCP_WITH_VENDOR_CLASS = bytes(
     [53, 1, 3, 60, 8]
 ) + b"MSFT 5.0" + bytes([55, 3, 1, 3, 6, 255])

@@ -13,8 +13,7 @@ from helpers import (
 
 
 def test_helper_checksum_agrees_with_the_hand_built_icmp_vector():
-    # The vector carries a checksum hand-computed from RFC 792, so a correct
-    # RFC 1071 implementation sums the whole message to zero.
+    # RFC 792 vector; a correct RFC 1071 sum over the whole message is zero.
     assert checksum(ICMP_ECHO) == 0
 
 
@@ -231,8 +230,8 @@ def test_raw_layer_from_bytes_keeps_the_whole_buffer():
 
 
 def test_a_clipped_capture_keeps_the_lengths_the_wire_gave():
-    # A snaplen-clipped record holds fewer bytes than its length fields
-    # describe; recomputing from what was captured would destroy them.
+    # A clipped record holds fewer bytes than its length fields describe;
+    # recomputing from what was captured would destroy them.
     full = bytes(Ether() / IP() / UDP() / Raw(load=b"x" * 60))
     clipped = Ether(full[:60])
     assert clipped[IP].len == 88
@@ -246,8 +245,8 @@ def test_a_clipped_capture_keeps_the_lengths_the_wire_gave():
 
 
 def test_stacking_onto_a_dissected_packet_keeps_its_fields():
-    # Regression: stacking must copy the real packet and append to its bytes,
-    # because variable-length content cannot survive the build path.
+    # Stacking copies the real packet and appends to its bytes: variable-length
+    # content cannot survive the build path.
     dissected = Ether(ETHER_IP_TCP)
     combined = dissected / Raw(load=b"zz")
     assert combined[IP].src == "10.0.0.1"
@@ -255,7 +254,6 @@ def test_stacking_onto_a_dissected_packet_keeps_its_fields():
     out = bytes(combined)
     assert out.endswith(b"zz")
     assert len(out) == len(ETHER_IP_TCP) + 2
-    # Only the fields that must change when a payload is appended: the IPv4
-    # total length and the two checksums.
+    # Only the IPv4 total length and the two checksums may change.
     assert combined[IP].len == len(ETHER_IP_TCP) - 14 + 2
     assert out[:16] == ETHER_IP_TCP[:16]

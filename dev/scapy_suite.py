@@ -24,8 +24,7 @@ from pathlib import Path
 
 import packetry
 
-# Names a test may use that we deliberately do not provide. Hitting one is a
-# scope boundary, not a defect.
+# Names we deliberately do not provide: a scope boundary, not a defect.
 OUT_OF_SCOPE = {
     "conf", "sniff", "send", "sendp", "sr", "sr1", "srp", "srp1", "srloop",
     "AsyncSniffer", "L3socket", "L2socket", "get_if_hwaddr", "getmacbyip",
@@ -53,7 +52,6 @@ def parse_uts(path):
             continue
         if name is None:
             continue
-        # ~ tags and * prose are metadata, not code.
         if line.startswith(("~ ", "* ", "#", "%")):
             continue
         buf.append(line)

@@ -29,9 +29,8 @@ def _is_bytes(x: Any) -> bool:
 
 
 def _to_bytes(x: Any, what: str = "value") -> bytes:
-    """Byte-oriented strings encode as latin-1, so every code point below 256
-    survives as the octet of the same value. Anything else is refused, because
-    `bytes(n)` would allocate n zero octets instead of failing."""
+    """Byte-oriented strings encode as latin-1. Anything else is refused,
+    because `bytes(n)` would allocate n zero octets instead of failing."""
     if isinstance(x, str):
         return x.encode("latin-1")
     if _is_bytes(x):
@@ -62,9 +61,8 @@ def _flag_names(layer: str, field: str) -> tuple[str, ...] | None:
 class FlagValue:
     """A flag field: an integer, a set of named bits and a string at once.
 
-    Naming bits is what the wire format means, so `.SA` is the AND of the two
-    bits rather than an equality test. Assigning to a bit writes through to the
-    packet the value was read from.
+    `.SA` is the AND of the two bits, not an equality test. Assigning to a bit
+    writes through to the packet the value was read from.
     """
 
     __slots__ = ("_names", "_bits", "_owner", "_layer", "_field")
@@ -90,8 +88,8 @@ class FlagValue:
         return int(other)
 
     def _mask(self, attr: str) -> int | None:
-        """The bits named by a run of concatenated flag names, longest first so
-        a name that starts with another still matches whole."""
+        """Longest name first, so a name starting with another still matches
+        whole."""
         mask = 0
         at = 0
         while at < len(attr):
@@ -252,9 +250,9 @@ class _LayerView:
 # (code, payload width, or None for variable). Codes from the IANA TCP Option
 # Kind and IP Option Number registries.
 #
-# EOL and NOP occupy a single octet with no length field, but SAckOK still
-# carries a length octet despite an empty payload; emitting it as one bare byte
-# desynchronises every option after it.
+# EOL and NOP are a single octet with no length field, but SAckOK keeps its
+# length octet despite an empty payload; emitting it bare desynchronises every
+# option after it.
 _SINGLE_BYTE = {0, 1}
 _TCP_OPT = {
     "EOL": (0, 0), "NOP": (1, 0), "MSS": (2, 2), "WScale": (3, 1),
@@ -272,8 +270,8 @@ _IP_OPT = {
 # big-endian integer of that many bytes.
 #
 # The length octet here counts ONLY the option data (RFC 2132 §2), the opposite
-# of the TCP/IPv4 convention above where it also counts the code and length
-# octets. Using one rule for the other desynchronises every following option.
+# of the TCP/IPv4 convention above, where it counts the code and length octets
+# too. Using one rule for the other desynchronises every following option.
 _DHCP_OPT: dict[str, tuple[int, Any]] = {
     "pad": (0, "flag"),
     "subnet_mask": (1, "ip"),
@@ -339,8 +337,8 @@ def _dhcp_payload(kind: Any, values: tuple) -> bytes:
 
 
 def _opt_code(name: Any) -> int | None:
-    """An option the parser could not name comes back labelled with its code in
-    decimal, so that label has to encode as that code again."""
+    """An unnamed option is labelled with its decimal code, which must encode
+    back to that code."""
     if isinstance(name, int):
         return name
     if isinstance(name, str) and name.isdigit() and 0 <= int(name) <= 255:
@@ -349,12 +347,11 @@ def _opt_code(name: Any) -> int | None:
 
 
 def _encode_dhcp_options(items: Any) -> bytes:
-    """Encode a DHCP option list (RFC 2132) into wire bytes.
+    """Encode an RFC 2132 DHCP option list.
 
     Accepts what the parser gives back and what people type: "end",
-    ("end", None), ("message-type", 1), ("message-type", "discover"),
-    ("server_id", "10.0.0.1"), ("router", ["10.0.0.1", "10.0.0.2"]),
-    (224, b"raw"), ("60", b"raw").
+    ("end", None), ("message-type", 1 | "discover"), ("server_id", "10.0.0.1"),
+    ("router", ["10.0.0.1", "10.0.0.2"]), (224, b"raw"), ("60", b"raw").
     """
     out = bytearray()
     for item in items:
@@ -383,11 +380,8 @@ def _encode_dhcp_options(items: Any) -> bytes:
 
 
 def _encode_options(layer: str, items: Any) -> bytes:
-    """Encode an option list into wire bytes.
-
-    Accepts the same shapes the parser produces: ("MSS", 1460),
-    ("SAckOK", None), ("Timestamp", (tsval, tsecr)), or (code, b"raw").
-    """
+    """Accepts the shapes the parser produces: ("MSS", 1460), ("SAckOK", None),
+    ("Timestamp", (tsval, tsecr)), (code, b"raw")."""
     if _is_bytes(items):
         return bytes(items)
     if layer == "DHCP":
@@ -439,8 +433,8 @@ def _layer_name(x: Any) -> str:
     raise TypeError(f"not a layer: {x!r}")
 
 
-# Layer name -> (field, default) of a trailing variable-length field, which is
-# appended at build time like an option region, not written into a fixed slot.
+# Layer name -> (field, default) of a trailing variable-length field, appended
+# at build time like an option region rather than written into a fixed slot.
 _VAR_FIELD: dict[str, tuple[str, Any]] = {}
 
 _OPAQUE = ("Raw", "Padding")
@@ -460,8 +454,8 @@ def _float_padding(stack: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
 def _layer_init(name: str):
     def __init__(self, _data: Any = None, **kw: Any) -> None:
         if _data is not None and (_is_bytes(_data) or isinstance(_data, str)):
-            # An opaque layer keeps its bytes as a field, so that stacking it
-            # under another one still produces a layer rather than a payload.
+            # An opaque layer keeps its bytes as a field, so stacking it under
+            # another one still produces a layer rather than a payload.
             if name in _OPAQUE:
                 kw.setdefault("load", _to_bytes(_data))
             else:
@@ -473,8 +467,7 @@ def _layer_init(name: str):
 
 
 class _PacketMeta(type):
-    """Registers a subclass that declares ``fields_desc`` as a real layer, so
-    it behaves exactly like a generated built-in one."""
+    """Registers a subclass declaring ``fields_desc`` as a real layer."""
 
     def __new__(mcls, cname, bases, ns):
         desc = ns.get("fields_desc")
@@ -525,8 +518,7 @@ class Packet(metaclass=_PacketMeta):
 
         # A materialised packet cannot be turned back into a field spec:
         # variable-length header content does not survive the build path, so
-        # reconstructing would reset every field to its default. Append to the
-        # real bytes instead, as happens on the wire.
+        # reconstructing would reset every field to its default.
         if self._rust is not None or other._rust is not None:
             new = self._materialize().copy()
             n = len(new.layer_names())
@@ -563,8 +555,8 @@ class Packet(metaclass=_PacketMeta):
         for i, (lname, fields) in enumerate(self._stack):
             var = _VAR_FIELD.get(lname)
             for k, v in fields.items():
-                # A list of options is encoded and appended to the header rather
-                # than written into a fixed-width field.
+                # Options are encoded and appended to the header, not written
+                # into a fixed-width field.
                 if k == "options" and not _is_bytes(v):
                     continue
                 if k == "load" and lname in ("Raw", "Padding"):
@@ -642,7 +634,6 @@ class Packet(metaclass=_PacketMeta):
         self._stack[layer][1][field] = value
 
     def __bytes__(self) -> bytes:
-        # A pure spec serialises in one crossing, with no Rust object kept.
         if self._rust is None and self._stack:
             names = [n for n, _ in self._stack]
             ints, strs, raws = self._split_fields()
@@ -697,7 +688,7 @@ class Packet(metaclass=_PacketMeta):
 
     def __getitem__(self, layer: Any) -> _LayerView:
         # pkt[IP:2] is the second IP layer; pkt[IP::{"ttl": 3}] filters on
-        # field values, which is the shape scapy's own suite uses.
+        # field values.
         if type(layer) is slice:
             view = self.getlayer(
                 layer.start, layer.stop or 1, **(layer.step or {})
@@ -941,8 +932,7 @@ def hexdump_str(pkt: Any, width: int = 16) -> str:
 def ls(layer: Any = None, verbose: bool = False) -> None:
     """List known layers, the fields of one, or the fields of a packet.
 
-    `verbose` keeps the fields a header's own contents make inactive, which are
-    otherwise left out for a packet that has been built.
+    `verbose` keeps the fields a header's own contents make inactive.
     """
     if layer is None:
         for n in _b.known_layers():

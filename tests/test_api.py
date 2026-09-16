@@ -117,7 +117,6 @@ def test_an_oversized_byte_value_is_truncated_to_its_field(pkt):
 
 @pytest.mark.parametrize("load", [b"ABCDEFGHIJKLMNOP", b"XY", b""])
 def test_writing_a_trailing_variable_length_field_resizes_the_frame(load):
-    # A port no layer is bound to, so the payload stays one Raw layer.
     orig = bytes(Ether() / IP() / UDP(sport=4444, dport=4444) / Raw(load=b"12345678"))
     pkt = Ether(orig)
     pkt[Raw].load = load
@@ -153,7 +152,7 @@ def test_a_trailing_pad_survives_a_payload_being_rewritten():
 
 
 def test_an_option_region_bounded_by_its_header_does_not_resize():
-    # TCP options end where the data offset says, not where the packet does.
+    # TCP options end where the data offset says.
     pkt = Ether(ETHER_IP_TCP)
     pkt[TCP].options = b"\x02\x04\x05\xb4"
     assert len(bytes(pkt)) == len(ETHER_IP_TCP)
@@ -281,7 +280,6 @@ def test_known_layers_matches_the_exported_classes():
     names = known_layers()
     assert names[0] == "Ether"
     assert {"IP", "IPv6", "TCP", "UDP", "ICMP", "ARP", "Raw"} <= set(names)
-    # A layer declared from Python is known too, but lives in its own module.
     for name in packetry._LAYERS:
         assert name in names
         assert getattr(packetry, name)._name == name

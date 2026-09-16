@@ -69,8 +69,8 @@ def test_a_padding_layer_keeps_its_place_in_the_stack():
     assert pkt[Padding].load == b"abc"
 
 
-# IEEE 802.3 clause 4 sets a 60-octet minimum frame, so short datagrams reach
-# the wire with a trailer that belongs to no layer above Ethernet.
+# IEEE 802.3 clause 4 sets a 60-octet minimum frame, so a short datagram reaches
+# the wire with a trailer belonging to no layer above Ethernet.
 def padded(datagram):
     frame = raw(Ether() / datagram)
     return frame + b"\x00" * (60 - len(frame))

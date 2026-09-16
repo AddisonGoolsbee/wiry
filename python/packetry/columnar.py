@@ -1,10 +1,9 @@
 """Columnar access: a whole capture as columns in one crossing of the boundary.
 
-Specs name the columns. Each is ``(layer, field)``, ``(layer, field, name)``
-with an explicit column name, or the string ``"IP.src"``. The pseudo-layer
-``Frame`` carries per-record metadata that is not in the packet bytes: ``time``
-(seconds), ``len`` (captured bytes) and ``num`` (position in the capture this
-one was filtered from).
+A spec is ``(layer, field)``, ``(layer, field, name)`` or ``"IP.src"``. The
+pseudo-layer ``Frame`` carries per-record metadata: ``time`` (seconds), ``len``
+(captured bytes) and ``num`` (position in the capture this one was filtered
+from).
 
 Rows are selected with ``layer=`` and ``where=``, both evaluated in Rust.
 ``where`` is data, not code: ``[("TCP", "dport", "==", 443)]``. Operators are
@@ -109,9 +108,9 @@ def columns(
 ) -> dict[str, list[Any]]:
     """Extract several fields from a whole capture in one pass.
 
-    Returns a dict of column name to list. Packets lacking a layer yield None
-    for its fields. When ``layer`` or ``where`` are given, only matching packets
-    contribute rows, and the rejected ones are never materialised.
+    Returns a dict of column name to list; a packet lacking a layer yields None
+    for its fields. ``layer`` and ``where`` select rows in Rust, so a rejected
+    packet is never materialised.
     """
     pairs, names = _normalize_specs(specs)
     cols = _rust(cap).columns(

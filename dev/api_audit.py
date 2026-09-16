@@ -94,7 +94,7 @@ def audit_methods():
     print("\n=== PACKET METHOD SURFACE ===")
     ours = {m for m in dir(B.Packet) if not m.startswith("_")}
     theirs = {m for m in dir(S.Packet) if not m.startswith("_")}
-    # Meaningless without live capture, deliberately out of scope.
+    # Meaningless without live capture.
     live = {
         "answers", "hashret", "send", "sendp", "sr", "sr1", "srp", "srp1",
         "sniff", "route", "src", "dst", "psdump", "pdfdump", "canvas_dump",

@@ -23,7 +23,7 @@ if which == "packetry":
     import packetry as B
     pl = B.rdpcap(path)
     n = len(pl)
-    # Touch a field on every packet so the comparison is like for like.
+    # Touch a field on every packet, so the comparison is like for like.
     col = pl.field_column("IP", "src")
     touched = sum(1 for x in col if x is not None)
 else:

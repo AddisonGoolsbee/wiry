@@ -59,8 +59,7 @@ VLAN_IP = (
     b"\x0a\x00\x00\x02"
 )
 
-# RFC 792 Echo message. The checksum is hand-computed for this message, so
-# checksum(ICMP_ECHO) == 0.
+# RFC 792 Echo; the checksum is computed so the message sums to zero.
 ICMP_ECHO = (
     b"\x08\x00"
     b"\x48\x2d"
@@ -92,5 +91,5 @@ DNS_HEADER = (
     b"\x00\x00"
 )
 
-# Bytes that no implemented dissector claims, for the Raw fallback tests.
+# Bytes no dissector claims, for the Raw fallback tests.
 GARBAGE = bytes(range(0x30, 0x60))

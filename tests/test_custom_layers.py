@@ -92,7 +92,6 @@ def test_the_documented_example_round_trips():
 def test_stacking_sets_the_parent_field_automatically():
     pkt = IP() / UDP() / MyProto()
     assert pkt[UDP].dport == 9999
-    # An explicit value still wins over the binding.
     other = IP() / UDP(dport=1234) / MyProto()
     assert other[UDP].dport == 1234
 

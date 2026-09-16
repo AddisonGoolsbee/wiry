@@ -228,8 +228,7 @@ def test_the_default_spec_covers_the_usual_columns(capture):
 def test_exports_explain_themselves_when_the_library_is_missing(
     capture, monkeypatch, func, module
 ):
-    # None in sys.modules makes the import fail the way an absent package does,
-    # whether or not the real library is installed here.
+    # None in sys.modules makes the import fail as an absent package does.
     monkeypatch.setitem(sys.modules, module, None)
     with pytest.raises(ImportError) as exc:
         getattr(columnar, func)(capture)

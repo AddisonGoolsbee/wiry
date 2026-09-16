@@ -85,6 +85,6 @@ def test_a_dns_decompression_bomb_decodes_a_bounded_amount():
         len(r.get("qname", r.get("rrname", ""))) for s in sections for r in s
     )
     # The engine budgets decoded bytes; a replacement character is one Python
-    # character per three of them, so this is well under the 256 KB cap.
+    # character per three, so this is under the 256 KB cap.
     assert decoded <= 256 * 1024
     assert sum(len(s) for s in sections) < 0xFFFF

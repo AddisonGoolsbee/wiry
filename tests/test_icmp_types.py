@@ -101,7 +101,6 @@ def test_address_mask_reply_carries_a_mask():
 
 
 def test_router_advertisement_names_its_four_octets_unused():
-    # Type 9 has no structured layout here.
     pkt = icmp(9, 0, bytes([1, 2, 3, 4]))
     assert pkt[ICMP].fields() == ["type", "code", "chksum", "unused"]
     assert pkt[ICMP].unused == 0x01020304
@@ -180,8 +179,7 @@ def test_dissecting_under_ip_keeps_the_conditional_fields():
 
 @pytest.mark.parametrize("value", [b"\x01\x02\x03\x04", 0x1234, "4660"])
 def test_a_field_past_a_clipped_header_is_refused_not_a_crash(value):
-    # A snaplen-clipped Timestamp message: ts_tx is declared at byte 16 of a
-    # header that stops at 8.
+    # Clipped Timestamp: ts_tx is declared at byte 16, the header stops at 8.
     pkt = ICMP(b"\x0d" + bytes(7))
     pkt[ICMP].ts_tx = value
     assert len(bytes(pkt)) == 8

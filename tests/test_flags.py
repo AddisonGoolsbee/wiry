@@ -98,7 +98,7 @@ def test_a_reassigned_field_still_reads_back_as_flags():
 
 
 def test_multi_letter_names_are_separated_when_rendered():
-    # Concatenating them would be ambiguous, so they are joined with "+".
+    # Concatenation would be ambiguous, so they join with "+".
     pkt = IP(flags="MF+DF")
     assert pkt.flags == 3
     assert str(pkt.flags) == "MF+DF"
