@@ -119,7 +119,8 @@ p.show()                    # every field
 # dissect
 q = Ether(some_bytes)
 q[IP].ttl                   # 64
-q[TCP].flags                # 'S'
+q[TCP].flags                # <Flag 2 (S)>: equals 2 and 'S', and q[TCP].flags.S
+q[0].name                   # 'Ether'; q.getlayer(IP, ttl=64) filters on fields
 TCP in q                    # True
 q.haslayer(UDP)             # False
 
