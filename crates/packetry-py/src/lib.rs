@@ -1,5 +1,5 @@
 //! Python bindings. The boundary is crossed at file or list granularity, never
-//! per field and never per packet in bulk paths.
+//! per field and never per packet on a bulk path.
 
 #![forbid(unsafe_code)]
 // pyo3 0.22's generated trampolines convert PyErr to PyErr, which clippy flags
@@ -121,8 +121,8 @@ impl Query {
     }
 }
 
-/// Clamped exactly as `Packet::get_desc` clamps, so the bulk path and the
-/// per-packet path cannot disagree.
+/// Clamped exactly as `Packet::get_desc` clamps, so the bulk and per-packet
+/// paths cannot disagree.
 #[inline]
 fn decode_span(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<FieldValue> {
     let a = s.off as usize;
@@ -326,7 +326,6 @@ impl PyPkt {
         Some(out.unbind())
     }
 
-    /// `None` when the layer is not DNS.
     fn dns_records(&self, py: Python<'_>, layer: usize) -> PyResult<Option<PyObject>> {
         use packetry_core::layers::dns::{self, RData};
         let Some(span) = self.inner.layers().get(layer) else {
@@ -408,7 +407,7 @@ impl PyPkt {
         Ok(PyBytes::new_bound(py, self.inner.payload(layer)))
     }
 
-    // &mut self is required: CorePacket::to_bytes caches computed checksums in place.
+    // &mut self: CorePacket::to_bytes caches computed checksums in place.
     #[allow(clippy::wrong_self_convention)]
     fn to_bytes<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         if let Some(e) = self.inner.oversize() {
@@ -421,8 +420,7 @@ impl PyPkt {
         show::show(&self.inner)
     }
 
-    /// Used when stacking onto a dissected packet, where rebuilding from a
-    /// field spec would lose variable-length header content.
+    /// Rebuilding from a field spec would lose variable-length header content.
     fn copy(&self) -> PyPkt {
         PyPkt {
             inner: self.inner.clone(),
@@ -455,12 +453,11 @@ impl PyPkt {
 }
 
 /// (offset, caplen, ts_sec, ts_frac). The offset is a `usize` because
-/// `fs::read` has no size limit: past 4 GiB a `u32` wrapped, and the wrapped
-/// slice stayed in bounds, so a read returned another packet's bytes.
+/// `fs::read` has no size limit: as a `u32` it wraps past 4 GiB, and the
+/// wrapped slice stays in bounds, so a read returns another packet's bytes.
 type Record = (usize, u32, u32, u32);
 
-/// One buffer plus a record index. Indexing mints a Python object for that
-/// packet only.
+/// One buffer plus a record index; indexing mints one Python object.
 #[pyclass(name = "PktList")]
 pub struct PyPktList {
     buf: Arc<Vec<u8>>,
@@ -542,7 +539,6 @@ impl PyPktList {
         }))
     }
 
-    /// Packets lacking the layer yield None.
     fn field_column(&self, py: Python<'_>, layer_name: &str, field: &str) -> PyResult<Py<PyList>> {
         let id = proto_by_name(layer_name)?;
         if proto::field_of(id, field).is_none() {
@@ -576,9 +572,8 @@ impl PyPktList {
         Ok(out.unbind())
     }
 
-    /// One pass, one crossing: each packet is dissected once and every
-    /// requested field read from it. `layer` and `conds` select rows in Rust,
-    /// so rejected packets are never materialised. One list per spec, in order.
+    /// One pass, one crossing. `layer` and `conds` select rows in Rust, so a
+    /// rejected packet is never materialised. One list per spec, in order.
     #[pyo3(signature = (specs, layer = None, conds = Vec::new()))]
     fn columns(
         &self,
@@ -690,7 +685,6 @@ impl PyPktList {
         }
     }
 
-    /// Positions in the capture these packets were filtered from.
     fn nums(&self) -> Vec<u32> {
         (0..self.index.len()).map(|i| self.num_at(i)).collect()
     }
@@ -719,7 +713,7 @@ impl PyPktList {
 }
 
 /// Records are indexed but not dissected. Dispatches on the file's own magic,
-/// so pcap and pcapng are interchangeable here.
+/// so pcap and pcapng are interchangeable.
 #[pyfunction]
 fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
     let data = std::fs::read(path)?;
@@ -799,7 +793,7 @@ fn make_stack(
 
 /// Unconditional fields go first: a conditional field's presence is decided by
 /// an unconditional one (ICMP's `type`), which can also lengthen the header.
-/// Growing it between the two passes is what makes `ICMP(type=13, ts_ori=...)`
+/// Growing it between the passes is what lets `ICMP(type=13, ts_ori=...)`
 /// reach octets the fixed template lacks.
 fn apply_all_fields(
     pkt: &mut CorePacket,
@@ -875,8 +869,8 @@ fn apply_fields(
     Ok(())
 }
 
-/// One crossing: the facade accumulates the layer stack and its field
-/// assignments in Python and hands the whole thing over once.
+/// One crossing: the facade accumulates the stack and its field assignments in
+/// Python and hands the whole thing over at once.
 #[pyfunction]
 #[pyo3(signature = (names, ints, strs, raws, payload = None, opts = Vec::new()))]
 fn build_and_serialize<'py>(
@@ -947,8 +941,8 @@ fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
     Ok(out)
 }
 
-/// Bit names of a flag field, least significant first. `None` for any other
-/// kind of field, which is what tells the facade not to wrap the value.
+/// Least significant first. `None` for any other kind, which is what tells the
+/// facade not to wrap the value.
 #[pyfunction]
 fn flag_names(name: &str, field: &str) -> PyResult<Option<Vec<&'static str>>> {
     let id = proto_by_name(name)?;
@@ -966,8 +960,7 @@ fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
 
-/// One field of a layer being declared: name, width in bits, kind, integer
-/// default, wide default, and flag names.
+/// name, bit width, kind, integer default, wide default, flag names.
 type FieldSpec = (String, u16, String, u64, Option<Vec<u8>>, Vec<String>);
 
 fn kind_of(k: &str) -> PyResult<FieldKind> {
@@ -984,8 +977,8 @@ fn kind_of(k: &str) -> PyResult<FieldKind> {
     })
 }
 
-/// Declares a layer the Rust dissector can then execute without ever calling
-/// back into Python. Bit offsets follow declaration order.
+/// The dissector then executes the layer without calling back into Python.
+/// Bit offsets follow declaration order.
 #[pyfunction]
 fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
     let mut descs = Vec::with_capacity(fields.len());
@@ -1045,8 +1038,8 @@ fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
         .map_err(PyValueError::new_err)
 }
 
-/// Makes dissection reach `child` from `parent`, and stacking `child` under
-/// `parent` write the values back.
+/// Makes dissection reach `child` from `parent`, and stacking the two write
+/// the values back.
 #[pyfunction]
 fn bind_layer(
     py: Python<'_>,
@@ -1108,10 +1101,6 @@ fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
 mod tests {
     use super::Record;
 
-    /// A capture is read whole and `fs::read` has no size limit, so a record
-    /// past 4 GiB must survive the index: as a `u32` its offset wrapped, and
-    /// the wrapped slice stayed in bounds, so the read silently returned
-    /// another packet's bytes.
     #[test]
     fn a_record_offset_past_four_gibibytes_is_not_truncated() {
         let off = u32::MAX as usize + 4096;
