@@ -82,16 +82,18 @@ impl Packet {
                     let n = b.len().min(hdr_end.saturating_sub(a));
                     buf[a..a + n].copy_from_slice(&b[..n]);
                 } else if f.default != 0 {
-                    field::write_bits(&mut buf[off..hdr_end], f.bit_off, f.bit_len, f.default);
+                    let v = field::wire_uint(f, f.default);
+                    field::write_bits(&mut buf[off..hdr_end], f.bit_off, f.bit_len, v);
                 }
             }
             if i > 0 {
                 let prev = spans[i - 1];
+                let a = prev.off as usize;
+                let b = (a + prev.hlen as usize).min(buf.len());
                 if let Some(bind) = desc(prev.proto).bind_next {
-                    let a = prev.off as usize;
-                    let b = (a + prev.hlen as usize).min(buf.len());
                     bind(&mut buf[a..b], p);
                 }
+                crate::proto::apply_bind(&mut buf[a..b], prev.proto, p);
             }
             if let Some(setter) = d.set_hlen {
                 let end = (off + hlen).min(buf.len());
@@ -186,6 +188,7 @@ impl Packet {
         };
         let a = s.off as usize;
         let b = (a + s.hlen as usize).min(self.buf.len());
+        let val = field::wire_uint(f, val);
         field::write_bits(&mut self.buf[a..b], f.bit_off, f.bit_len, val);
         self.mark_dirty(layer);
         true
@@ -316,7 +319,12 @@ pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
             total: remaining as u32,
         });
 
-        let next = (d.next)(hdr);
+        // A declared binding outranks the layer's own guess: it is the only way
+        // a user layer can be reached, and it was asked for explicitly.
+        let next = match crate::proto::bound_next(proto, hdr) {
+            Some(p) => Next::Proto(p),
+            None => (d.next)(hdr),
+        };
         off += hlen;
 
         match next {

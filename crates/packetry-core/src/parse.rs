@@ -107,7 +107,7 @@ pub fn value_for(f: &FieldDesc, s: &str) -> Option<ValueBits> {
         FieldKind::Ipv6Addr => ipv6(s).map(|b| ValueBits::Bytes(b.to_vec())),
         FieldKind::MacAddr => mac(s).map(|b| ValueBits::Bytes(b.to_vec())),
         FieldKind::Flags => Some(ValueBits::Uint(flags(s, f.flags))),
-        FieldKind::Uint => s.parse::<u64>().ok().map(ValueBits::Uint),
+        FieldKind::Uint | FieldKind::LeUint => s.parse::<u64>().ok().map(ValueBits::Uint),
         FieldKind::Bytes | FieldKind::VarBytes => Some(ValueBits::Bytes(s.as_bytes().to_vec())),
     }
 }

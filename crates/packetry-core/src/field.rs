@@ -1,6 +1,8 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldKind {
     Uint,
+    /// Little-endian integer. Must be a whole number of bytes wide.
+    LeUint,
     Ipv4Addr,
     /// Rendered in RFC 5952 form.
     Ipv6Addr,
@@ -255,9 +257,25 @@ fn fixed_bytes<const N: usize>(hdr: &[u8], bit_off: u16) -> [u8; N] {
     out
 }
 
+/// Converts between a field's value and the bits on the wire. Little-endian
+/// fields are byte-reversed; the operation is its own inverse, so both
+/// directions go through here.
+#[inline]
+pub fn wire_uint(f: &FieldDesc, v: u64) -> u64 {
+    if f.kind != FieldKind::LeUint {
+        return v;
+    }
+    let n = (f.bit_len / 8) as usize;
+    v.to_be_bytes()[8 - n..]
+        .iter()
+        .rev()
+        .fold(0u64, |acc, b| (acc << 8) | *b as u64)
+}
+
 pub fn decode(hdr: &[u8], f: &FieldDesc) -> FieldValue {
     match f.kind {
         FieldKind::Uint => FieldValue::Uint(read_bits(hdr, f.bit_off, f.bit_len)),
+        FieldKind::LeUint => FieldValue::Uint(wire_uint(f, read_bits(hdr, f.bit_off, f.bit_len))),
         FieldKind::Flags => FieldValue::Flags {
             bits: read_bits(hdr, f.bit_off, f.bit_len),
             names: f.flags,
