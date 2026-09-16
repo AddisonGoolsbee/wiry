@@ -1,0 +1,73 @@
+[package]
+name = "blitzpkt-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone workspace: the fuzz crate must not join the root workspace, since
+# libfuzzer-sys requires nightly and would break `cargo build` on stable.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+blitzpkt-core = { path = "../crates/blitzpkt-core" }
+
+[profile.release]
+debug = 1
+panic = "abort"
+
+[lib]
+name = "blitzpkt_fuzz"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dissect_ether"
+path = "fuzz_targets/dissect_ether.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dissect_any_link"
+path = "fuzz_targets/dissect_any_link.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_records"
+path = "fuzz_targets/dns_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pcap_reader"
+path = "fuzz_targets/pcap_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pcapng_reader"
+path = "fuzz_targets/pcapng_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "options_walk"
+path = "fuzz_targets/options_walk.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false

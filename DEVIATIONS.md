@@ -45,5 +45,5 @@ running Scapy, because a machine-generated corpus derived from GPL code is a gre
 | # | Item | Status |
 |---|---|---|
 | C1 | Checksum recomputation implemented for IPv4/TCP/UDP/ICMP/ICMPv6 only | OPEN |
-| C2 | No fuzzing of the dissector against malformed input yet (`cargo-fuzz` planned) | OPEN |
+| C2 | Fuzzing: 7 libFuzzer targets in `fuzz/` (dissection, DNS records, pcap, pcapng, TLV options, serialise round-trip) plus seeded property tests in `crates/blitzpkt-core/tests/robustness.rs` that run on stable | Remaining: no continuous fuzzing, and no coverage-guided corpus beyond the hand-written seeds | PARTIAL |
 | C3 | Endianness assumed little-endian host; big-endian hosts untested | OPEN |
