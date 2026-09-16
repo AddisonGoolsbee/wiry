@@ -16,7 +16,6 @@ pub enum FieldKind {
 #[derive(Clone, Copy, Debug)]
 pub struct FieldDesc {
     pub name: &'static str,
-    /// From the first byte of this layer's header.
     pub bit_off: u16,
     /// Ignored for `VarBytes`.
     pub bit_len: u16,

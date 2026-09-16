@@ -10,11 +10,7 @@ pub fn ipv4(s: &str) -> Option<[u8; 4]> {
         out[n] = part.parse::<u8>().ok()?;
         n += 1;
     }
-    if n == 4 {
-        Some(out)
-    } else {
-        None
-    }
+    (n == 4).then_some(out)
 }
 
 pub fn mac(s: &str) -> Option<[u8; 6]> {
@@ -27,11 +23,7 @@ pub fn mac(s: &str) -> Option<[u8; 6]> {
         out[n] = u8::from_str_radix(part, 16).ok()?;
         n += 1;
     }
-    if n == 6 {
-        Some(out)
-    } else {
-        None
-    }
+    (n == 6).then_some(out)
 }
 
 pub fn ipv6(s: &str) -> Option<[u8; 16]> {

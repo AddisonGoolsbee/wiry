@@ -53,20 +53,21 @@ pub fn render_ipv6(b: &[u8; 16]) -> String {
             cur_len = 0;
         }
     }
-    // RFC 5952 §4.2.2: a lone zero group is written out, not elided.
-    if best_len < 2 {
-        return g
-            .iter()
+    let hex = |gs: &[u16]| {
+        gs.iter()
             .map(|x| format!("{x:x}"))
             .collect::<Vec<_>>()
-            .join(":");
+            .join(":")
+    };
+    // RFC 5952 §4.2.2: a lone zero group is written out, not elided.
+    if best_len < 2 {
+        return hex(&g);
     }
-    let head: Vec<String> = g[..best_start].iter().map(|x| format!("{x:x}")).collect();
-    let tail: Vec<String> = g[best_start + best_len..]
-        .iter()
-        .map(|x| format!("{x:x}"))
-        .collect();
-    format!("{}::{}", head.join(":"), tail.join(":"))
+    format!(
+        "{}::{}",
+        hex(&g[..best_start]),
+        hex(&g[best_start + best_len..])
+    )
 }
 
 pub fn summary(pkt: &Packet) -> String {
