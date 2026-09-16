@@ -5,7 +5,6 @@ use smallvec::SmallVec;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LayerSpan {
     pub proto: ProtoId,
-    /// Byte offset of the header from the start of the buffer.
     pub off: u32,
     pub hlen: u32,
     /// Header plus payload.
@@ -23,8 +22,8 @@ pub struct Packet {
     pub spans: Spans,
     /// Bitmask of layers whose computed fields need recomputing.
     dirty: u32,
-    /// Set when a write changed how many bytes the packet holds, so the length
-    /// fields still describe the old extent.
+    /// A write changed the byte count, so the length fields still describe the
+    /// old extent.
     pub(crate) resized: bool,
 }
 
@@ -54,7 +53,7 @@ impl Packet {
             let p = *p;
             let d = desc(p);
             // A layer can gain header bytes from what is stacked under it, so
-            // the previous header is finished only now.
+            // the previous header is only finished now.
             if i > 0 {
                 let prev = spans[i - 1];
                 if let Some(extra) = desc(prev.proto).bind_next_bytes.map(|f| f(p)) {
@@ -100,8 +99,7 @@ impl Packet {
                 crate::proto::apply_bind(&mut buf[a..b], prev.proto, p);
             }
             if let Some(setter) = d.set_hlen {
-                let end = (off + hlen).min(buf.len());
-                setter(&mut buf[off..end], hlen);
+                setter(&mut buf[off..hdr_end], hlen);
             }
             spans.push(LayerSpan {
                 proto: p,
@@ -142,14 +140,18 @@ impl Packet {
         self.spans.iter().any(|s| s.proto == proto)
     }
 
-    /// Empty for a layer index past the stack, as every other accessor is.
+    #[inline]
+    fn hdr_range(&self, s: &LayerSpan) -> (usize, usize) {
+        let a = (s.off as usize).min(self.buf.len());
+        (a, (a + s.hlen as usize).min(self.buf.len()))
+    }
+
     #[inline]
     pub fn header(&self, layer: usize) -> &[u8] {
         let Some(s) = self.spans.get(layer) else {
             return &[];
         };
-        let a = s.off as usize;
-        let b = (a + s.hlen as usize).min(self.buf.len());
+        let (a, b) = self.hdr_range(s);
         &self.buf[a..b]
     }
 
@@ -172,23 +174,19 @@ impl Packet {
         &self.buf[a..]
     }
 
-    /// `None` when the layer has no such field, including a conditional field
-    /// this header does not carry.
     pub fn get(&self, layer: usize, name: &str) -> Option<FieldValue> {
         let proto = self.spans.get(layer)?.proto;
         let f = crate::proto::active_field_of(proto, self.header(layer), name)?;
         Some(self.get_desc(layer, f))
     }
 
-    /// VarBytes fields run to the end of the header, not the buffer, which is
-    /// exactly the extent `header` reports.
+    /// VarBytes runs to the end of the header, not the buffer: exactly what
+    /// `header` reports.
     #[inline]
     pub fn get_desc(&self, layer: usize, f: &FieldDesc) -> FieldValue {
         field::decode(self.header(layer), f)
     }
 
-    /// False when the field is unknown for this layer, or conditional and
-    /// absent from this header.
     pub fn set_uint(&mut self, layer: usize, name: &str, val: u64) -> bool {
         let Some(s) = self.spans.get(layer).copied() else {
             return false;
@@ -196,8 +194,7 @@ impl Packet {
         let Some(f) = crate::proto::active_field_of(s.proto, self.header(layer), name) else {
             return false;
         };
-        let a = s.off as usize;
-        let b = (a + s.hlen as usize).min(self.buf.len());
+        let (a, b) = self.hdr_range(&s);
         let val = field::wire_uint(f, val);
         field::write_bits(&mut self.buf[a..b], f.bit_off, f.bit_len, val);
         self.mark_dirty(layer);
@@ -211,26 +208,24 @@ impl Packet {
         let Some(f) = crate::proto::active_field_of(s.proto, self.header(layer), name) else {
             return false;
         };
-        // A conditional field may be declared past the end of a header this
-        // short: ICMP's timestamps sit at byte 16 of a message whose minimum is
-        // 8. Clamping the start refuses such a write instead of panicking,
-        // which is the rule `write_bits` already follows.
+        // A conditional field can be declared past the end of a header this
+        // short: ICMP's timestamps sit at byte 16 of an 8-byte minimum message.
+        // Clamping refuses the write instead of panicking, as `write_bits` does.
         let a = (s.off as usize + (f.bit_off / 8) as usize).min(self.buf.len());
         if f.to_end {
             self.replace_to_end(layer, a, val);
             return true;
         }
         let mut room = self.buf.len().saturating_sub(a);
-        // An oversized value is truncated to the field, never spilled into the
-        // next one. A variable-length field has no width of its own.
+        // Truncate to the field, never spill into the next. A variable-length
+        // field has no width of its own.
         if f.bit_len > 0 {
             room = room.min((f.bit_len / 8) as usize);
         }
         let n = val.len().min(room);
         self.buf[a..a + n].copy_from_slice(&val[..n]);
-        // A fixed-width field is replaced, not overwritten in part: a short
-        // value would otherwise leave the tail of the previous one behind. A
-        // variable-length one has no end of its own, so it keeps what follows.
+        // A fixed-width field is replaced, not partly overwritten, or a short
+        // value leaves the tail of the previous one behind.
         if f.bit_len > 0 {
             let end = (a + (f.bit_len / 8) as usize).min(self.buf.len());
             if end > a + n {
@@ -242,8 +237,7 @@ impl Packet {
     }
 
     /// A field with no end of its own takes the whole tail of its layer, so the
-    /// frame grows or shrinks with it and every enclosing length follows. What
-    /// comes after the layer, a trailing `Padding` included, stays put.
+    /// frame resizes with it. What follows the layer, `Padding` included, stays.
     fn replace_to_end(&mut self, layer: usize, at: usize, val: &[u8]) {
         let s = self.spans[layer];
         let end = ((s.off + s.hlen) as usize).min(self.buf.len());
@@ -259,7 +253,6 @@ impl Packet {
         self.refresh_totals();
     }
 
-    /// False when there is no such layer.
     pub fn set_payload(&mut self, layer: usize, data: &[u8]) -> bool {
         let Some(s) = self.spans.get(layer).copied() else {
             return false;
@@ -276,7 +269,7 @@ impl Packet {
 
     /// Construction lays down the fixed part first, so a header whose length
     /// depends on one of its own fields (ICMP, by type) stays short until that
-    /// field is written. Grow those to their real length.
+    /// field is written.
     pub fn refit_headers(&mut self) {
         for i in 0..self.spans.len() {
             let s = self.spans[i];
@@ -303,7 +296,7 @@ impl Packet {
 
     #[inline]
     fn mark_dirty(&mut self, layer: usize) {
-        // Lengths and checksums propagate outward, so every enclosing layer goes too.
+        // Lengths and checksums propagate outward, so enclosing layers go too.
         for i in 0..=layer.min(31) {
             self.dirty |= 1 << i;
         }
@@ -316,9 +309,8 @@ impl Packet {
         }
     }
 
-    /// Names a length field too narrow to describe this packet, when
-    /// serialising would have to write one. A packet read from a capture and
-    /// left alone keeps the lengths the wire gave, so it is never rejected.
+    /// Names a length field too narrow to describe this packet. An untouched
+    /// capture keeps the lengths the wire gave, so it is never rejected.
     pub fn oversize(&self) -> Option<String> {
         (self.dirty != 0)
             .then(|| crate::compute::oversize(self))
@@ -340,8 +332,7 @@ impl Packet {
     pub fn options(&self, layer: usize) -> Option<Vec<crate::options::Item>> {
         let s = self.spans.get(layer)?;
         let parse = desc(s.proto).parse_options?;
-        let a = s.off as usize;
-        let b = (a + s.hlen as usize).min(self.buf.len());
+        let (a, b) = self.hdr_range(s);
         Some(parse(&self.buf[a..b]))
     }
 
@@ -358,13 +349,13 @@ pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
     spans_of(buf, link, true)
 }
 
-/// `bound` is false only when rebuilding after the buffer changed under us: the
+/// `bound` is false when rebuilding after the buffer changed under us: the
 /// length fields still describe the old extent, so they bound nothing yet.
 fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
     let mut spans = Spans::new();
     let mut off = 0usize;
-    // Where the content of the innermost layer that declared a length ends. A
-    // frame padded to Ethernet's 60-octet minimum carries bytes past it.
+    // End of the innermost declared length. A frame padded to Ethernet's
+    // 60-octet minimum carries bytes past it.
     let mut end = buf.len();
     let mut proto = link;
 
@@ -394,8 +385,8 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
             total: remaining as u32,
         });
 
-        // A length that claims more than was captured means a clipped capture,
-        // not a trailer, so the bound only ever tightens.
+        // A length claiming more than was captured means a clipped capture, not
+        // a trailer, so the bound only ever tightens.
         if let Some(f) = d.content_len.filter(|_| bound) {
             let claimed = f(hdr);
             if claimed >= hlen && off + claimed < end {
@@ -404,7 +395,7 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
         }
 
         // A declared binding outranks the layer's own guess: it is the only way
-        // a user layer can be reached, and it was asked for explicitly.
+        // a user layer can be reached.
         let next = match crate::proto::bound_next(proto, hdr) {
             Some(p) => Next::Proto(p),
             None => (d.next)(hdr),
@@ -434,7 +425,7 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
 mod tests {
     use super::*;
 
-    // Ether/IPv4/TCP frame hand-built from RFC 791 and RFC 9293 layouts.
+    /// Ether/IPv4/TCP frame from the RFC 791 and RFC 9293 layouts.
     fn sample() -> Vec<u8> {
         let mut v = Vec::new();
         v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
@@ -518,7 +509,7 @@ mod tests {
 
     #[test]
     fn an_ethernet_trailer_dissects_as_padding() {
-        // IEEE 802.3 clause 4 sets a 60-octet minimum frame.
+        // IEEE 802.3 clause 4: 60-octet minimum frame.
         let mut v = sample();
         v.extend_from_slice(&[0u8; 6]);
         let p = Packet::dissect(v, ProtoId::Ether);

@@ -1,16 +1,11 @@
-//! Fixed 12-byte DNS message header from RFC 1035 §4.1.1.
-//!
-//! The question and resource-record sections that follow are variable length and
-//! use name compression (RFC 1035 §4.1.4), so they stay an opaque `Raw` payload
-//! and are decoded by [`parse_records`], which takes the whole message because
-//! compression pointers are offsets from the start of the header. DEVIATIONS.md E8.
+//! RFC 1035 §4.1.1 header; sections stay `Raw` and are decoded by
+//! [`parse_records`]. DEVIATIONS.md E8.
 
 use crate::field::FieldDesc;
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
-/// RFC 1035 §4.2.2 puts a two-octet length prefix on TCP-carried messages only,
-/// and TCP-carried DNS stays `Raw` (DEVIATIONS.md E8). The name is part of the
-/// interface, so the field exists with a condition that can never pass.
+/// RFC 1035 §4.2.2: the length prefix exists only over TCP, which stays `Raw`,
+/// so the field is present for the interface but can never apply.
 fn over_tcp(_: &[u8]) -> bool {
     false
 }
@@ -24,7 +19,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("tc", 22, 1, 0),
     FieldDesc::uint("rd", 23, 1, 1),
     FieldDesc::uint("ra", 24, 1, 0),
-    // RFC 1035 reserved all three bits as Z; RFC 4035 took two for AD and CD.
+    // RFC 1035 Z became AD and CD in RFC 4035.
     FieldDesc::uint("z", 25, 1, 0),
     FieldDesc::uint("ad", 26, 1, 0),
     FieldDesc::uint("cd", 27, 1, 0),
@@ -120,8 +115,6 @@ pub struct ResourceRecord {
     pub rdata: RData,
 }
 
-/// Undecoded types, and RDATA that fails its own consistency checks, land in
-/// `Other` with the raw bytes so nothing is lost.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RData {
     A([u8; 4]),
@@ -153,22 +146,18 @@ pub struct Records {
     pub ar: Vec<ResourceRecord>,
 }
 
-/// Jumps must already go strictly backwards, which rules out loops; this is a
-/// second bound so a long descending chain cannot make decoding quadratic.
+/// Jumps already go strictly backwards, ruling out loops; this bounds a long
+/// descending chain so decoding cannot go quadratic.
 const MAX_JUMPS: usize = 64;
 
-/// RFC 1035 §2.3.4. Counting as we go also bounds the work a compressed name
-/// can cause.
+/// RFC 1035 §2.3.4; counted as we go, so it also bounds a compressed name.
 const MAX_NAME_OCTETS: usize = 255;
 
-/// Every other decoded byte comes from a byte of the message, but a name does
-/// not: a two-octet pointer yields up to 255 octets, and 65,535 records of them
-/// turn a 2.75 MB message into hundreds of MB. One message may decode this many
-/// name bytes in total, which is orders of magnitude above any real message.
+/// Per-message decompression budget: a two-octet pointer yields up to 255
+/// octets, so without it 2.75 MB of input decodes to hundreds of MB.
 pub const MAX_DECODED_NAME_BYTES: usize = 256 * 1024;
 
-/// What a record contributes to the decompression budget. RDATA that is not a
-/// name is bounded by its own RDLENGTH, so it costs nothing.
+/// RDATA that is not a name is bounded by its own RDLENGTH, so it costs nothing.
 pub fn decoded_name_bytes(rr: &ResourceRecord) -> usize {
     rr.rrname.len()
         + match &rr.rdata {
@@ -190,10 +179,7 @@ fn be32(b: &[u8], off: usize) -> Option<u32> {
 }
 
 /// Returns the name and the offset just past it *in the original stream*, i.e.
-/// past the first pointer when the name was compressed. `None` means truncated
-/// or malformed, and the caller should stop parsing the section.
-///
-/// The root name renders as the empty string and no name carries a trailing dot.
+/// past the first pointer when the name was compressed.
 fn read_name(msg: &[u8], pos: usize) -> Option<(String, usize)> {
     let mut labels: Vec<&[u8]> = Vec::new();
     let mut at = pos;
@@ -223,9 +209,8 @@ fn read_name(msg: &[u8], pos: usize) -> Option<(String, usize)> {
                 let target = (((len & 0x3f) as usize) << 8) | lo as usize;
                 end.get_or_insert(at + 2);
                 jumps += 1;
-                // RFC 1035 §4.1.4 pointers refer to a *prior* occurrence, so a
-                // target at or after the pointer is invalid; rejecting it makes
-                // self- and mutually-referencing pointers terminate.
+                // RFC 1035 §4.1.4 pointers refer to a *prior* occurrence, so
+                // rejecting a non-backwards target makes every loop terminate.
                 if jumps > MAX_JUMPS || target >= at {
                     return None;
                 }
@@ -244,8 +229,7 @@ fn read_name(msg: &[u8], pos: usize) -> Option<(String, usize)> {
     Some((name, end?))
 }
 
-/// A name's encoding never extends past its own RDATA, so one that does is a
-/// malformed RDLENGTH reaching into the next record.
+/// A name reaching past its own RDATA means a malformed RDLENGTH.
 fn read_name_within(msg: &[u8], pos: usize, end: usize) -> Option<(String, usize)> {
     if pos > end {
         return None;
@@ -353,11 +337,9 @@ fn decode_soa(msg: &[u8], start: usize, end: usize) -> Option<RData> {
     })
 }
 
-/// `msg` must be the whole message starting at the 12-byte header, because
-/// compression pointers are offsets from that origin. Parsing stops at the
-/// first record that cannot be decoded, or once the message has spent its
-/// decompression budget, and returns what was read; the header's section counts
-/// are an upper bound only.
+/// `msg` must be the whole message from the 12-byte header, because compression
+/// pointers are offsets from that origin. Stops at the first undecodable record
+/// or once the budget is spent; section counts are an upper bound only.
 pub fn parse_records(msg: &[u8]) -> Records {
     let mut out = Records::default();
     if msg.len() < 12 {
@@ -402,10 +384,7 @@ pub fn parse_records(msg: &[u8]) -> Records {
             }
         }
     }
-    let [an, ns, ar] = sections;
-    out.an = an;
-    out.ns = ns;
-    out.ar = ar;
+    [out.an, out.ns, out.ar] = sections;
     out
 }
 
@@ -415,7 +394,7 @@ mod tests {
     use crate::field::FieldValue;
     use crate::packet::Packet;
 
-    /// Recursive query for "a.com" A/IN, hand-built from RFC 1035 §4.1.
+    /// RFC 1035 §4.1 recursive query for "a.com" A/IN.
     fn query() -> Vec<u8> {
         let mut v = vec![
             0xab, 0xcd, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -464,9 +443,8 @@ mod tests {
         assert_eq!(p.get(0, "z").unwrap(), FieldValue::Uint(0));
         assert_eq!(p.get(0, "rcode").unwrap(), FieldValue::Uint(3));
 
-        // Every field differs, so no two offsets can be swapped and still pass.
         // 0x13 = QR=0, OPCODE=2, AA=0, TC=1, RD=1; 0x5f = RA=0, Z=1, AD=0,
-        // CD=1, RCODE=15.
+        // CD=1, RCODE=15. Every field differs, so no two offsets can swap.
         let mut b = vec![0x00, 0x00, 0x13, 0x5f];
         b.extend_from_slice(&[0; 8]);
         let p = Packet::dissect(b, ProtoId::Dns);
@@ -529,9 +507,6 @@ mod tests {
         assert_eq!(p.get(0, "qr").unwrap(), FieldValue::Uint(0));
         assert_eq!(&p.raw_bytes()[0..6], &[0x00, 0x00, 0x01, 0x00, 0x00, 0x01]);
     }
-
-    // Record-section vectors (RFC 1035 §4.1.2-4.1.4) are written out by hand;
-    // the helpers only concatenate literal pieces.
 
     fn name(labels: &[&str]) -> Vec<u8> {
         let mut v = Vec::new();
@@ -625,7 +600,7 @@ mod tests {
 
     #[test]
     fn pointer_loops_terminate() {
-        // A hang here is a DoS. (a) a pointer to itself.
+        // (a) a pointer to itself.
         let mut selfptr = header(1, 0, 0, 0);
         selfptr.extend_from_slice(&[0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01]);
         assert_eq!(read_name(&selfptr, 12), None);
@@ -638,8 +613,8 @@ mod tests {
         assert_eq!(read_name(&mutual, 16), None);
         assert_eq!(parse_records(&mutual), Records::default());
 
-        // (c) a long strictly-backwards chain: legal direction, but deep. Offset
-        // 12 holds the name "a"; each later pointer points at the previous one.
+        // (c) a long strictly-backwards chain: offset 12 holds the name "a",
+        // each later pointer points at the previous one.
         let mut chain = header(0, 0, 0, 0);
         chain.extend_from_slice(&[0x01, b'a', 0x00, 0x00]);
         for k in 0..100usize {
@@ -666,13 +641,11 @@ mod tests {
         assert_eq!(read_name(&oob, 12), None);
         assert_eq!(parse_records(&oob), Records::default());
 
-        // Second octet missing.
         let mut half = header(1, 0, 0, 0);
         half.push(0xc0);
         assert_eq!(read_name(&half, 12), None);
         assert_eq!(parse_records(&half), Records::default());
 
-        // Reserved label types 0b01 and 0b10.
         for top in [0x40u8, 0x80u8] {
             let mut bad = header(1, 0, 0, 0);
             bad.extend_from_slice(&[top | 0x05, 0, 0, 0, 0, 0, 0, 0]);
@@ -784,7 +757,6 @@ mod tests {
             172800,
             &[192, 0, 2, 1],
         ));
-        // TYPE 99 is not decoded and must survive as Other.
         msg.extend_from_slice(&record(&name(&["example", "com"]), 99, 1, 60, b"\x02hi"));
         msg
     }
@@ -822,14 +794,12 @@ mod tests {
 
     #[test]
     fn counts_larger_than_the_data_do_not_over_read() {
-        // Claims 5 questions and 9 answers, carries exactly one question.
         let mut msg = header(5, 9, 3, 7);
         msg.extend_from_slice(&question(&name(&["example", "com"]), rtype::A, 1));
         let r = parse_records(&msg);
         assert_eq!(r.qd.len(), 1);
         assert!(r.an.is_empty() && r.ns.is_empty() && r.ar.is_empty());
 
-        // RDLENGTH runs past the end of the message.
         let mut over = header(0, 1, 0, 0);
         over.extend_from_slice(&name(&["example", "com"]));
         over.extend_from_slice(&[0x00, 0x01, 0x00, 0x01, 0, 0, 0, 60, 0xff, 0xff, 1, 2, 3, 4]);
@@ -851,7 +821,7 @@ mod tests {
 
     #[test]
     fn oversized_names_are_rejected() {
-        // 4 labels of 63 octets is 256 wire octets, over the RFC 1035 §2.3.4 limit.
+        // 4 labels of 63 octets is 256 wire octets, over RFC 1035 §2.3.4.
         let long = "a".repeat(63);
         let labels = [long.as_str(); 4];
         let mut msg = header(1, 0, 0, 0);
@@ -864,11 +834,10 @@ mod tests {
     }
 
     /// Every section full of two-octet pointers to one maximal name: 2.75 MB of
-    /// input that decoded to 568 MB of output before the budget existed.
+    /// input, 568 MB of output without the budget.
     fn decompression_bomb() -> Vec<u8> {
         let mut msg = header(0xffff, 0xffff, 0xffff, 0xffff);
-        // Octets no UTF-8 sequence can start, so each decodes to a three-byte
-        // replacement character: the amplification is in the lossy decode too.
+        // 0xff starts no UTF-8 sequence, so the lossy decode amplifies too.
         let mut long = Vec::new();
         for _ in 0..3 {
             long.push(63u8);
@@ -897,7 +866,6 @@ mod tests {
                 .map(decoded_name_bytes)
                 .sum::<usize>();
         assert!(decoded <= MAX_DECODED_NAME_BYTES, "decoded {decoded} bytes");
-        // The budget, not the section counts, is what stopped it.
         assert!(r.qd.len() < 0xffff);
         assert!(decoded > MAX_DECODED_NAME_BYTES / 2);
     }
@@ -942,9 +910,7 @@ mod tests {
     #[test]
     fn malformed_rdata_falls_back_to_other() {
         let mut msg = header(0, 4, 0, 0);
-        // A with RDLENGTH 3 instead of 4.
         msg.extend_from_slice(&record(&name(&["a", "com"]), rtype::A, 1, 60, &[1, 2, 3]));
-        // TXT character-string length runs past the end of its RDATA.
         msg.extend_from_slice(&record(
             &name(&["a", "com"]),
             rtype::TXT,
@@ -952,11 +918,10 @@ mod tests {
             60,
             b"\x09short",
         ));
-        // CNAME whose name runs past its own RDLENGTH; literal because the
-        // helper derives RDLENGTH from the data.
+        // CNAME running past its own RDLENGTH: literal, because `record`
+        // derives RDLENGTH from the data.
         msg.extend_from_slice(&name(&["a", "com"]));
         msg.extend_from_slice(&[0x00, 0x05, 0x00, 0x01, 0, 0, 0, 60, 0x00, 0x02, 0x03, b'w']);
-        // SOA with the timers cut short.
         let mut soa = name(&["ns", "a", "com"]);
         soa.extend_from_slice(&name(&["r", "a", "com"]));
         soa.extend_from_slice(&[0, 0, 0, 1]);
@@ -972,7 +937,6 @@ mod tests {
 
     #[test]
     fn random_bytes_never_panic() {
-        // Deterministic smoke fuzz; the only property under test is "returns".
         let mut state = 0x2545_f491_4f6c_dd1du64;
         for _ in 0..2000 {
             let mut msg = Vec::with_capacity(64);
@@ -982,7 +946,7 @@ mod tests {
                 state ^= state << 17;
                 msg.push(state as u8);
             }
-            // Plausible counts, so the record loops are actually entered.
+            // Plausible counts, so the record loops are entered.
             msg[4] = 0;
             msg[5] = 2;
             msg[6] = 0;
