@@ -5,10 +5,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords = ["packet", "pcap", "capture", "sniffer", "network"]
+categories = ["network-programming"]
+readme = "../../README.md"
 rust-version.workspace = true
 
 [dependencies]
-wiry-core = { path = "../wiry-core" }
+wiry-core = { path = "../wiry-core", version = "0.1.0" }
 # Pinned exactly: 2.5.0 declares MSRV 1.64 but master already declares 1.85 and
 # edition 2024, so a 2.6 would break this workspace's MSRV on `cargo update`.
 pcap = { version = "=2.5.0", optional = true }

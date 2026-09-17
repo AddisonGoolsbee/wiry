@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords = ["packet", "pcap", "network", "dissector", "scapy"]
+categories = ["network-programming", "parser-implementations"]
+readme = "../../README.md"
 rust-version.workspace = true
 
 [dependencies]

@@ -5,14 +5,17 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords = ["packet", "pcap", "python", "pyo3", "scapy"]
+categories = ["network-programming", "api-bindings"]
+readme = "../../README.md"
 
 [lib]
 name = "_wiry"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wiry-core = { path = "../wiry-core" }
-wiry-capture = { path = "../wiry-capture" }
+wiry-core = { path = "../wiry-core", version = "0.1.0" }
+wiry-capture = { path = "../wiry-capture", version = "0.1.0" }
 # extension-module is NOT enabled here: it disables linking against libpython,
 # which breaks `cargo test`/`cargo build`. maturin enables it at build time via
 # pyproject.toml's [tool.maturin] features, which is the only place it matters.
