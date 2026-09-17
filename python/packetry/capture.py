@@ -15,8 +15,10 @@ names still import and raise ``CaptureUnavailable``, which subclasses
 
 from __future__ import annotations
 
+import atexit
 import os
 import threading
+import weakref
 from typing import Any, Callable, Optional
 
 from . import Packet, PacketList
@@ -169,25 +171,62 @@ def sniff(
     )
 
 
+_RUNNING: "weakref.WeakSet[AsyncSniffer]" = weakref.WeakSet()
+
+
+def _stop_running_sniffers() -> None:
+    """Belt and braces beside the Rust ``Drop``: a capture thread that is still
+    calling ``prn`` when the interpreter finalises segfaults."""
+    for s in list(_RUNNING):
+        try:
+            s.stop()
+        except BaseException:
+            pass
+
+
+atexit.register(_stop_running_sniffers)
+
+
 class AsyncSniffer:
     """``sniff`` on a background thread, with the familiar start/stop/join.
 
     ``.results`` holds the ``PacketList`` once the run ends. ``stop()`` is
     honoured between packets, so it works on the offline driver too.
+
+    On an interface the thread is a Rust one owning the capture handle, so a
+    ``prn`` runs on a non-Python thread and reacquires the GIL for every packet
+    it sees. That is scapy's contract for async callbacks, not an oversight:
+    keep the callback short, or sniff without one and read ``.results``.
     """
 
-    __slots__ = ("args", "results", "_thread", "_stop", "_exc")
+    __slots__ = ("args", "_results", "_thread", "_stop", "_exc", "_live",
+                 "__weakref__")
 
     def __init__(self, **kwargs: Any):
         self.args = kwargs
-        self.results: Optional[PacketList] = None
+        self._results: Optional[PacketList] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._exc: Optional[BaseException] = None
+        self._live: Any = None
+
+    @property
+    def results(self) -> Optional[PacketList]:
+        if self._results is None and self._live is not None:
+            self._keep(self._live.results())
+        return self._results
 
     @property
     def running(self) -> bool:
+        if self._live is not None:
+            return self._live.running()
         return self._thread is not None and self._thread.is_alive()
+
+    def _keep(self, rust: Any) -> Optional[PacketList]:
+        """One wrapper per run, so ``join() is results`` holds."""
+        if rust is not None and self._results is None:
+            self._results = PacketList(rust)
+        return self._results
 
     def _stopping(self, user: Optional[Callable]) -> Callable:
         def check(pkt: Packet) -> bool:
@@ -201,31 +240,51 @@ class AsyncSniffer:
         args = dict(self.args)
         args["stop_filter"] = self._stopping(args.get("stop_filter"))
         try:
-            self.results = sniff(**args)
+            self._results = sniff(**args)
         except BaseException as exc:  # re-raised out of join()
             self._exc = exc
 
     def start(self) -> "AsyncSniffer":
         if self.running:
             raise RuntimeError("this sniffer is already running")
-        self._stop.clear()
+        self._results = None
         self._exc = None
+        if self.args.get("offline") is None:
+            _b.capture_check()
+            self._live = _b.LiveSniffer(**_live_args(**self.args))
+            self._live.start()
+            _RUNNING.add(self)
+            return self
+        self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         return self
 
     def join(self, timeout: Optional[float] = None) -> Optional[PacketList]:
+        if self._live is not None:
+            try:
+                self._keep(self._live.join(timeout))
+            except BaseException as exc:
+                self._exc = exc
+            if self._exc is not None:
+                raise self._exc
+            return self._results
         if self._thread is not None:
             self._thread.join(timeout)
         if self._exc is not None:
             raise self._exc
-        return self.results
+        return self._results
 
     def stop(self, join: bool = True) -> Optional[PacketList]:
+        if self._live is not None:
+            self._keep(self._live.stop(bool(join)))
+            if join and self._exc is not None:
+                raise self._exc
+            return self._results
         self._stop.set()
         if join:
             return self.join()
-        return self.results
+        return self._results
 
 
 def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,

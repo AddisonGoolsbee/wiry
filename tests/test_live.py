@@ -52,3 +52,37 @@ def test_sniffing_an_unknown_interface_raises_oserror():
 def test_a_malformed_bpf_filter_is_refused_before_any_capture():
     with pytest.raises((ValueError, OSError)):
         P.sniff(iface=NO_SUCH_IF, filter="tcp port", timeout=0.1)
+
+
+def test_a_sniffer_is_weak_referenceable_so_the_atexit_hook_holds_nothing():
+    import weakref
+
+    s = P.AsyncSniffer(offline=None, iface="eth0")
+    ref = weakref.ref(s)
+    assert ref() is s
+    del s
+    assert ref() is None
+
+
+def test_stopping_every_running_sniffer_survives_a_broken_one():
+    class Broken:
+        def stop(self):
+            raise RuntimeError("no")
+
+    b = Broken()
+    C._RUNNING.add(b)
+    try:
+        C._stop_running_sniffers()
+    finally:
+        C._RUNNING.discard(b)
+
+
+@live
+def test_a_failed_start_leaves_the_sniffer_idle_and_restartable():
+    s = P.AsyncSniffer(iface=NO_SUCH_IF, timeout=0.1)
+    with pytest.raises(OSError):
+        s.start()
+    assert not s.running
+    assert s.results is None
+    with pytest.raises(OSError):
+        s.start()
