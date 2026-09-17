@@ -235,6 +235,18 @@ fn fixed_bytes<const N: usize>(hdr: &[u8], bit_off: u16) -> [u8; N] {
     out
 }
 
+/// Whether `v` is representable in this field, so an assignment too wide for it
+/// is refused rather than masked by `write_bits`. A field of whole octets is
+/// packed by `struct` in the API this follows and rejects an oversized value; a
+/// sub-octet field is a bit field there and masks. Both halves are kept.
+#[inline]
+pub fn fits(f: &FieldDesc, v: u64) -> bool {
+    if f.bit_len == 0 || f.bit_len >= 64 || f.bit_off % 8 != 0 || f.bit_len % 8 != 0 {
+        return true;
+    }
+    v >> f.bit_len == 0
+}
+
 /// Byte-reverses a little-endian field. Its own inverse, so both directions
 /// go through here.
 #[inline]
@@ -307,6 +319,30 @@ mod tests {
         let mut b = [0xffu8; 16];
         write_bits(&mut b, 0, 128, 1);
         assert_eq!(b, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    }
+
+    #[test]
+    fn a_whole_octet_field_rejects_a_value_too_wide_for_it() {
+        let ttl = FieldDesc::uint("ttl", 64, 8, 64);
+        assert!(fits(&ttl, 255));
+        assert!(!fits(&ttl, 256));
+        assert!(!fits(&ttl, u64::MAX));
+
+        let sport = FieldDesc::uint("sport", 0, 16, 0);
+        assert!(fits(&sport, 65535));
+        assert!(!fits(&sport, 70000));
+
+        let le = FieldDesc::le_uint("type", 0, 32, 0);
+        assert!(fits(&le, 0xffff_ffff));
+        assert!(!fits(&le, 0x1_0000_0000));
+    }
+
+    #[test]
+    fn a_sub_octet_field_masks_rather_than_rejecting() {
+        assert!(fits(&FieldDesc::uint("vlan", 20, 12, 0), 5000));
+        assert!(fits(&FieldDesc::flags("flags", 103, 9, &[]), u64::MAX));
+        assert!(fits(&FieldDesc::uint("wide", 0, 64, 0), u64::MAX));
+        assert!(fits(&FieldDesc::var_bytes("options", 160), u64::MAX));
     }
 
     #[test]

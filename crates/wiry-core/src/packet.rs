@@ -1,4 +1,4 @@
-use crate::field::{self, FieldDesc, FieldValue};
+use crate::field::{self, FieldDesc, FieldKind, FieldValue};
 use crate::proto::{desc, Next, ProtoId};
 use smallvec::SmallVec;
 
@@ -25,6 +25,10 @@ pub struct Packet {
     /// A write changed the byte count, so the length fields still describe the
     /// old extent.
     pub(crate) resized: bool,
+    /// Computed fields the user wrote by hand. A value supplied for a length or
+    /// a checksum is honoured, never recomputed over: only an unset one is
+    /// filled in.
+    pinned: Vec<(u32, ProtoId, &'static str)>,
 }
 
 impl Packet {
@@ -35,6 +39,7 @@ impl Packet {
             spans,
             dirty: 0,
             resized: false,
+            pinned: Vec::new(),
         }
     }
 
@@ -113,6 +118,7 @@ impl Packet {
             spans,
             dirty: u32::MAX,
             resized: false,
+            pinned: Vec::new(),
         };
         pkt.refresh_totals();
         pkt
@@ -187,6 +193,8 @@ impl Packet {
         field::decode(self.header(layer), f)
     }
 
+    /// Refuses a value too wide for the field rather than writing its low bits:
+    /// a truncated value emitted under a recomputed checksum is undetectable.
     pub fn set_uint(&mut self, layer: usize, name: &str, val: u64) -> bool {
         let Some(s) = self.spans.get(layer).copied() else {
             return false;
@@ -194,11 +202,48 @@ impl Packet {
         let Some(f) = crate::proto::active_field_of(s.proto, self.header(layer), name) else {
             return false;
         };
+        if !field::fits(f, val) {
+            return false;
+        }
         let (a, b) = self.hdr_range(&s);
-        let val = field::wire_uint(f, val);
-        field::write_bits(&mut self.buf[a..b], f.bit_off, f.bit_len, val);
+        let wire = field::wire_uint(f, val);
+        field::write_bits(&mut self.buf[a..b], f.bit_off, f.bit_len, wire);
+        // `write_bits` drops a write past the end of a clipped header, and a
+        // value that never landed is not one the user pinned.
+        if f.computed && (f.bit_off as usize + f.bit_len as usize) <= (b - a) * 8 {
+            self.pin(layer, s.proto, f.name);
+        }
         self.mark_dirty(layer);
         true
+    }
+
+    /// Whether `set_uint` would accept this value, so a caller can tell a field
+    /// that does not exist from one that cannot hold what it was given.
+    pub fn uint_fits(&self, layer: usize, name: &str, val: u64) -> bool {
+        let f = self
+            .spans
+            .get(layer)
+            .and_then(|s| crate::proto::active_field_of(s.proto, self.header(layer), name));
+        match f {
+            Some(f) => field::fits(f, val),
+            None => true,
+        }
+    }
+
+    fn pin(&mut self, layer: usize, proto: ProtoId, name: &'static str) {
+        if !self.is_pinned(layer, name) {
+            self.pinned.push((layer as u32, proto, name));
+        }
+    }
+
+    /// A computed field the user assigned; `compute` leaves those alone.
+    pub(crate) fn is_pinned(&self, layer: usize, name: &str) -> bool {
+        let Some(s) = self.spans.get(layer) else {
+            return false;
+        };
+        self.pinned
+            .iter()
+            .any(|(l, p, n)| *l == layer as u32 && *p == s.proto && *n == name)
     }
 
     pub fn set_bytes(&mut self, layer: usize, name: &str, val: &[u8]) -> bool {
@@ -212,16 +257,17 @@ impl Packet {
         // short: ICMP's timestamps sit at byte 16 of an 8-byte minimum message.
         // Clamping refuses the write instead of panicking, as `write_bits` does.
         let a = (s.off as usize + (f.bit_off / 8) as usize).min(self.buf.len());
-        if f.to_end {
-            self.replace_to_end(layer, a, val);
+        // A variable-length field has no width of its own, so writing one
+        // resizes its region rather than running over what follows.
+        if f.kind == FieldKind::VarBytes {
+            self.replace_region(layer, a, val);
             return true;
         }
-        let mut room = self.buf.len().saturating_sub(a);
-        // Truncate to the field, never spill into the next. A variable-length
-        // field has no width of its own.
-        if f.bit_len > 0 {
-            room = room.min((f.bit_len / 8) as usize);
-        }
+        let room = self
+            .buf
+            .len()
+            .saturating_sub(a)
+            .min((f.bit_len / 8) as usize);
         let n = val.len().min(room);
         self.buf[a..a + n].copy_from_slice(&val[..n]);
         // A fixed-width field is replaced, not partly overwritten, or a short
@@ -236,17 +282,55 @@ impl Packet {
         true
     }
 
-    /// A field with no end of its own takes the whole tail of its layer, so the
-    /// frame resizes with it. What follows the layer, `Padding` included, stays.
-    fn replace_to_end(&mut self, layer: usize, at: usize, val: &[u8]) {
+    /// A variable-length field owns the rest of its layer, so the frame resizes
+    /// with it: an option region grows or shrinks and the header length that
+    /// governs it (`ihl`, `dataofs`) follows, as construction does. What comes
+    /// after the layer, `Padding` included, stays where it is.
+    fn replace_region(&mut self, layer: usize, at: usize, val: &[u8]) {
         let s = self.spans[layer];
+        let d = desc(s.proto);
         let end = ((s.off + s.hlen) as usize).min(self.buf.len());
         let at = at.min(end);
-        let delta = val.len() as isize - (end - at) as isize;
-        self.buf.splice(at..end, val.iter().copied());
-        self.spans[layer].hlen = (at + val.len() - s.off as usize) as u32;
+        // A header length counted in 32-bit words can only describe a padded
+        // region, so construction's padding rule applies to a rewrite too.
+        let pad = if d.set_hlen.is_some() {
+            (4 - (val.len() % 4)) % 4
+        } else {
+            0
+        };
+        // Bytes a stacked layer contributed to this header (BOOTP's magic
+        // cookie) are appended after the field at build time, so they follow
+        // the new content rather than being written over.
+        let tail: &'static [u8] = match (d.bind_next_bytes, self.spans.get(layer + 1)) {
+            (Some(f), Some(n)) => f(n.proto),
+            _ => &[],
+        };
+        let keep: &'static [u8] = if !tail.is_empty()
+            && end - at > tail.len()
+            && self.buf[end - tail.len()..end] == *tail
+        {
+            tail
+        } else {
+            &[]
+        };
+        let grown = val.len() + pad + keep.len();
+        let delta = grown as isize - (end - at) as isize;
+        self.buf.splice(
+            at..end,
+            val.iter()
+                .copied()
+                .chain(std::iter::repeat(0u8).take(pad))
+                .chain(keep.iter().copied()),
+        );
+        let hlen = (at + grown).saturating_sub(s.off as usize);
+        self.spans[layer].hlen = hlen as u32;
         for later in self.spans[layer + 1..].iter_mut() {
-            later.off = (later.off as isize + delta) as u32;
+            later.off = (later.off as isize + delta).max(0) as u32;
+        }
+        if let Some(setter) = d.set_hlen {
+            let grown = self.spans[layer];
+            let (a, b) = self.hdr_range(&grown);
+            setter(&mut self.buf[a..b], hlen);
         }
         self.dirty = u32::MAX;
         self.resized = true;
@@ -589,11 +673,140 @@ mod tests {
     }
 
     #[test]
+    fn writing_an_option_region_resizes_it_instead_of_the_next_layer() {
+        let before = sample();
+        let mut p = Packet::dissect(before.clone(), ProtoId::Ether);
+        let (ip, tcp) = (1, 2);
+        let ports = (p.get(tcp, "sport").unwrap(), p.get(tcp, "dport").unwrap());
+
+        // RFC 791 §3.1 Router Alert (IANA option 148), one 4-octet word.
+        assert!(p.set_bytes(ip, "options", &[0x94, 0x04, 0x00, 0x00]));
+        assert_eq!(
+            p.get(ip, "options").unwrap(),
+            FieldValue::Bytes(vec![0x94, 0x04, 0x00, 0x00])
+        );
+        assert_eq!(p.get(ip, "ihl").unwrap(), FieldValue::Uint(6));
+        assert_eq!(p.get(tcp, "sport").unwrap(), ports.0);
+        assert_eq!(p.get(tcp, "dport").unwrap(), ports.1);
+        assert_eq!(p.len(), before.len() + 4);
+        assert_eq!(p.to_bytes().len(), before.len() + 4);
+        assert_eq!(p.get(ip, "len").unwrap(), FieldValue::Uint(44));
+
+        // And back out again.
+        assert!(p.set_bytes(ip, "options", &[]));
+        assert_eq!(p.get(ip, "ihl").unwrap(), FieldValue::Uint(5));
+        assert_eq!(p.get(tcp, "sport").unwrap(), ports.0);
+        assert_eq!(p.to_bytes().len(), before.len());
+        // Everything but the two checksums the rewrite made stale.
+        assert_eq!(p.raw_bytes()[..24], before[..24]);
+        assert_eq!(p.raw_bytes()[26..50], before[26..50]);
+    }
+
+    #[test]
+    fn an_option_region_pads_to_the_word_its_length_field_counts() {
+        let mut p = Packet::dissect(sample(), ProtoId::Ether);
+        // RFC 791 §3.1: IHL counts 32-bit words, so a 3-octet option is padded.
+        assert!(p.set_bytes(1, "options", &[0x94, 0x04, 0x00]));
+        assert_eq!(p.get(1, "ihl").unwrap(), FieldValue::Uint(6));
+        assert_eq!(
+            p.get(1, "options").unwrap(),
+            FieldValue::Bytes(vec![0x94, 0x04, 0x00, 0x00])
+        );
+    }
+
+    #[test]
+    fn writing_tcp_options_leaves_the_payload_where_it_was() {
+        let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Tcp]);
+        p.set_payload(1, b"GET / HTTP");
+        let bytes = p.to_bytes().to_vec();
+
+        let mut back = Packet::dissect(bytes, ProtoId::Ipv4);
+        // RFC 9293 §3.2: MSS 1460.
+        assert!(back.set_bytes(1, "options", &[2, 4, 0x05, 0xb4]));
+        assert_eq!(back.get(1, "dataofs").unwrap(), FieldValue::Uint(6));
+        assert_eq!(
+            back.get(1, "options").unwrap(),
+            FieldValue::Bytes(vec![2, 4, 0x05, 0xb4])
+        );
+        assert_eq!(back.payload(1), b"GET / HTTP");
+        assert_eq!(back.to_bytes().len(), 20 + 24 + 10);
+    }
+
+    #[test]
+    fn writing_bootp_options_leaves_the_dhcp_layer_alone() {
+        let mut p = Packet::build(&[ProtoId::Bootp, ProtoId::Dhcp]);
+        // RFC 2132 §9.6: message type 3 (DHCPREQUEST), then End.
+        assert!(p.set_bytes(1, "options", &[53, 1, 3, 255]));
+        let bytes = p.to_bytes().to_vec();
+
+        let mut back = Packet::dissect(bytes, ProtoId::Bootp);
+        assert_eq!(back.layers()[1].proto, ProtoId::Dhcp);
+        let opts = [99, 130, 83, 99, 53, 1, 8, 255];
+        assert!(back.set_bytes(0, "options", &opts));
+        assert_eq!(
+            back.get(0, "options").unwrap(),
+            FieldValue::Bytes(opts.to_vec())
+        );
+        assert_eq!(
+            back.get(1, "options").unwrap(),
+            FieldValue::Bytes(vec![53, 1, 3, 255])
+        );
+        assert_eq!(back.to_bytes().len(), 236 + opts.len() + 4);
+    }
+
+    #[test]
+    fn a_value_too_wide_for_a_whole_octet_field_is_refused_not_truncated() {
+        let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Tcp]);
+        assert!(!p.set_uint(0, "ttl", 300));
+        assert_eq!(p.get(0, "ttl").unwrap(), FieldValue::Uint(64));
+        assert!(!p.set_uint(0, "id", 70000));
+        assert_eq!(p.get(0, "id").unwrap(), FieldValue::Uint(1));
+        assert!(!p.set_uint(1, "sport", 70000));
+        assert_eq!(p.get(1, "sport").unwrap(), FieldValue::Uint(20));
+
+        assert!(p.set_uint(0, "ttl", 255));
+        assert_eq!(p.get(0, "ttl").unwrap(), FieldValue::Uint(255));
+        assert!(p.uint_fits(0, "ttl", 255));
+        assert!(!p.uint_fits(0, "ttl", 256));
+        // A name the layer does not carry is not a range failure.
+        assert!(p.uint_fits(0, "nosuchfield", u64::MAX));
+    }
+
+    #[test]
+    fn a_sub_octet_field_still_takes_the_bits_that_fit() {
+        // IEEE 802.1Q clause 9.6: a 12-bit VID, which masks rather than
+        // refusing, as the API being matched does.
+        let mut p = Packet::build(&[ProtoId::Ether, ProtoId::Dot1Q]);
+        assert!(p.set_uint(1, "vlan", 5000));
+        assert_eq!(p.get(1, "vlan").unwrap(), FieldValue::Uint(5000 & 0xfff));
+    }
+
+    #[test]
     fn a_field_declared_past_a_clipped_header_is_refused_not_written() {
         // RFC 792 Timestamp: ts_tx sits at byte 16 of a message clipped to 8.
         let mut p = Packet::dissect(vec![13, 0, 0, 0, 0, 0, 0, 0], ProtoId::Icmp);
         assert!(p.set_bytes(0, "ts_tx", &[1, 2, 3, 4]));
         assert_eq!(p.len(), 8);
+    }
+
+    #[test]
+    fn rewriting_an_option_region_with_what_it_holds_changes_nothing() {
+        // Construction appends the blob and then writes the field, so the
+        // second write must land on exactly what the first one built.
+        let opts = vec![0x94u8, 4, 0, 0];
+        let stack = [(ProtoId::Ipv4, Some(opts.clone())), (ProtoId::Tcp, None)];
+        let built = Packet::build_with(&stack).to_bytes().to_vec();
+        let mut again = Packet::build_with(&stack);
+        assert!(again.set_bytes(0, "options", &opts));
+        assert_eq!(again.to_bytes(), &built[..]);
+
+        // BOOTP's magic cookie (RFC 2131 §3) is appended after the field when
+        // DHCP is stacked, and survives a rewrite of the field itself.
+        let stack = [(ProtoId::Bootp, Some(opts.clone())), (ProtoId::Dhcp, None)];
+        let built = Packet::build_with(&stack).to_bytes().to_vec();
+        let mut again = Packet::build_with(&stack);
+        assert!(again.set_bytes(0, "options", &opts));
+        assert_eq!(again.to_bytes(), &built[..]);
     }
 
     #[test]

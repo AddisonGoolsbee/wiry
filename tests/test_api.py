@@ -151,11 +151,19 @@ def test_a_trailing_pad_survives_a_payload_being_rewritten():
     assert out[IP].len == 38
 
 
-def test_an_option_region_bounded_by_its_header_does_not_resize():
-    # TCP options end where the data offset says.
+def test_writing_options_grows_the_header_instead_of_the_next_layer():
+    """The option region used to be written over whatever followed it: the
+    frame kept its length, the data offset never moved, and the bytes landed on
+    the payload or the next layer."""
     pkt = Ether(ETHER_IP_TCP)
+    assert pkt[TCP].dataofs == 5
     pkt[TCP].options = b"\x02\x04\x05\xb4"
-    assert len(bytes(pkt)) == len(ETHER_IP_TCP)
+
+    out = Ether(bytes(pkt))
+    assert len(bytes(pkt)) == len(ETHER_IP_TCP) + 4
+    assert out[TCP].dataofs == 6
+    assert out[TCP].options == [("MSS", 1460)]
+    assert out[IP].len == 44
 
 
 @pytest.mark.parametrize(
