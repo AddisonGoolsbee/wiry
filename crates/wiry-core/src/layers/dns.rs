@@ -158,13 +158,24 @@ const MAX_NAME_OCTETS: usize = 255;
 /// octets, so without it 2.75 MB of input decodes to hundreds of MB.
 pub const MAX_DECODED_NAME_BYTES: usize = 256 * 1024;
 
-/// RDATA that is not a name is bounded by its own RDLENGTH, so it costs nothing.
+/// What one decoded record costs in owned memory, which is what the budget
+/// exists to bound.
+///
+/// Name bytes dominate, but they are not the only cost: TXT splits its RDATA
+/// into one owned string per character-string, so RDATA of N zero octets yields
+/// N empty strings. The bytes are bounded by RDLENGTH; the per-string overhead
+/// is not, and left uncharged it amplified 17 MB of input into 656 MB. Charge
+/// each string its header as well as its length.
 pub fn decoded_name_bytes(rr: &ResourceRecord) -> usize {
     rr.rrname.len()
         + match &rr.rdata {
             RData::Name(n) => n.len(),
             RData::Mx { exchange, .. } => exchange.len(),
             RData::Soa { mname, rname, .. } => mname.len() + rname.len(),
+            RData::Txt(parts) => parts
+                .iter()
+                .map(|t| t.len() + std::mem::size_of::<String>())
+                .sum(),
             _ => 0,
         }
 }
@@ -869,6 +880,33 @@ mod tests {
         assert!(decoded <= MAX_DECODED_NAME_BYTES, "decoded {decoded} bytes");
         assert!(r.qd.len() < 0xffff);
         assert!(decoded > MAX_DECODED_NAME_BYTES / 2);
+    }
+
+    /// TXT splits RDATA into one owned string per character-string, so RDATA of
+    /// N zero octets used to yield N empty strings free of charge. 17 MB of
+    /// input became 656 MB of output.
+    #[test]
+    fn a_txt_bomb_spends_the_same_bounded_budget() {
+        let rdata = vec![0u8; 0xffff];
+        let mut msg = vec![0, 1, 0x81, 0x80, 0, 0, 0xff, 0xff, 0, 0, 0, 0];
+        for _ in 0..0xffff {
+            msg.extend_from_slice(&record(&[0], rtype::TXT, 1, 0, &rdata));
+        }
+        let r = parse_records(&msg);
+        let strings: usize = r
+            .an
+            .iter()
+            .map(|rr| match &rr.rdata {
+                RData::Txt(parts) => parts.len(),
+                _ => 0,
+            })
+            .sum();
+        let decoded: usize = r.an.iter().map(decoded_name_bytes).sum();
+        assert!(decoded <= MAX_DECODED_NAME_BYTES, "decoded {decoded} bytes");
+        assert!(
+            strings * std::mem::size_of::<String>() <= MAX_DECODED_NAME_BYTES,
+            "{strings} strings escaped the budget"
+        );
     }
 
     #[test]

@@ -7,3 +7,6 @@ __pycache__/
 dist/
 *.whl
 .pytest_cache/
+
+# Artifacts the scapy regression suite writes into the working directory
+p0f.fp

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterator, Sequence
+import contextlib
+import os
+import tempfile
+import warnings
+from typing import Any, Iterator, Optional, Sequence
 
 from . import _wiry as _b
 
@@ -57,8 +61,32 @@ _FLAG_FIELDS: set[str] = set()
 
 
 def _bits_from(text: str, names: Sequence[str]) -> int:
-    # An unassigned bit carries an empty name, which every string contains.
-    return sum(1 << i for i, n in enumerate(names) if n and n in text)
+    """Parse a flag string into its bits.
+
+    Substring containment is wrong here: with names `a`, `ab`, `b` the string
+    `"ab"` sets all three. Tokenise instead, longest name first, so a name that
+    starts with another still matches whole.
+    """
+    if not text:
+        return 0
+    if "+" in text:
+        bits = 0
+        for tok in text.split("+"):
+            if not tok or tok not in names:
+                raise ValueError(f"unknown flag {tok!r}")
+            bits |= 1 << list(names).index(tok)
+        return bits
+    bits, at = 0, 0
+    while at < len(text):
+        best, width = -1, 0
+        for i, n in enumerate(names):
+            if n and len(n) > width and text.startswith(n, at):
+                best, width = i, len(n)
+        if best < 0:
+            raise ValueError(f"unknown flag in {text!r} at offset {at}")
+        bits |= 1 << best
+        at += width
+    return bits
 
 
 def _flag_names(layer: str, field: str) -> tuple[str, ...] | None:
@@ -705,20 +733,81 @@ class PacketList:
         return f"<PacketList: {len(self)} packets>"
 
 
-def rdpcap(path: str, count: int = -1) -> PacketList:
-    """Read a pcap file. Records are indexed, not dissected, so this is cheap."""
-    pl = PacketList(_b.read_pcap(str(path)))
+@contextlib.contextmanager
+def _as_path(source: Any) -> Iterator[str]:
+    """Yield a filesystem path for a path or a file-like object.
+
+    The reader memory-maps a file and indexes records by offset into it, so a
+    stream has to land on disk before it can be read.
+    """
+    read = getattr(source, "read", None)
+    if read is None:
+        yield str(source)
+        return
+    data = read()
+    if isinstance(data, str):
+        raise ValueError("capture stream must be opened in binary mode")
+    fd, tmp = tempfile.mkstemp(suffix=".pcap")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        yield tmp
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def rdpcap(path: Any, count: int = -1) -> PacketList:
+    """Read a pcap file, by path or from a binary stream.
+
+    Records are indexed, not dissected, so this is cheap."""
     if count is not None and count >= 0:
         raise NotImplementedError(
             "count= is not implemented yet; slice the PacketList instead"
         )
-    return pl
+    with _as_path(path) as real:
+        return PacketList(_b.read_pcap(real))
 
 
-def wrpcap(path: str, packets: Any, linktype: int = 1) -> None:
+# A pcap file declares one link type for every record in it, so the writer has
+# to pick one. Keyed by the name of a packet's outermost layer.
+_LINKTYPE_OF = {
+    "Ether": 1,
+    "Loopback": 0,
+    "IP": 228,
+    "IPv6": 229,
+    "CookedLinux": 113,
+    "CookedLinuxV2": 276,
+}
+
+
+def _linktype_of(pkt: Any) -> Optional[int]:
+    layers = getattr(pkt, "layers", None)
+    if layers is None:
+        return None
+    try:
+        names = layers()
+    except Exception:
+        return None
+    return _LINKTYPE_OF.get(names[0]) if names else None
+
+
+def wrpcap(path: str, packets: Any, linktype: Optional[int] = None) -> None:
     """Write packets to a pcap file."""
     if isinstance(packets, (Packet, bytes, bytearray)):
         packets = [packets]
+    packets = list(packets)
+    if linktype is None:
+        seen = {lt for lt in (_linktype_of(p) for p in packets) if lt is not None}
+        if len(seen) > 1:
+            warnings.warn(
+                "Inconsistent linktypes detected! The resulting file might "
+                "contain invalid packets.",
+                stacklevel=2,
+            )
+        linktype = seen.pop() if len(seen) == 1 else 1
     blobs = [bytes(p) for p in packets]
     _b.write_pcap(str(path), blobs, linktype)
 
@@ -728,8 +817,9 @@ class PcapReader:
 
     __slots__ = ("_pl", "_i")
 
-    def __init__(self, path: str):
-        self._pl = PacketList(_b.read_pcap(str(path)))
+    def __init__(self, path: Any):
+        with _as_path(path) as real:
+            self._pl = PacketList(_b.read_pcap(real))
         self._i = 0
 
     def __enter__(self) -> "PcapReader":

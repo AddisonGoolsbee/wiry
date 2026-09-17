@@ -3,11 +3,12 @@
 //! family of the datagram that follows.
 //!
 //! DLT_NULL writes that value in the **host** byte order of the machine that
-//! captured, DLT_LOOP in network byte order, so one layer reads both by trying
-//! little-endian first and falling back to big-endian. Declaring the field
-//! `LeUint` matches a capture taken on a little-endian host; on a big-endian
-//! one it would need to be `Uint`, which is the pre-existing gap logged as
-//! DEVIATIONS.md C3 and is not addressed here.
+//! captured, DLT_LOOP in network byte order. One layer serves both: `type` is
+//! declared twice under disjoint conditions, little-endian when that order
+//! yields a known address family and big-endian otherwise, so the field read
+//! reaches the same decision the dispatcher does. A DLT_NULL capture written on
+//! a big-endian host is still ambiguous with DLT_LOOP and stays logged as
+//! DEVIATIONS.md C3.
 
 use crate::field::FieldDesc;
 use crate::proto::{Next, ProtoDesc, ProtoId};
@@ -21,7 +22,10 @@ pub mod af {
     pub const INET6_DARWIN: u32 = 30;
 }
 
-pub static FIELDS: &[FieldDesc] = &[FieldDesc::le_uint("type", 0, 32, af::INET as u64)];
+pub static FIELDS: &[FieldDesc] = &[
+    FieldDesc::le_uint("type", 0, 32, af::INET as u64).when(host_order),
+    FieldDesc::uint("type", 0, 32, af::INET as u64).when(network_order),
+];
 
 fn known(v: u32) -> bool {
     matches!(
@@ -30,13 +34,23 @@ fn known(v: u32) -> bool {
     )
 }
 
+/// True when reading the four octets little-endian names an address family we
+/// recognise, which is what makes this a host-order DLT_NULL header.
+fn host_order(hdr: &[u8]) -> bool {
+    hdr.get(..4)
+        .is_some_and(|b| known(u32::from_le_bytes([b[0], b[1], b[2], b[3]])))
+}
+
+fn network_order(hdr: &[u8]) -> bool {
+    !host_order(hdr)
+}
+
 fn family(hdr: &[u8]) -> u32 {
     let Some(b) = hdr.get(..4) else {
         return 0;
     };
-    let le = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-    if known(le) {
-        le
+    if host_order(hdr) {
+        u32::from_le_bytes([b[0], b[1], b[2], b[3]])
     } else {
         u32::from_be_bytes([b[0], b[1], b[2], b[3]])
     }
@@ -124,6 +138,34 @@ mod tests {
             p.layers().iter().map(|s| s.proto).collect::<Vec<_>>(),
             vec![ProtoId::Null, ProtoId::Ipv4]
         );
+    }
+
+    /// The dispatcher always tried both byte orders; the field read did not, so
+    /// every DLT_LOOP capture reported a byte-swapped `type`.
+    #[test]
+    fn the_family_reads_in_the_order_the_dispatcher_chose() {
+        for af in [af::INET, af::INET6_BSD, af::INET6_FREEBSD, af::INET6_DARWIN] {
+            let le = Packet::dissect(frame(&af.to_le_bytes(), IPV6), ProtoId::Null);
+            assert_eq!(
+                le.get(0, "type").unwrap(),
+                FieldValue::Uint(af as u64),
+                "host order, af {af}"
+            );
+            let be = Packet::dissect(frame(&af.to_be_bytes(), IPV6), ProtoId::Null);
+            assert_eq!(
+                be.get(0, "type").unwrap(),
+                FieldValue::Uint(af as u64),
+                "network order, af {af}"
+            );
+        }
+    }
+
+    /// An unrecognised family has no byte order to infer, so it reads as the
+    /// network-order field and must still round-trip its octets.
+    #[test]
+    fn an_unknown_family_still_reads_one_consistent_value() {
+        let p = Packet::dissect(frame(&[0x00, 0x00, 0x00, 0x77], IPV4), ProtoId::Null);
+        assert_eq!(p.get(0, "type").unwrap(), FieldValue::Uint(0x77));
     }
 
     #[test]

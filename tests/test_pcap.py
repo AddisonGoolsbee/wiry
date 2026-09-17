@@ -3,7 +3,7 @@
 import pytest
 
 from wiry import (
-    ARP, Dot1Q, Ether, ICMP, IP, IPv6, PacketList, PcapReader, Raw, TCP, UDP,
+    ARP, Dot1Q, Ether, ICMP, IP, IPv6, Loopback, PacketList, PcapReader, Raw, TCP, UDP,
     rdpcap, wrpcap,
 )
 from helpers import ETHER_IP_TCP
@@ -202,3 +202,50 @@ def test_reading_a_file_that_is_not_a_pcap_is_an_error(tmp_path):
 def test_reading_a_missing_file_is_an_os_error(tmp_path):
     with pytest.raises(OSError):
         rdpcap(str(tmp_path / "absent.pcap"))
+
+
+def _linktype(path):
+    with open(path, "rb") as fh:
+        return int.from_bytes(fh.read(24)[20:24], "little")
+
+
+@pytest.mark.parametrize(
+    "pkt,expected",
+    [
+        (Ether() / IP() / TCP(), 1),
+        (IP() / TCP(), 228),
+        (IPv6() / TCP(), 229),
+        (Loopback() / IP(), 0),
+    ],
+)
+def test_wrpcap_declares_the_link_type_of_its_packets(tmp_path, pkt, expected):
+    path = str(tmp_path / "out.pcap")
+    wrpcap(path, [pkt])
+    assert _linktype(path) == expected
+    assert bytes(rdpcap(path)[0]) == bytes(pkt)
+
+
+def test_wrpcap_l3_packets_read_back_as_l3(tmp_path):
+    """A file of bare IP datagrams used to claim Ethernet, so every other tool
+    read the first 14 octets as a MAC header."""
+    path = str(tmp_path / "l3.pcap")
+    wrpcap(path, [IP() / TCP(dport=80)])
+    assert rdpcap(path)[0].layers() == ["IP", "TCP"]
+
+
+def test_wrpcap_honours_an_explicit_link_type(tmp_path):
+    path = str(tmp_path / "forced.pcap")
+    wrpcap(path, [IP() / TCP()], linktype=1)
+    assert _linktype(path) == 1
+
+
+def test_wrpcap_warns_when_the_packets_disagree(tmp_path):
+    path = str(tmp_path / "mixed.pcap")
+    with pytest.warns(UserWarning, match="Inconsistent linktypes"):
+        wrpcap(path, [IP(), Ether(), IP()])
+
+
+def test_wrpcap_of_raw_bytes_still_defaults_to_ethernet(tmp_path):
+    path = str(tmp_path / "raw.pcap")
+    wrpcap(path, [b"\x00" * 40])
+    assert _linktype(path) == 1

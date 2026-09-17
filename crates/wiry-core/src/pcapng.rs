@@ -310,6 +310,11 @@ impl<'a> Reader<'a> {
                         return None;
                     }
                     let iface_id = rd32(self.buf, start + 8, self.swapped)?;
+                    // No IDB for this id means no link type for the frame, so
+                    // there is nothing it could honestly be decoded as.
+                    if self.ifaces.get(iface_id as usize).is_none() {
+                        continue;
+                    }
                     let hi = rd32(self.buf, start + 12, self.swapped)?;
                     let lo = rd32(self.buf, start + 16, self.swapped)?;
                     let caplen = rd32(self.buf, start + 20, self.swapped)?;
@@ -622,6 +627,27 @@ mod tests {
         assert!(matches!(Reader::new(&v), Err(PcapngError::BadByteOrder(0))));
     }
 
+    /// scapy's own regression suite covers this, and scapy 2.7.0 fails it: the
+    /// file names interface 1 where only interface 0 was described.
+    #[test]
+    fn a_packet_block_naming_an_undescribed_interface_is_skipped() {
+        let blob: Vec<u8> = (0..)
+            .step_by(2)
+            .take_while(|i| *i < BLOB.len())
+            .map(|i| u8::from_str_radix(&BLOB[i..i + 2], 16).unwrap())
+            .collect();
+        let got: Vec<_> = Reader::new(&blob).unwrap().collect();
+        assert_eq!(got.len(), 1, "the block naming interface 1 must be skipped");
+        assert_eq!(got[0].data[..6], [0, 0, 0, 0, 0, 2]);
+    }
+
+    const BLOB: &str = "0a0d0d0a1c0000004d3c2b1a01000000ffffffffffffffff1c000000\
+010000001400000001000000ffff0000140000000600000034000000\
+01000000000000000000000011000000110000000000000000010000\
+00000000900042414400000034000000060000003400000000000000\
+00000000000000001300000013000000000000000002000000000000\
+900041465445520034000000";
+
     #[test]
     fn multiple_interfaces_use_their_own_resolution() {
         let mut v = shb(false);
@@ -629,6 +655,8 @@ mod tests {
         v.extend_from_slice(&idb(linktype::RAW, Some(9), false));
         v.extend_from_slice(&epb(0, 2_000_500, &[0xa1; 4], 4, false));
         v.extend_from_slice(&epb(1, 2_000_000_500, &[0xa2; 4], 4, false));
+        // Interface 9 was never described, so this block is dropped rather
+        // than decoded under some other interface's link type.
         v.extend_from_slice(&epb(9, 3_000_000, &[0xa3; 4], 4, false));
 
         let r = Reader::new(&v).unwrap();
@@ -636,10 +664,10 @@ mod tests {
         assert_eq!(r.header.tsresol, 1_000_000);
 
         let recs: Vec<_> = Reader::new(&v).unwrap().collect();
-        assert_eq!(recs.len(), 3);
+        assert_eq!(recs.len(), 2);
         assert_eq!((recs[0].ts_sec, recs[0].ts_frac), (2, 500));
         assert_eq!((recs[1].ts_sec, recs[1].ts_frac), (2, 500));
-        assert_eq!((recs[2].ts_sec, recs[2].ts_frac), (3, 0));
+        assert!(recs.iter().all(|r| r.data[0] != 0xa3));
     }
 
     #[test]
