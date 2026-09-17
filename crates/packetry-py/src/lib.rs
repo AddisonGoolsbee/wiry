@@ -7,13 +7,14 @@
 #![allow(clippy::useless_conversion)]
 
 use packetry_core::field::{self, FieldDesc, FieldKind, FieldValue};
+use packetry_core::options::OptArg;
 use packetry_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use packetry_core::pcap;
 use packetry_core::proto::{self, ProtoId};
 use packetry_core::show;
-use pyo3::exceptions::{PyIndexError, PyKeyError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList};
+use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PySequence};
 use std::sync::Arc;
 
 fn proto_by_name(name: &str) -> PyResult<ProtoId> {
@@ -773,22 +774,89 @@ fn build_stack(names: Vec<String>) -> PyResult<PyPkt> {
     })
 }
 
-fn make_stack(
-    names: &[String],
-    opts: &[(usize, Vec<u8>)],
-) -> PyResult<Vec<(ProtoId, Option<Vec<u8>>)>> {
+/// One entry of a layer's option region: a named option for Rust to encode,
+/// or, with no name, bytes to append verbatim. The facade normalises the
+/// container shape; resolving the name and laying out the payload is this
+/// crate's job.
+type OptEntry = (usize, Option<String>, OptArgIn);
+
+struct OptArgIn(OptArg);
+
+impl FromPyObject<'_> for OptArgIn {
+    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(OptArgIn(opt_arg(ob)?))
+    }
+}
+
+fn opt_arg(ob: &Bound<'_, PyAny>) -> PyResult<OptArg> {
+    if ob.is_none() {
+        return Ok(OptArg::Flag);
+    }
+    if let Ok(b) = ob.downcast::<PyBytes>() {
+        return Ok(OptArg::Bytes(b.as_bytes().to_vec()));
+    }
+    if let Ok(b) = ob.downcast::<PyByteArray>() {
+        return Ok(OptArg::Bytes(b.to_vec()));
+    }
+    if let Ok(s) = ob.extract::<String>() {
+        return Ok(OptArg::Text(s));
+    }
+    if let Ok(n) = ob.extract::<u64>() {
+        return Ok(OptArg::Uint(n));
+    }
+    if let Ok(seq) = ob.downcast::<PySequence>() {
+        let mut out = Vec::with_capacity(seq.len()?);
+        for i in 0..seq.len()? {
+            out.push(opt_arg(&seq.get_item(i)?)?);
+        }
+        return Ok(OptArg::List(out));
+    }
+    Err(PyTypeError::new_err(format!(
+        "cannot encode option value {}",
+        ob.repr()?
+    )))
+}
+
+fn make_stack(names: &[String], opts: &[OptEntry]) -> PyResult<Vec<(ProtoId, Option<Vec<u8>>)>> {
     if names.is_empty() {
         return Err(PyValueError::new_err("empty packet"));
     }
     let mut stack = Vec::with_capacity(names.len());
     for (i, n) in names.iter().enumerate() {
-        let o = opts
-            .iter()
-            .find(|(idx, _)| *idx == i)
-            .map(|(_, b)| b.clone());
-        stack.push((proto_by_name(n)?, o));
+        let id = proto_by_name(n)?;
+        let region = option_region(id, i, opts)?;
+        stack.push((id, (!region.is_empty()).then_some(region)));
     }
     Ok(stack)
+}
+
+fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut named = Vec::new();
+    for (_, name, arg) in opts.iter().filter(|(l, _, _)| *l == layer) {
+        let Some(name) = name else {
+            match &arg.0 {
+                OptArg::Bytes(b) => out.extend_from_slice(b),
+                _ => return Err(PyTypeError::new_err("a raw option region must be bytes")),
+            }
+            continue;
+        };
+        let desc = proto::desc(id);
+        let table = desc.opt_table.ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "{} does not take an encodable option list",
+                desc.name
+            ))
+        })?;
+        named.push(table.item(name, &arg.0).map_err(PyValueError::new_err)?);
+    }
+    if !named.is_empty() {
+        let table = proto::desc(id)
+            .opt_table
+            .expect("named items imply a table");
+        out.extend_from_slice(&table.encode(&named).map_err(PyValueError::new_err)?);
+    }
+    Ok(out)
 }
 
 /// Unconditional fields go first: a conditional field's presence is decided by
@@ -880,7 +948,7 @@ fn build_and_serialize<'py>(
     strs: Vec<(usize, String, String)>,
     raws: Vec<(usize, String, Vec<u8>)>,
     payload: Option<Vec<u8>>,
-    opts: Vec<(usize, Vec<u8>)>,
+    opts: Vec<OptEntry>,
 ) -> PyResult<Bound<'py, PyBytes>> {
     let stack = make_stack(&names, &opts)?;
     let mut pkt = CorePacket::build_with(&stack);
@@ -905,7 +973,7 @@ fn build_packet(
     strs: Vec<(usize, String, String)>,
     raws: Vec<(usize, String, Vec<u8>)>,
     payload: Option<Vec<u8>>,
-    opts: Vec<(usize, Vec<u8>)>,
+    opts: Vec<OptEntry>,
 ) -> PyResult<PyPkt> {
     let stack = make_stack(&names, &opts)?;
     let mut pkt = CorePacket::build_with(&stack);

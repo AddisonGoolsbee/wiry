@@ -247,179 +247,6 @@ class _LayerView:
         return hash((self._name, self._idx))
 
 
-# (code, payload width, or None for variable). Codes from the IANA TCP Option
-# Kind and IP Option Number registries.
-#
-# EOL and NOP are a single octet with no length field, but SAckOK keeps its
-# length octet despite an empty payload; emitting it bare desynchronises every
-# option after it.
-_SINGLE_BYTE = {0, 1}
-_TCP_OPT = {
-    "EOL": (0, 0), "NOP": (1, 0), "MSS": (2, 2), "WScale": (3, 1),
-    "SAckOK": (4, 0), "SAck": (5, None), "Timestamp": (8, 8),
-    "UTO": (28, 2), "AO": (29, None), "TFO": (34, None),
-}
-_IP_OPT = {
-    "EOL": (0, 0), "NOP": (1, 0), "RR": (7, None), "Timestamp": (68, None),
-    "Security": (130, None), "LSRR": (131, None), "SID": (136, 2),
-    "SSRR": (137, None), "RA": (148, 2),
-}
-
-
-# RFC 2132 option codes and payload shapes; an integer entry means a fixed-width
-# big-endian integer of that many bytes.
-#
-# The length octet here counts ONLY the option data (RFC 2132 §2), the opposite
-# of the TCP/IPv4 convention above, where it counts the code and length octets
-# too. Using one rule for the other desynchronises every following option.
-_DHCP_OPT: dict[str, tuple[int, Any]] = {
-    "pad": (0, "flag"),
-    "subnet_mask": (1, "ip"),
-    "router": (3, "ip"),
-    "name_server": (6, "ip"),
-    "hostname": (12, "text"),
-    "domain": (15, "text"),
-    "broadcast_address": (28, "ip"),
-    "requested_addr": (50, "ip"),
-    "lease_time": (51, 4),
-    "message-type": (53, 1),
-    "server_id": (54, "ip"),
-    "param_req_list": (55, "bytes"),
-    "max_dhcp_size": (57, 2),
-    "renewal_time": (58, 4),
-    "rebinding_time": (59, 4),
-    "client_id": (61, "bytes"),
-    "relay_agent_information": (82, "bytes"),
-    "end": (255, "flag"),
-}
-
-# RFC 2132 §9.6.
-_DHCP_MSGTYPE = {
-    "discover": 1, "offer": 2, "request": 3, "decline": 4,
-    "ack": 5, "nak": 6, "release": 7, "inform": 8,
-}
-
-# RFC 2132 §3.1, §3.2: Pad and End are a bare octet, no length and no data.
-_DHCP_BARE = {0, 255}
-
-
-def _ipv4_bytes(v: Any) -> bytes:
-    if _is_bytes(v):
-        return bytes(v)
-    if isinstance(v, int):
-        return int(v).to_bytes(4, "big")
-    return bytes(int(p) for p in str(v).split("."))
-
-
-def _dhcp_payload(kind: Any, values: tuple) -> bytes:
-    flat: list[Any] = []
-    for v in values:
-        if isinstance(v, (list, tuple)):
-            flat.extend(v)
-        else:
-            flat.append(v)
-    if kind == "ip":
-        return b"".join(_ipv4_bytes(v) for v in flat)
-    if kind == "text":
-        return b"".join(
-            v.encode() if isinstance(v, str) else bytes(v) for v in flat
-        )
-    if kind == "bytes":
-        if len(flat) == 1 and _is_bytes(flat[0]):
-            return bytes(flat[0])
-        if len(flat) == 1 and isinstance(flat[0], str):
-            return flat[0].encode()
-        return bytes(int(v) & 0xFF for v in flat)
-    v = flat[0] if flat else 0
-    if isinstance(v, str):
-        v = _DHCP_MSGTYPE.get(v.lower(), v)
-    return int(v).to_bytes(kind, "big")
-
-
-def _opt_code(name: Any) -> int | None:
-    """An unnamed option is labelled with its decimal code, which must encode
-    back to that code."""
-    if isinstance(name, int):
-        return name
-    if isinstance(name, str) and name.isdigit() and 0 <= int(name) <= 255:
-        return int(name)
-    return None
-
-
-def _encode_dhcp_options(items: Any) -> bytes:
-    """Encode an RFC 2132 DHCP option list.
-
-    Accepts what the parser gives back and what people type: "end",
-    ("end", None), ("message-type", 1 | "discover"), ("server_id", "10.0.0.1"),
-    ("router", ["10.0.0.1", "10.0.0.2"]), (224, b"raw"), ("60", b"raw").
-    """
-    out = bytearray()
-    for item in items:
-        if isinstance(item, (str, int)):
-            name, values = item, ()
-        else:
-            name, values = item[0], tuple(item[1:])
-        if values == (None,):
-            values = ()
-        if name in _DHCP_OPT:
-            code, kind = _DHCP_OPT[name]
-        elif (c := _opt_code(name)) is not None:
-            code, kind = c, "bytes"
-        else:
-            raise ValueError(f"unknown DHCP option {name!r}")
-        if code in _DHCP_BARE:
-            out.append(code)
-            continue
-        payload = _dhcp_payload(kind, values)
-        if len(payload) > 255:
-            raise ValueError(f"DHCP option {name!r} is too long to encode")
-        out.append(code)
-        out.append(len(payload))
-        out += payload
-    return bytes(out)
-
-
-def _encode_options(layer: str, items: Any) -> bytes:
-    """Accepts the shapes the parser produces: ("MSS", 1460), ("SAckOK", None),
-    ("Timestamp", (tsval, tsecr)), (code, b"raw")."""
-    if _is_bytes(items):
-        return bytes(items)
-    if layer == "DHCP":
-        return _encode_dhcp_options(items)
-    table = _TCP_OPT if layer == "TCP" else _IP_OPT if layer == "IP" else None
-    if table is None:
-        raise ValueError(f"{layer} does not take an encodable option list")
-
-    out = bytearray()
-    for item in items:
-        name, value = item if isinstance(item, tuple) else (item, None)
-        if name in table:
-            code, width = table[name]
-        elif (c := _opt_code(name)) is not None:
-            code, width = c, None
-        else:
-            raise ValueError(f"unknown {layer} option {name!r}")
-
-        if code in _SINGLE_BYTE:
-            out.append(code)
-            continue
-        if isinstance(value, tuple):
-            payload = b"".join(int(v).to_bytes(4, "big") for v in value)
-        elif isinstance(value, int):
-            payload = int(value).to_bytes(width or 4, "big")
-        elif _is_bytes(value):
-            payload = bytes(value)
-        elif value is None:
-            payload = b""
-        else:
-            raise TypeError(f"cannot encode option {name!r} value {value!r}")
-        # The length octet counts the code and length octets themselves.
-        out.append(code)
-        out.append(len(payload) + 2)
-        out += payload
-    return bytes(out)
-
-
 def _layer_name(x: Any) -> str:
     """Accept a layer class, an instance, or a plain string."""
     if isinstance(x, str):
@@ -577,31 +404,38 @@ class Packet(metaclass=_PacketMeta):
                     )
         return ints, strs, raws
 
-    def _opt_blobs(self) -> list[tuple[int, bytes]]:
-        """Encoded option regions, as (layer index, bytes)."""
-        out: list[tuple[int, bytes]] = []
+    def _opt_blobs(self) -> list[tuple[int, str | None, Any]]:
+        """Each layer's option region, as (layer index, name, value) entries.
+        An entry with no name is bytes to append verbatim; a named one is
+        encoded by the protocol's table in Rust."""
+        out: list[tuple[int, str | None, Any]] = []
         for i, (lname, fields) in enumerate(self._stack):
             if lname in ("Raw", "Padding"):
                 load = fields.get("load")
                 if load is not None:
                     blob = _to_bytes(load, f"{lname}.load")
                     if blob:
-                        out.append((i, blob))
+                        out.append((i, None, blob))
                 continue
             var = _VAR_FIELD.get(lname)
             if var is not None:
                 blob = fields.get(var[0], var[1]) or b""
                 if blob:
-                    out.append((i, _to_bytes(blob, f"{lname}.{var[0]}")))
+                    out.append((i, None, _to_bytes(blob, f"{lname}.{var[0]}")))
                 continue
             v = fields.get("options")
             if v is None or _is_bytes(v):
                 if _is_bytes(v) and v:
-                    out.append((i, bytes(v)))
+                    out.append((i, None, bytes(v)))
                 continue
-            blob = _encode_options(lname, v)
-            if blob:
-                out.append((i, blob))
+            for opt in v:
+                # A bare name, ("MSS", 1460), or DHCP's ("router", a, b).
+                if isinstance(opt, (str, int)):
+                    name, value = opt, None
+                else:
+                    name = opt[0]
+                    value = opt[1] if len(opt) == 2 else list(opt[1:])
+                out.append((i, str(name), value))
         return out
 
     def _materialize(self):
