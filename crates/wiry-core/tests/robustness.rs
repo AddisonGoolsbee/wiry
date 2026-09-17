@@ -13,9 +13,10 @@ use wiry_core::{parse, pcap, pcapng, show};
 /// Fixed so a failure is reproducible; printed in every assertion message.
 const SEED: u64 = 0x2545_F491_4F6C_DD1D;
 
-/// Loose enough not to flake on a loaded runner, tight enough that an
-/// unbounded walk trips it.
-const BUDGET: Duration = Duration::from_secs(20);
+/// Catches an unbounded walk, which does not terminate at all, so the only
+/// requirement is that it be finite. 20s flaked: the suite alone takes about
+/// 15s, and `cargo test` runs these in parallel with the rest of the workspace.
+const BUDGET: Duration = Duration::from_secs(120);
 
 struct Rng(u64);
 

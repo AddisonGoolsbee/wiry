@@ -893,14 +893,13 @@ mod tests {
             msg.extend_from_slice(&record(&[0], rtype::TXT, 1, 0, &rdata));
         }
         let r = parse_records(&msg);
-        let strings: usize = r
-            .an
-            .iter()
-            .map(|rr| match &rr.rdata {
-                RData::Txt(parts) => parts.len(),
-                _ => 0,
-            })
-            .sum();
+        let strings: usize =
+            r.an.iter()
+                .map(|rr| match &rr.rdata {
+                    RData::Txt(parts) => parts.len(),
+                    _ => 0,
+                })
+                .sum();
         let decoded: usize = r.an.iter().map(decoded_name_bytes).sum();
         assert!(decoded <= MAX_DECODED_NAME_BYTES, "decoded {decoded} bytes");
         assert!(
