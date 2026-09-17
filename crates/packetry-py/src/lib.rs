@@ -1284,6 +1284,7 @@ fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<live::LiveSniffer>()?;
     m.add_function(wrap_pyfunction!(live::send_frames, m)?)?;
     m.add_function(wrap_pyfunction!(live::send_datagrams, m)?)?;
+    m.add_function(wrap_pyfunction!(live::sr_live, m)?)?;
     m.add(
         "CaptureUnavailable",
         m.py().get_type_bound::<capture::CaptureUnavailable>(),

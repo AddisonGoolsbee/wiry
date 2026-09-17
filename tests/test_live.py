@@ -150,3 +150,33 @@ def test_sendp_on_an_unknown_interface_raises_oserror():
 
     with pytest.raises(OSError):
         P.sendp(Ether() / IP(), iface=NO_SUCH_IF, verbose=0)
+
+
+@live
+def test_a_negative_retry_is_refused_rather_than_guessed_at():
+    from packetry import Ether, ARP
+
+    with pytest.raises(NotImplementedError) as exc:
+        P.srp(Ether() / ARP(pdst="10.0.0.1"), iface=NO_SUCH_IF, retry=-1,
+              timeout=0.1, verbose=0)
+    assert "retry" in str(exc.value)
+
+
+@live
+def test_sr_refuses_ipv6_and_names_sendp():
+    from packetry import IPv6, UDP
+
+    with pytest.raises(NotImplementedError) as exc:
+        P.sr(IPv6() / UDP(), timeout=0.1, verbose=0)
+    assert "sendp" in str(exc.value)
+
+
+@live
+@pytest.mark.parametrize("fn", ["sr", "sr1", "srp", "srp1"])
+def test_every_exchange_reaches_the_backend(fn):
+    from packetry import Ether, IP, ICMP
+
+    pkt = IP(dst="10.99.0.2") / ICMP() if fn.startswith("sr") and "p" not in fn \
+        else Ether() / IP(dst="10.99.0.2") / ICMP()
+    with pytest.raises(OSError):
+        getattr(P, fn)(pkt, iface=NO_SUCH_IF, timeout=0.1, verbose=0)

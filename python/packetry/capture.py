@@ -39,17 +39,6 @@ def capture_available() -> bool:
     return _b.capture_available()
 
 
-def _live_only(what: str) -> None:
-    """Refuse an operation that has no offline meaning. Raises
-    ``CaptureUnavailable`` when the backend is missing, and ``NotImplementedError``
-    when it is present but this driver is not written yet."""
-    _b.capture_check()
-    raise NotImplementedError(
-        f"{what} needs the live driver, which this build does not have yet. "
-        "Offline work goes through rdpcap(), wrpcap() and sniff(offline=...)."
-    )
-
-
 def _iface_name(iface: Any) -> str:
     """The interface to work on: what was asked for, else ``conf.iface``."""
     return conf.iface if iface is None else str(iface)
@@ -382,30 +371,88 @@ def sendp(x: Any, inter: float = 0, loop: int = 0, iface: Any = None,
     return pkts if return_packets else None
 
 
+def _exchange(x: Any, l2: bool, iface: Any, filter: Optional[str],
+              timeout: Optional[float], retry: int, multi: bool, inter: float,
+              promisc: Optional[bool], verbose: Optional[int], what: str) -> tuple:
+    """One send-and-receive round. The receive capture opens before anything
+    goes out, so a reply at wire speed is not already gone."""
+    _b.capture_check()
+    if retry < 0:
+        raise NotImplementedError(
+            "a negative retry= means scapy's 'resend only while nothing at all "
+            "has answered'; pass a count of resends instead"
+        )
+    name = _iface_name(iface)
+    pkts = _as_list(x)
+    if l2:
+        mac = _b.interface_mac(name)
+        frames = [bytes(_with_src(p, mac)) for p in pkts]
+    else:
+        _refuse_ipv6(pkts, what)
+        frames = [bytes(p) for p in pkts]
+    recv, pairs, unans = _b.sr_live(
+        frames, name, l2, filter,
+        None if timeout is None else float(timeout),
+        int(retry), bool(multi), float(inter),
+        True if promisc is None else bool(promisc),
+    )
+    got = PacketList(recv)
+    answered = [(pkts[i], got[j]) for i, j in pairs]
+    unanswered = [pkts[i] for i in unans]
+    if (conf.verb if verbose is None else verbose):
+        print(f"Received {len(got)} packets, got {len(answered)} answers, "
+              f"remaining {len(unanswered)} packets")
+    return answered, unanswered
+
+
 def sr(x: Any, promisc: Optional[bool] = None, filter: Optional[str] = None,
-       iface: Any = None, nofilter: int = 0, *args: Any, **kwargs: Any) -> Any:
-    """Send layer-3 packets and collect (answered, unanswered)."""
-    _live_only("sr()")
+       iface: Any = None, nofilter: int = 0, *, timeout: Optional[float] = None,
+       retry: int = 0, multi: bool = False, inter: float = 0,
+       verbose: Optional[int] = None, **kwargs: Any) -> Any:
+    """Send layer-3 packets and collect ``(answered, unanswered)``.
+
+    ``answered`` pairs each sent packet with the reply ``answers()`` matched;
+    anything it does not recognise is dropped rather than guessed at, so an
+    unmatched probe is visible in ``unanswered``. ``retry=N`` resends the
+    unanswered set N more times; ``multi=True`` keeps collecting after a probe
+    has been answered once.
+    """
+    return _exchange(x, False, iface, filter, timeout, retry, multi, inter,
+                     promisc, verbose, "sr")
 
 
 def sr1(x: Any, promisc: Optional[bool] = None, filter: Optional[str] = None,
-        iface: Any = None, nofilter: int = 0, *args: Any, **kwargs: Any) -> Any:
-    """Send layer-3 packets and return the first answer, or None."""
-    _live_only("sr1()")
+        iface: Any = None, nofilter: int = 0, *, timeout: Optional[float] = None,
+        retry: int = 0, multi: bool = False, inter: float = 0,
+        verbose: Optional[int] = None, **kwargs: Any) -> Any:
+    """Send layer-3 packets and return the first answer, or ``None``."""
+    answered, _ = sr(x, promisc=promisc, filter=filter, iface=iface,
+                     nofilter=nofilter, timeout=timeout, retry=retry,
+                     multi=multi, inter=inter, verbose=verbose, **kwargs)
+    return answered[0][1] if answered else None
 
 
 def srp(x: Any, promisc: Optional[bool] = None, iface: Any = None,
         iface_hint: Any = None, filter: Optional[str] = None,
-        nofilter: int = 0, type: int = 3, *args: Any, **kwargs: Any) -> Any:
-    """Send layer-2 frames and collect (answered, unanswered)."""
-    _live_only("srp()")
+        nofilter: int = 0, type: int = 3, *, timeout: Optional[float] = None,
+        retry: int = 0, multi: bool = False, inter: float = 0,
+        verbose: Optional[int] = None, **kwargs: Any) -> Any:
+    """Send layer-2 frames and collect ``(answered, unanswered)``. See ``sr``."""
+    return _exchange(x, True, iface, filter, timeout, retry, multi, inter,
+                     promisc, verbose, "srp")
 
 
 def srp1(x: Any, promisc: Optional[bool] = None, iface: Any = None,
          iface_hint: Any = None, filter: Optional[str] = None,
-         nofilter: int = 0, type: int = 3, *args: Any, **kwargs: Any) -> Any:
-    """Send layer-2 frames and return the first answer, or None."""
-    _live_only("srp1()")
+         nofilter: int = 0, type: int = 3, *, timeout: Optional[float] = None,
+         retry: int = 0, multi: bool = False, inter: float = 0,
+         verbose: Optional[int] = None, **kwargs: Any) -> Any:
+    """Send layer-2 frames and return the first answer, or ``None``."""
+    answered, _ = srp(x, promisc=promisc, iface=iface, iface_hint=iface_hint,
+                      filter=filter, nofilter=nofilter, type=type,
+                      timeout=timeout, retry=retry, multi=multi, inter=inter,
+                      verbose=verbose, **kwargs)
+    return answered[0][1] if answered else None
 
 
 def get_if_list() -> list:

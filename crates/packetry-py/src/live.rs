@@ -21,6 +21,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use packetry_capture::{open_live, CaptureBuf, Flow, Handle, LiveConfig, PacketMeta, Record};
+use packetry_core::answers::{answers, reply_key, ReplyKey};
+use packetry_core::packet::dissect_spans;
 use packetry_core::pcap;
 use packetry_core::proto::ProtoId;
 use pyo3::exceptions::PyRuntimeError;
@@ -524,6 +526,156 @@ pub(crate) fn send_datagrams(
     }
 }
 
+/// One send-and-receive exchange. The state of a single `sr` call, so the
+/// collect phase can be run in bounded slices without unpicking it.
+struct Exchange {
+    keys: Vec<Option<ReplyKey>>,
+    got: Vec<bool>,
+    pairs: Vec<(usize, usize)>,
+    out: CaptureBuf,
+    scratch: Vec<u8>,
+    link: ProtoId,
+    multi: bool,
+}
+
+impl Exchange {
+    fn settled(&self) -> bool {
+        // With multi= the wait runs to the deadline however many answers land.
+        !self.multi && self.got.iter().all(|g| *g)
+    }
+
+    fn pending(&self) -> Vec<usize> {
+        (0..self.got.len()).filter(|&i| !self.got[i]).collect()
+    }
+
+    /// Records every sent packet this frame answers. A frame `answers` does
+    /// not recognise is dropped: a wrong match corrupts the caller's results
+    /// silently, where a missing one shows up in `unanswered`.
+    fn offer(&mut self, meta: &PacketMeta) {
+        let spans = dissect_spans(&self.scratch, self.link);
+        let mut kept = None;
+        for i in 0..self.keys.len() {
+            let Some(k) = &self.keys[i] else { continue };
+            if !self.multi && self.got[i] {
+                continue;
+            }
+            if !answers(k, &self.scratch, &spans) {
+                continue;
+            }
+            let at = *kept.get_or_insert_with(|| {
+                self.out.push(meta, &self.scratch);
+                self.out.len() - 1
+            });
+            self.pairs.push((i, at));
+            self.got[i] = true;
+            if !self.multi {
+                break;
+            }
+        }
+    }
+
+    /// Reads until the exchange is over, the deadline passes, or the slice
+    /// runs out. `true` means the phase is finished.
+    fn collect(
+        &mut self,
+        h: &mut Handle,
+        deadline: Option<Instant>,
+        until: Instant,
+    ) -> PyResult<bool> {
+        loop {
+            if self.settled() || deadline.is_some_and(|d| Instant::now() >= d) {
+                return Ok(true);
+            }
+            if Instant::now() >= until {
+                return Ok(false);
+            }
+            let Some(meta) = h.next_into(&mut self.scratch).map_err(to_py_err)? else {
+                continue;
+            };
+            self.offer(&meta);
+        }
+    }
+}
+
+/// The replies, as (sent index, reply index) pairs into the capture, and the
+/// sent indices nothing answered.
+type Exchanged = (PyPktList, Vec<(usize, usize)>, Vec<usize>);
+
+/// Send and collect the answers. The receive capture opens before anything is
+/// sent, or a reply that comes back at wire speed is already gone.
+#[allow(clippy::too_many_arguments)]
+#[pyfunction]
+#[pyo3(signature = (
+    frames, iface = None, l2 = true, filter = None, timeout = None, retry = 0,
+    multi = false, inter = 0.0, promisc = true, snaplen = 262_144
+))]
+pub(crate) fn sr_live(
+    py: Python<'_>,
+    frames: Vec<Vec<u8>>,
+    iface: Option<String>,
+    l2: bool,
+    filter: Option<String>,
+    timeout: Option<f64>,
+    retry: usize,
+    multi: bool,
+    inter: f64,
+    promisc: bool,
+    snaplen: u32,
+) -> PyResult<Exchanged> {
+    let cfg = live_config(iface, filter, promisc, snaplen);
+    let mut h = open_live(&cfg).map_err(to_py_err)?;
+    let dlt = h.linktype();
+    let link = pcap::link_to_proto(dlt);
+    let sent_link = if l2 { link } else { ProtoId::Ipv4 };
+    let gap = Duration::from_secs_f64(inter.max(0.0));
+
+    let mut ex = Exchange {
+        keys: frames
+            .iter()
+            .map(|f| reply_key(f, &dissect_spans(f, sent_link)))
+            .collect(),
+        got: vec![false; frames.len()],
+        pairs: Vec::new(),
+        out: CaptureBuf::new(dlt, snaplen),
+        scratch: Vec::new(),
+        link,
+        multi,
+    };
+
+    for _ in 0..=retry {
+        let pending = ex.pending();
+        if pending.is_empty() {
+            break;
+        }
+        let batch: Vec<Vec<u8>> = pending.iter().map(|&i| frames[i].clone()).collect();
+        py.allow_threads(|| -> PyResult<()> {
+            if l2 {
+                one_run(&mut h, &batch, 1, gap)?;
+            } else {
+                packetry_capture::send_l3(&batch, 1, inter).map_err(to_py_err)?;
+            }
+            Ok(())
+        })?;
+        let deadline = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t.max(0.0)));
+        loop {
+            let until = Instant::now() + SLICE;
+            let over = py.allow_threads(|| ex.collect(&mut h, deadline, until))?;
+            py.check_signals()?;
+            if over {
+                break;
+            }
+        }
+    }
+
+    let unanswered = ex.pending();
+    let (buf, index, _) = ex.out.into_parts();
+    Ok((
+        PyPktList::from_capture(buf, index, dlt, false),
+        ex.pairs,
+        unanswered,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,5 +693,103 @@ mod tests {
     #[test]
     fn an_absent_interface_name_means_libpcaps_own_default() {
         assert!(live_config(None, None, true, 65_535).iface.is_empty());
+    }
+
+    const A: [u8; 4] = [10, 0, 0, 1];
+    const B: [u8; 4] = [10, 0, 0, 2];
+
+    /// RFC 791 §3.1, no options.
+    fn ip4(id: u16, src: [u8; 4], dst: [u8; 4], rest: &[u8]) -> Vec<u8> {
+        let mut v = vec![0x45, 0x00];
+        v.extend_from_slice(&((20 + rest.len()) as u16).to_be_bytes());
+        v.extend_from_slice(&id.to_be_bytes());
+        v.extend_from_slice(&[0x00, 0x00, 0x40, 1, 0x00, 0x00]);
+        v.extend_from_slice(&src);
+        v.extend_from_slice(&dst);
+        v.extend_from_slice(rest);
+        v
+    }
+
+    /// RFC 792 echo.
+    fn echo(ty: u8, id: u16, seq: u16) -> Vec<u8> {
+        let mut v = vec![ty, 0, 0, 0];
+        v.extend_from_slice(&id.to_be_bytes());
+        v.extend_from_slice(&seq.to_be_bytes());
+        v
+    }
+
+    fn meta(len: usize) -> PacketMeta {
+        PacketMeta {
+            ts_sec: 1,
+            ts_frac: 0,
+            caplen: len as u32,
+            origlen: len as u32,
+        }
+    }
+
+    fn exchange(sent: &[Vec<u8>], multi: bool) -> Exchange {
+        Exchange {
+            keys: sent
+                .iter()
+                .map(|f| reply_key(f, &dissect_spans(f, ProtoId::Ipv4)))
+                .collect(),
+            got: vec![false; sent.len()],
+            pairs: Vec::new(),
+            out: CaptureBuf::new(pcap::linktype::IPV4, 65_535),
+            scratch: Vec::new(),
+            link: ProtoId::Ipv4,
+            multi,
+        }
+    }
+
+    fn offer(ex: &mut Exchange, frame: Vec<u8>) {
+        let m = meta(frame.len());
+        ex.scratch = frame;
+        ex.offer(&m);
+    }
+
+    #[test]
+    fn a_reply_is_paired_with_the_probe_it_answers() {
+        let req = ip4(7, A, B, &echo(8, 0x1234, 1));
+        let mut ex = exchange(&[req], false);
+        offer(&mut ex, ip4(9, B, A, &echo(0, 0x9999, 1)));
+        assert!(ex.pairs.is_empty(), "a different echo is not an answer");
+        assert_eq!(ex.out.len(), 0, "an unmatched frame is not stored");
+        offer(&mut ex, ip4(9, B, A, &echo(0, 0x1234, 1)));
+        assert_eq!(ex.pairs, vec![(0, 0)]);
+        assert!(ex.settled());
+        assert!(ex.pending().is_empty());
+    }
+
+    #[test]
+    fn multi_keeps_collecting_after_the_first_answer() {
+        let req = ip4(7, A, B, &echo(8, 0x1234, 1));
+        let mut ex = exchange(&[req], true);
+        offer(&mut ex, ip4(9, B, A, &echo(0, 0x1234, 1)));
+        offer(&mut ex, ip4(10, B, A, &echo(0, 0x1234, 1)));
+        assert_eq!(ex.pairs, vec![(0, 0), (0, 1)]);
+        assert_eq!(ex.out.len(), 2);
+        // The wait runs to the deadline however many answers have landed.
+        assert!(!ex.settled());
+    }
+
+    #[test]
+    fn an_unanswered_probe_is_reported_not_guessed_at() {
+        let a = ip4(7, A, B, &echo(8, 0x1111, 1));
+        let b = ip4(8, A, B, &echo(8, 0x2222, 1));
+        let mut ex = exchange(&[a, b], false);
+        offer(&mut ex, ip4(9, B, A, &echo(0, 0x2222, 1)));
+        assert_eq!(ex.pairs, vec![(1, 0)]);
+        assert_eq!(ex.pending(), vec![0]);
+    }
+
+    #[test]
+    fn one_frame_answering_two_probes_is_stored_once() {
+        let a = ip4(7, A, B, &echo(8, 0x1234, 1));
+        let b = ip4(8, A, B, &echo(8, 0x1234, 1));
+        let mut ex = exchange(&[a, b], true);
+        offer(&mut ex, ip4(9, B, A, &echo(0, 0x1234, 1)));
+        assert_eq!(ex.pairs, vec![(0, 0), (1, 0)]);
+        assert_eq!(ex.out.len(), 1);
     }
 }
