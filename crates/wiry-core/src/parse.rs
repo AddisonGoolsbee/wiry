@@ -83,15 +83,11 @@ pub fn ipv6(s: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
-pub fn flags(s: &str, names: &[&str]) -> u64 {
-    let mut v = 0u64;
-    for (i, n) in names.iter().enumerate() {
-        // An unassigned bit carries an empty name, which every string contains.
-        if !n.is_empty() && s.contains(n) {
-            v |= 1 << i;
-        }
-    }
-    v
+/// One implementation, shared with the renderer whose output this reads back.
+/// `None` where a token names no flag of this field: the only way a typo can
+/// reach the caller instead of quietly building a packet with the bit clear.
+pub fn flags(s: &str, names: &[&str]) -> Option<u64> {
+    crate::show::flags_from(s, names)
 }
 
 pub fn value_for(f: &FieldDesc, s: &str) -> Option<ValueBits> {
@@ -99,7 +95,7 @@ pub fn value_for(f: &FieldDesc, s: &str) -> Option<ValueBits> {
         FieldKind::Ipv4Addr => ipv4(s).map(|b| ValueBits::Bytes(b.to_vec())),
         FieldKind::Ipv6Addr => ipv6(s).map(|b| ValueBits::Bytes(b.to_vec())),
         FieldKind::MacAddr => mac(s).map(|b| ValueBits::Bytes(b.to_vec())),
-        FieldKind::Flags => Some(ValueBits::Uint(flags(s, f.flags))),
+        FieldKind::Flags => flags(s, f.flags).map(ValueBits::Uint),
         FieldKind::Uint | FieldKind::LeUint => s.parse::<u64>().ok().map(ValueBits::Uint),
         FieldKind::Bytes | FieldKind::VarBytes => Some(ValueBits::Bytes(s.as_bytes().to_vec())),
     }
@@ -164,14 +160,30 @@ mod tests {
     #[test]
     fn flag_letters_map_to_bits() {
         let names: &[&str] = &["F", "S", "R", "P", "A", "U", "E", "C"];
-        assert_eq!(flags("S", names), 0b10);
-        assert_eq!(flags("SA", names), 0b1_0010);
-        assert_eq!(flags("", names), 0);
+        assert_eq!(flags("S", names), Some(0b10));
+        assert_eq!(flags("SA", names), Some(0b1_0010));
+        assert_eq!(flags("", names), Some(0));
     }
 
     #[test]
     fn unnamed_bits_stay_clear() {
         let names: &[&str] = &["", "", "", "B"];
-        assert_eq!(flags("B", names), 0b1000);
+        assert_eq!(flags("B", names), Some(0b1000));
+    }
+
+    #[test]
+    fn a_name_that_is_part_of_another_sets_only_its_own_bit() {
+        let names: &[&str] = &["a", "ab", "b"];
+        assert_eq!(flags("ab", names), Some(0b010));
+    }
+
+    #[test]
+    fn an_unknown_flag_name_fails_the_whole_value() {
+        let names: &[&str] = &["F", "S", "R", "P", "A", "U", "E", "C"];
+        assert_eq!(flags("zz", names), None);
+        assert_eq!(flags("SAzz", names), None);
+        let f = FieldDesc::flags("flags", 0, 8, names);
+        assert!(value_for(&f, "zz").is_none());
+        assert!(matches!(value_for(&f, "SA"), Some(ValueBits::Uint(18))));
     }
 }

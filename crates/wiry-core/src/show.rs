@@ -17,19 +17,58 @@ pub fn render_value(v: &FieldValue) -> String {
 
 /// Names of more than a letter would run together, so a field carrying any of
 /// those separates them with `+`.
-pub fn render_flags(bits: u64, names: &[&str]) -> String {
-    let sep = if names.iter().any(|n| n.chars().count() > 1) {
+fn separator(names: &[&str]) -> &'static str {
+    if names.iter().any(|n| n.chars().count() > 1) {
         "+"
     } else {
         ""
-    };
+    }
+}
+
+pub fn render_flags(bits: u64, names: &[&str]) -> String {
     names
         .iter()
         .enumerate()
-        .filter(|(i, n)| !n.is_empty() && bits & (1 << i) != 0)
+        // A caller-declared `FlagsField` may name more bits than a `u64` holds;
+        // shifting by such an index panics in debug and wraps modulo 64 in
+        // release, printing flags that are not set.
+        .filter(|(i, n)| !n.is_empty() && *i < 64 && bits & (1u64 << i) != 0)
         .map(|(_, n)| *n)
         .collect::<Vec<_>>()
-        .join(sep)
+        .join(separator(names))
+}
+
+/// The inverse of `render_flags`. A name counts only where it appears whole:
+/// matching by substring also sets every bit whose name is contained in
+/// another, so the integer read back would not be the integer on the wire.
+///
+/// `None` where a token names no flag of this field. Reading a typo as zero
+/// builds a packet the caller did not ask for and says nothing about it.
+pub fn flags_from(text: &str, names: &[&str]) -> Option<u64> {
+    let bit = |tok: &str| {
+        if tok.is_empty() {
+            // The empty rendering of no flags at all, or a stray separator.
+            return Some(0);
+        }
+        names
+            .iter()
+            .position(|n| !n.is_empty() && *n == tok)
+            // A name past bit 63 names a bit the field cannot hold.
+            .filter(|i| *i < 64)
+            .map(|i| 1u64 << i)
+    };
+    let mut v = 0u64;
+    if separator(names).is_empty() {
+        let mut buf = [0u8; 4];
+        for c in text.chars() {
+            v |= bit(c.encode_utf8(&mut buf))?;
+        }
+    } else {
+        for tok in text.split('+') {
+            v |= bit(tok)?;
+        }
+    }
+    Some(v)
 }
 
 /// RFC 5952 form.
@@ -136,5 +175,52 @@ mod tests {
         let names: &[&str] = &["MF", "DF", "evil"];
         assert_eq!(render_flags(0b011, names), "MF+DF");
         assert_eq!(render_flags(0b010, names), "DF");
+    }
+
+    #[test]
+    fn more_names_than_a_u64_has_bits_renders_only_the_bits_that_exist() {
+        let owned: Vec<String> = (0..100).map(|i| format!("n{i}")).collect();
+        let names: Vec<&str> = owned.iter().map(String::as_str).collect();
+        assert_eq!(render_flags(1, &names), "n0");
+        assert_eq!(render_flags(u64::MAX, &names).matches('+').count(), 63);
+        assert!(!render_flags(u64::MAX, &names).contains("n64"));
+    }
+
+    #[test]
+    fn a_name_contained_in_another_does_not_set_its_bit() {
+        let names: &[&str] = &["a", "ab", "b"];
+        assert_eq!(flags_from("a", names), Some(0b001));
+        assert_eq!(flags_from("ab", names), Some(0b010));
+        assert_eq!(flags_from("b", names), Some(0b100));
+        assert_eq!(flags_from("a+b", names), Some(0b101));
+    }
+
+    #[test]
+    fn every_flag_string_round_trips() {
+        for names in [
+            &["F", "S", "R", "P", "A"][..],
+            &["MF", "DF", "evil"][..],
+            &["a", "ab", "b"][..],
+            &["", "", "B"][..],
+        ] {
+            for bits in 0..(1u64 << names.len()) {
+                let expect = (0..names.len())
+                    .filter(|i| !names[*i].is_empty() && bits & (1 << i) != 0)
+                    .fold(0u64, |a, i| a | 1 << i);
+                assert_eq!(flags_from(&render_flags(bits, names), names), Some(expect));
+            }
+        }
+    }
+
+    #[test]
+    fn an_unknown_flag_name_is_refused_not_read_as_zero() {
+        let owned: Vec<String> = (0..100).map(|i| format!("n{i}")).collect();
+        let names: Vec<&str> = owned.iter().map(String::as_str).collect();
+        // Named, but past the last bit a u64 has.
+        assert_eq!(flags_from("n64", &names), None);
+        assert_eq!(flags_from("nope", &names), None);
+        assert_eq!(flags_from("", &names), Some(0));
+        assert_eq!(flags_from("zz", &["F", "S", "A"]), None);
+        assert_eq!(flags_from("SAzz", &["F", "S", "A"]), None);
     }
 }

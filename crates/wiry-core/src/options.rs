@@ -64,6 +64,28 @@ pub enum OptArg {
     List(Vec<OptArg>),
 }
 
+/// No real option value nests deeper than a list of pairs, and `num_value`,
+/// `push_addrs` and `flat_bytes` all walk a `List` by recursion, so the shape
+/// is bounded once here rather than guarded in each of them.
+pub const MAX_ARG_DEPTH: usize = 8;
+
+impl OptArg {
+    /// Iterative on purpose: measuring a deep value must not itself overflow
+    /// the stack.
+    pub fn nests_deeper_than(&self, limit: usize) -> bool {
+        let mut stack = vec![(self, 1usize)];
+        while let Some((arg, depth)) = stack.pop() {
+            if depth > limit {
+                return true;
+            }
+            if let OptArg::List(v) = arg {
+                stack.extend(v.iter().map(|e| (e, depth + 1)));
+            }
+        }
+        false
+    }
+}
+
 /// The payload layout of one option, read in both directions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
@@ -217,6 +239,12 @@ impl OptTable {
     /// Resolves a name — or a decimal code for an option this table does not
     /// name — and coerces the value into the shape that name implies.
     pub fn item(&self, name: &str, arg: &OptArg) -> Result<Item, String> {
+        if arg.nests_deeper_than(MAX_ARG_DEPTH) {
+            return Err(format!(
+                "{} option {name:?} value nests more than {MAX_ARG_DEPTH} deep",
+                self.proto
+            ));
+        }
         if let Some(d) = self.by_name(name) {
             return Ok(Item {
                 name: Cow::Borrowed(d.name),
@@ -455,6 +483,32 @@ mod tests {
     fn an_oversized_payload_is_rejected() {
         let long = OptArg::Bytes(vec![0u8; 254]);
         assert!(TLV.build(&[("99", long)]).is_err());
+    }
+
+    fn nested(depth: usize) -> OptArg {
+        (0..depth).fold(OptArg::Uint(1), |a, _| OptArg::List(vec![a]))
+    }
+
+    #[test]
+    fn a_shallow_nested_value_still_encodes() {
+        assert_eq!(
+            TLV.build(&[("MSS", nested(MAX_ARG_DEPTH - 1))]).unwrap(),
+            vec![2, 4, 0, 1]
+        );
+    }
+
+    #[test]
+    fn a_deeply_nested_value_is_rejected_not_recursed() {
+        let deep = nested(MAX_ARG_DEPTH + 1);
+        assert!(deep.nests_deeper_than(MAX_ARG_DEPTH));
+        assert!(TLV.build(&[("MSS", deep)]).is_err());
+        assert!(TLV.build(&[("99", nested(MAX_ARG_DEPTH * 10))]).is_err());
+    }
+
+    #[test]
+    fn a_wide_but_shallow_value_is_accepted() {
+        let wide = OptArg::List((0..1000).map(|_| OptArg::Uint(1)).collect());
+        assert!(!wide.nests_deeper_than(MAX_ARG_DEPTH));
     }
 
     fn sample(shape: Shape) -> Vec<u8> {

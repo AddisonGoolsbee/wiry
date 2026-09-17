@@ -16,7 +16,7 @@ use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PySequence};
 use std::sync::Arc;
 use wiry_capture::Flow;
 use wiry_core::field::{self, FieldDesc, FieldKind, FieldValue};
-use wiry_core::options::OptArg;
+use wiry_core::options::{Item, OptArg};
 use wiry_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use wiry_core::pcap;
 use wiry_core::proto::{self, ProtoId};
@@ -137,6 +137,40 @@ fn decode_span(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<FieldValue> {
     f.is_active(hdr).then(|| field::decode(hdr, f))
 }
 
+/// The named item list a per-packet `.options` read returns. A bulk read of
+/// the same field has to answer with this and not the raw region, which the
+/// facade already exposes separately as `raw_options()`.
+fn parsed_options(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<Vec<Item>> {
+    if f.name != "options" {
+        return None;
+    }
+    let parse = proto::desc(s.proto).parse_options?;
+    let a = (s.off as usize).min(buf.len());
+    let b = (a + s.hlen as usize).min(buf.len());
+    Some(parse(&buf[a..b]))
+}
+
+fn options_to_py(py: Python<'_>, items: &[Item]) -> PyResult<Py<PyList>> {
+    use wiry_core::options::ItemValue;
+    let out = PyList::empty_bound(py);
+    for it in items {
+        let v: PyObject = match &it.value {
+            ItemValue::Flag => py.None(),
+            ItemValue::Uint(n) => n.into_py(py),
+            ItemValue::Pair(a, b) => (*a, *b).into_py(py),
+            ItemValue::Bytes(b) => PyBytes::new_bound(py, b).into(),
+            ItemValue::Text(s) => s.into_py(py),
+            ItemValue::Ipv4List(l) => l
+                .iter()
+                .map(|a| format!("{}.{}.{}.{}", a[0], a[1], a[2], a[3]))
+                .collect::<Vec<_>>()
+                .into_py(py),
+        };
+        out.append((it.name.as_ref(), v))?;
+    }
+    Ok(out.unbind())
+}
+
 fn raw_bytes(v: &FieldValue) -> Option<&[u8]> {
     match v {
         FieldValue::Ipv4(b) => Some(b),
@@ -212,6 +246,18 @@ enum Cell {
     Null,
     Val(FieldValue),
     Time(f64),
+    Opts(Vec<Item>),
+}
+
+impl Cell {
+    fn into_py_value(self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(match self {
+            Cell::Null => py.None(),
+            Cell::Val(v) => value_to_py(py, &v),
+            Cell::Time(t) => t.into_py(py),
+            Cell::Opts(items) => options_to_py(py, &items)?.into_py(py),
+        })
+    }
 }
 
 #[pyclass(name = "Pkt")]
@@ -260,12 +306,20 @@ impl PyPkt {
     }
 
     fn set_field(&mut self, layer: usize, name: &str, val: u64) -> PyResult<()> {
-        if !self.inner.set_uint(layer, name, val) {
-            return Err(PyKeyError::new_err(format!(
-                "no field {name:?} in layer {layer}"
+        if self.inner.set_uint(layer, name, val) {
+            return Ok(());
+        }
+        // `set_uint` says only yes or no, and a value too wide for the field
+        // fails the same way an unknown name does. Tell them apart, or an
+        // out-of-range write reports a field that plainly exists as missing.
+        if !self.inner.uint_fits(layer, name, val) {
+            return Err(PyValueError::new_err(format!(
+                "{val} does not fit field {name:?} in layer {layer}"
             )));
         }
-        Ok(())
+        Err(PyKeyError::new_err(format!(
+            "no field {name:?} in layer {layer}"
+        )))
     }
 
     fn set_field_str(&mut self, layer: usize, name: &str, val: &str) -> PyResult<()> {
@@ -311,25 +365,8 @@ impl PyPkt {
     /// `None` means the protocol has no option region at all, unlike an empty
     /// list, which means it has one and it is empty.
     fn options(&self, py: Python<'_>, layer: usize) -> Option<Py<PyList>> {
-        use wiry_core::options::ItemValue;
         let items = self.inner.options(layer)?;
-        let out = PyList::empty_bound(py);
-        for it in &items {
-            let v: PyObject = match &it.value {
-                ItemValue::Flag => py.None(),
-                ItemValue::Uint(n) => n.into_py(py),
-                ItemValue::Pair(a, b) => (*a, *b).into_py(py),
-                ItemValue::Bytes(b) => PyBytes::new_bound(py, b).into(),
-                ItemValue::Text(s) => s.into_py(py),
-                ItemValue::Ipv4List(l) => l
-                    .iter()
-                    .map(|a| format!("{}.{}.{}.{}", a[0], a[1], a[2], a[3]))
-                    .collect::<Vec<_>>()
-                    .into_py(py),
-            };
-            out.append((it.name.as_ref(), v)).ok()?;
-        }
-        Some(out.unbind())
+        options_to_py(py, &items).ok()
     }
 
     fn dns_records(&self, py: Python<'_>, layer: usize) -> PyResult<Option<PyObject>> {
@@ -596,24 +633,28 @@ impl PyPktList {
         let idx = self.index.clone();
         let link = self.link;
         let fname = field.to_string();
+        let parses_options = field == "options" && proto::desc(id).parse_options.is_some();
 
-        let collected: Vec<Option<FieldValue>> = py.allow_threads(move || {
+        let collected: Vec<Cell> = py.allow_threads(move || {
             idx.iter()
                 .map(|(off, len, _, _)| {
                     let a = *off;
                     let b = a + *len as usize;
                     let pkt = CorePacket::dissect(buf[a..b].to_vec(), link);
-                    pkt.find_layer(id).and_then(|l| pkt.get(l, &fname))
+                    let Some(l) = pkt.find_layer(id) else {
+                        return Cell::Null;
+                    };
+                    match parses_options.then(|| pkt.options(l)).flatten() {
+                        Some(items) => Cell::Opts(items),
+                        None => pkt.get(l, &fname).map_or(Cell::Null, Cell::Val),
+                    }
                 })
                 .collect()
         });
 
         let out = PyList::empty_bound(py);
-        for v in &collected {
-            match v {
-                Some(v) => out.append(value_to_py(py, v))?,
-                None => out.append(py.None())?,
-            }
+        for v in collected {
+            out.append(v.into_py_value(py)?)?;
         }
         Ok(out.unbind())
     }
@@ -665,7 +706,10 @@ impl PyPktList {
                             Cell::Val(FieldValue::Uint(nums.map_or(row as u64, |n| n[row] as u64)))
                         }
                         ColSpec::Field(id, f) => match spans.iter().find(|s| s.proto == *id) {
-                            Some(s) => decode_span(bytes, s, f).map_or(Cell::Null, Cell::Val),
+                            Some(s) => match parsed_options(bytes, s, f) {
+                                Some(items) => Cell::Opts(items),
+                                None => decode_span(bytes, s, f).map_or(Cell::Null, Cell::Val),
+                            },
                             None => Cell::Null,
                         },
                     });
@@ -675,14 +719,10 @@ impl PyPktList {
         });
 
         let out = PyList::empty_bound(py);
-        for col in &cols {
+        for col in cols {
             let l = PyList::empty_bound(py);
             for cell in col {
-                match cell {
-                    Cell::Null => l.append(py.None())?,
-                    Cell::Val(v) => l.append(value_to_py(py, v))?,
-                    Cell::Time(t) => l.append(*t)?,
-                }
+                l.append(cell.into_py_value(py)?)?;
             }
             out.append(l)?;
         }
@@ -902,6 +942,15 @@ impl FromPyObject<'_> for OptArgIn {
 }
 
 fn opt_arg(ob: &Bound<'_, PyAny>) -> PyResult<OptArg> {
+    opt_arg_at(ob, 1)
+}
+
+/// A Python sequence can hold itself, and a nested one can be arbitrarily
+/// deep, so descending it without a bound overflows the stack — a SIGSEGV the
+/// interpreter cannot catch, not a Python exception. The bound is the option
+/// crate's, since it is what `num_value`, `push_addrs` and `flat_bytes` then
+/// recurse over.
+fn opt_arg_at(ob: &Bound<'_, PyAny>, depth: usize) -> PyResult<OptArg> {
     if ob.is_none() {
         return Ok(OptArg::Flag);
     }
@@ -918,9 +967,16 @@ fn opt_arg(ob: &Bound<'_, PyAny>) -> PyResult<OptArg> {
         return Ok(OptArg::Uint(n));
     }
     if let Ok(seq) = ob.downcast::<PySequence>() {
-        let mut out = Vec::with_capacity(seq.len()?);
-        for i in 0..seq.len()? {
-            out.push(opt_arg(&seq.get_item(i)?)?);
+        if depth >= wiry_core::options::MAX_ARG_DEPTH {
+            return Err(PyValueError::new_err(format!(
+                "option value nests more than {} deep",
+                wiry_core::options::MAX_ARG_DEPTH
+            )));
+        }
+        let n = seq.len()?;
+        let mut out = Vec::with_capacity(n.min(1024));
+        for i in 0..n {
+            out.push(opt_arg_at(&seq.get_item(i)?, depth + 1)?);
         }
         return Ok(OptArg::List(out));
     }
@@ -941,6 +997,16 @@ fn make_stack(names: &[String], opts: &[OptEntry]) -> PyResult<Vec<(ProtoId, Opt
         stack.push((id, (!region.is_empty()).then_some(region)));
     }
     Ok(stack)
+}
+
+/// IPv4's `ihl` and TCP's `dataofs` — the two `set_hlen` writers — count 32-bit
+/// words in four bits, so the whole header is at most 15 words. A longer option
+/// region would be emitted under a header length taken modulo 16, which is a
+/// lie of the same kind `compute::oversize` refuses to tell about IPv4 length.
+fn option_region_limit(id: ProtoId) -> Option<usize> {
+    let d = proto::desc(id);
+    d.set_hlen
+        .map(|_| (15 * 4usize).saturating_sub(d.build_len))
 }
 
 fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u8>> {
@@ -968,6 +1034,19 @@ fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u
             .opt_table
             .expect("named items imply a table");
         out.extend_from_slice(&table.encode(&named).map_err(PyValueError::new_err)?);
+    }
+    if let Some(max) = option_region_limit(id) {
+        // `build_with` pads the region to a whole word before writing the
+        // header length, so the padding counts against the limit too.
+        let padded = out.len().div_ceil(4) * 4;
+        if padded > max {
+            let d = proto::desc(id);
+            return Err(PyValueError::new_err(format!(
+                "{} options are {} octets; the header length field holds at most {max}",
+                d.name,
+                out.len()
+            )));
+        }
     }
     Ok(out)
 }
@@ -1014,6 +1093,11 @@ fn apply_fields(
 ) -> PyResult<()> {
     for (layer, name, v) in ints {
         if !pkt.set_uint(*layer, name, *v) {
+            if !pkt.uint_fits(*layer, name, *v) {
+                return Err(PyValueError::new_err(format!(
+                    "{v} does not fit field {name:?} in layer {layer}"
+                )));
+            }
             return Err(PyKeyError::new_err(format!(
                 "no field {name:?} in layer {layer}"
             )));
@@ -1180,6 +1264,12 @@ fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
                 "{name}.{fname} is {bit_len} bits; an integer field holds at most 64"
             )));
         }
+        if kind == FieldKind::Flags && flag_names.len() > bit_len as usize {
+            return Err(PyValueError::new_err(format!(
+                "{name}.{fname} is {bit_len} bits but names {} flags",
+                flag_names.len()
+            )));
+        }
         if kind == FieldKind::LeUint && bit_len / 8 * 8 != bit_len {
             return Err(PyValueError::new_err(format!(
                 "{name}.{fname} is little-endian and must be a whole number of bytes"
@@ -1294,7 +1384,48 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::Record;
+    use super::*;
+
+    fn region(layer: &str, opts: &[(Option<&str>, OptArg)]) -> PyResult<Vec<u8>> {
+        let id = proto::by_name(layer).expect("known layer");
+        let entries: Vec<OptEntry> = opts
+            .iter()
+            .map(|(n, a)| (0usize, n.map(str::to_string), OptArgIn(a.clone())))
+            .collect();
+        option_region(id, 0, &entries)
+    }
+
+    #[test]
+    fn only_the_four_bit_header_lengths_cap_their_option_region() {
+        assert_eq!(option_region_limit(ProtoId::Ipv4), Some(40));
+        assert_eq!(option_region_limit(ProtoId::Tcp), Some(40));
+        assert_eq!(option_region_limit(ProtoId::Udp), None);
+        assert_eq!(option_region_limit(ProtoId::Dhcp), None);
+    }
+
+    #[test]
+    fn a_raw_option_region_the_header_length_cannot_describe_is_refused() {
+        for layer in ["IP", "TCP"] {
+            let ok = OptArg::Bytes(vec![1u8; 40]);
+            assert!(region(layer, &[(None, ok)]).is_ok(), "{layer} 40");
+            // 41 octets pad to 44, which is 11 words and wraps the field to 0.
+            let over = OptArg::Bytes(vec![1u8; 41]);
+            assert!(region(layer, &[(None, over)]).is_err(), "{layer} 41");
+        }
+    }
+
+    #[test]
+    fn a_named_option_list_is_capped_the_same_way() {
+        let nops: Vec<_> = (0..44).map(|_| (Some("NOP"), OptArg::Flag)).collect();
+        assert!(region("TCP", &nops).is_err());
+        assert!(region("TCP", &nops[..40]).is_ok());
+    }
+
+    #[test]
+    fn a_protocol_without_a_header_length_field_takes_a_long_region() {
+        let long = OptArg::Bytes(vec![0u8; 400]);
+        assert!(region("DHCP", &[(None, long)]).is_ok());
+    }
 
     #[test]
     fn a_record_offset_past_four_gibibytes_is_not_truncated() {

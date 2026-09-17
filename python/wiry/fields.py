@@ -189,7 +189,9 @@ class FlagsField(Field):
     def spec(self) -> tuple:
         v = self.default
         if isinstance(v, str):
-            v = sum(1 << i for i, n in enumerate(self.names) if n and n in v)
+            from . import _bits_from
+
+            v = _bits_from(v, self.names)
         return (self.name, self.size, self.kind, int(v or 0), None, list(self.names))
 
 
