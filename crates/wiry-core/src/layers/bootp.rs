@@ -250,8 +250,7 @@ mod tests {
         let got: Vec<_> = p.layers().iter().map(|s| s.proto).collect();
         assert_eq!(got, vec![ProtoId::Udp, ProtoId::Bootp, ProtoId::Dhcp]);
 
-        // RFC 2131 §3: the cookie closes the BOOTP option area and DHCP starts
-        // at the first option.
+        // RFC 2131 §3: the cookie closes BOOTP's option area.
         let b = p.find_layer(ProtoId::Bootp).unwrap();
         assert_eq!(
             p.get(b, "options").unwrap(),

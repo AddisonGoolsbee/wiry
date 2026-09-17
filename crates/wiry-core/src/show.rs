@@ -216,8 +216,11 @@ mod tests {
     fn an_unknown_flag_name_is_refused_not_read_as_zero() {
         let owned: Vec<String> = (0..100).map(|i| format!("n{i}")).collect();
         let names: Vec<&str> = owned.iter().map(String::as_str).collect();
-        // Named, but past the last bit a u64 has.
-        assert_eq!(flags_from("n64", &names), None);
+        assert_eq!(
+            flags_from("n64", &names),
+            None,
+            "named, but past the last bit a u64 has"
+        );
         assert_eq!(flags_from("nope", &names), None);
         assert_eq!(flags_from("", &names), Some(0));
         assert_eq!(flags_from("zz", &["F", "S", "A"]), None);

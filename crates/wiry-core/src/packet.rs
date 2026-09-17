@@ -253,9 +253,9 @@ impl Packet {
         let Some(f) = crate::proto::active_field_of(s.proto, self.header(layer), name) else {
             return false;
         };
-        // A conditional field can be declared past the end of a header this
-        // short: ICMP's timestamps sit at byte 16 of an 8-byte minimum message.
-        // Clamping refuses the write instead of panicking, as `write_bits` does.
+        // A conditional field can be declared past the end of a header this short
+        // (ICMP timestamps at byte 16 of an 8-octet message), so clamp rather than
+        // panic, as `write_bits` does.
         let a = (s.off as usize + (f.bit_off / 8) as usize).min(self.buf.len());
         // A variable-length field has no width of its own, so writing one
         // resizes its region rather than running over what follows.
@@ -298,9 +298,8 @@ impl Packet {
         } else {
             0
         };
-        // Bytes a stacked layer contributed to this header (BOOTP's magic
-        // cookie) are appended after the field at build time, so they follow
-        // the new content rather than being written over.
+        // Bytes a stacked layer contributed (BOOTP's magic cookie) are appended
+        // after the field at build time, so they follow the new content.
         let tail: &'static [u8] = match (d.bind_next_bytes, self.spans.get(layer + 1)) {
             (Some(f), Some(n)) => f(n.proto),
             _ => &[],
@@ -692,7 +691,6 @@ mod tests {
         assert_eq!(p.to_bytes().len(), before.len() + 4);
         assert_eq!(p.get(ip, "len").unwrap(), FieldValue::Uint(44));
 
-        // And back out again.
         assert!(p.set_bytes(ip, "options", &[]));
         assert_eq!(p.get(ip, "ihl").unwrap(), FieldValue::Uint(5));
         assert_eq!(p.get(tcp, "sport").unwrap(), ports.0);
@@ -768,14 +766,16 @@ mod tests {
         assert_eq!(p.get(0, "ttl").unwrap(), FieldValue::Uint(255));
         assert!(p.uint_fits(0, "ttl", 255));
         assert!(!p.uint_fits(0, "ttl", 256));
-        // A name the layer does not carry is not a range failure.
-        assert!(p.uint_fits(0, "nosuchfield", u64::MAX));
+        assert!(
+            p.uint_fits(0, "nosuchfield", u64::MAX),
+            "a name the layer does not carry is not a range failure"
+        );
     }
 
     #[test]
     fn a_sub_octet_field_still_takes_the_bits_that_fit() {
-        // IEEE 802.1Q clause 9.6: a 12-bit VID, which masks rather than
-        // refusing, as the API being matched does.
+        // IEEE 802.1Q clause 9.6: a 12-bit VID, masked rather than refused, as
+        // the API being matched does.
         let mut p = Packet::build(&[ProtoId::Ether, ProtoId::Dot1Q]);
         assert!(p.set_uint(1, "vlan", 5000));
         assert_eq!(p.get(1, "vlan").unwrap(), FieldValue::Uint(5000 & 0xfff));
@@ -791,8 +791,8 @@ mod tests {
 
     #[test]
     fn rewriting_an_option_region_with_what_it_holds_changes_nothing() {
-        // Construction appends the blob and then writes the field, so the
-        // second write must land on exactly what the first one built.
+        // Construction appends the blob then writes the field: the second write
+        // must land on exactly what the first one built.
         let opts = vec![0x94u8, 4, 0, 0];
         let stack = [(ProtoId::Ipv4, Some(opts.clone())), (ProtoId::Tcp, None)];
         let built = Packet::build_with(&stack).to_bytes().to_vec();

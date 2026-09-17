@@ -184,15 +184,21 @@ mod tests {
     #[test]
     fn nothing_that_is_not_an_ipv4_datagram_yields_a_destination() {
         let ip = ip4([10, 0, 0, 1], [10, 0, 0, 2], &[0u8; 20]);
-        // An Ethernet frame: the single likeliest send()/sendp() mix-up.
         let mut ether = vec![0u8; 12];
         ether.extend_from_slice(&[0x08, 0x00]);
         ether.extend_from_slice(&ip);
-        assert_eq!(ipv4_dst(&ether), None);
-        // An IPv6 datagram: the version nibble is the whole of the difference.
+        assert_eq!(
+            ipv4_dst(&ether),
+            None,
+            "an Ethernet frame: the likeliest send()/sendp() mix-up"
+        );
         let mut six = vec![0x60, 0, 0, 0, 0, 20, 6, 64];
         six.extend_from_slice(&[0u8; 32]);
-        assert_eq!(ipv4_dst(&six), None);
+        assert_eq!(
+            ipv4_dst(&six),
+            None,
+            "an IPv6 datagram: the version nibble is the whole of the difference"
+        );
         for junk in [
             b"this is not a packet at all!!".to_vec(),
             vec![0u8; 20],
@@ -213,17 +219,26 @@ mod tests {
             bad[0] = ihl;
             assert_eq!(ipv4_dst(&bad), None, "ihl nibble {ihl:#x}");
         }
-        // A total length claiming more than was handed in.
         let mut long = good.clone();
         long[2] = 0xff;
-        assert_eq!(ipv4_dst(&long), None);
-        // ...and one that undercuts its own header.
+        assert_eq!(
+            ipv4_dst(&long),
+            None,
+            "a total length claiming more than was handed in"
+        );
         let mut short = good.clone();
         short[2] = 0;
         short[3] = 10;
-        assert_eq!(ipv4_dst(&short), None);
-        // Truncated below the header it declares.
-        assert_eq!(ipv4_dst(&good[..19]), None);
+        assert_eq!(
+            ipv4_dst(&short),
+            None,
+            "a total length undercutting its own header"
+        );
+        assert_eq!(
+            ipv4_dst(&good[..19]),
+            None,
+            "truncated below the header it declares"
+        );
     }
 }
 

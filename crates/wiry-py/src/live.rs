@@ -523,10 +523,10 @@ impl Drop for LiveSniffer {
         let Some(t) = self.thread.take() else { return };
         let done = Arc::clone(&self.done);
         Python::with_gil(|py| {
-            // Sliced, so a signal arriving while a wedged `prn` is being waited
-            // out still runs its Python handler. The wait itself cannot be
-            // abandoned: a capture thread outliving the interpreter is the
-            // segfault this whole impl exists to prevent.
+            // Sliced so a signal arriving while a wedged `prn` is waited out still
+            // runs its Python handler. The wait itself must never be abandoned: a
+            // capture thread outliving the interpreter is the segfault this exists
+            // to prevent.
             let mut signal: Option<PyErr> = None;
             while !py.allow_threads(|| done.wait_for(SLICE)) {
                 if let Err(e) = py.check_signals() {
@@ -856,8 +856,10 @@ mod tests {
         offer(&mut ex, ip4(10, B, A, &echo(0, 0x1234, 1)));
         assert_eq!(ex.pairs, vec![(0, 0), (0, 1)]);
         assert_eq!(ex.out.len(), 2);
-        // The wait runs to the deadline however many answers have landed.
-        assert!(!ex.settled());
+        assert!(
+            !ex.settled(),
+            "multi= waits to the deadline however many answers have landed"
+        );
     }
 
     #[test]

@@ -121,9 +121,8 @@ fn exercise(pkt: &mut Packet, what: &str) {
             let _ = show::render_value(&v);
             let _ = v.as_uint();
             // A lookup by name answers with the field this header carries, so
-            // compare only when that resolves back to this one: a false
-            // condition, or another field sharing the name under a disjoint
-            // condition (ICMP), both give a different answer.
+            // compare only when that resolves back to this one: a false condition,
+            // or an ICMP name shared under a disjoint one, answer differently.
             if proto::active_field_of(proto, pkt.header(i), f.name)
                 .is_some_and(|a| std::ptr::eq(a, f))
             {
@@ -509,26 +508,22 @@ fn ptr(target: usize) -> [u8; 2] {
 fn dns_adversarial_compression_pointers_terminate() {
     let mut cases: Vec<(&str, Vec<u8>)> = Vec::new();
 
-    // Self-referential: 12 -> 12.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&ptr(12));
     m.extend_from_slice(&[0, 1, 0, 1]);
     cases.push(("self-referential", m));
 
-    // Mutually referential: 12 -> 14 -> 12.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&ptr(14));
     m.extend_from_slice(&ptr(12));
     m.extend_from_slice(&[0, 1, 0, 1]);
     cases.push(("mutually referential", m));
 
-    // Forward pointer.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&ptr(40));
     m.extend_from_slice(&[0u8; 40]);
     cases.push(("forward", m));
 
-    // Out of bounds.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&ptr(0x3fff));
     m.extend_from_slice(&[0, 1, 0, 1]);
@@ -544,7 +539,7 @@ fn dns_adversarial_compression_pointers_terminate() {
     m.splice(12..14, ptr(last).iter().copied());
     cases.push(("long backwards chain", m));
 
-    // Label/jump alternation: a decompression bomb.
+    // A decompression bomb.
     let mut m = dns_header(1, 0, 0, 0);
     m.extend_from_slice(&[4, b'a', b'a', b'a', b'a']);
     for _ in 0..200 {

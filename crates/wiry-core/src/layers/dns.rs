@@ -612,21 +612,18 @@ mod tests {
 
     #[test]
     fn pointer_loops_terminate() {
-        // (a) a pointer to itself.
         let mut selfptr = header(1, 0, 0, 0);
         selfptr.extend_from_slice(&[0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01]);
-        assert_eq!(read_name(&selfptr, 12), None);
+        assert_eq!(read_name(&selfptr, 12), None, "12 -> 12");
         assert_eq!(parse_records(&selfptr), Records::default());
 
-        // (b) two pointers referencing each other: 12 -> 16 and 16 -> 12.
         let mut mutual = header(1, 0, 0, 0);
         mutual.extend_from_slice(&[0xc0, 0x10, 0x00, 0x00, 0xc0, 0x0c, 0x00, 0x00]);
-        assert_eq!(read_name(&mutual, 12), None);
-        assert_eq!(read_name(&mutual, 16), None);
+        assert_eq!(read_name(&mutual, 12), None, "12 -> 16");
+        assert_eq!(read_name(&mutual, 16), None, "16 -> 12");
         assert_eq!(parse_records(&mutual), Records::default());
 
-        // (c) a long strictly-backwards chain: offset 12 holds the name "a",
-        // each later pointer points at the previous one.
+        // Strictly backwards and so individually legal: only MAX_JUMPS stops it.
         let mut chain = header(0, 0, 0, 0);
         chain.extend_from_slice(&[0x01, b'a', 0x00, 0x00]);
         for k in 0..100usize {
@@ -643,10 +640,9 @@ mod tests {
 
     #[test]
     fn forward_and_out_of_bounds_pointers_are_rejected() {
-        // Forward pointer: at offset 12, pointing to 20.
         let mut fwd = header(1, 0, 0, 0);
         fwd.extend_from_slice(&[0xc0, 0x14, 0x00, 0x00, 0x00, 0x00, 0x01, b'a', 0x00, 0x00]);
-        assert_eq!(read_name(&fwd, 12), None);
+        assert_eq!(read_name(&fwd, 12), None, "12 -> 20, forwards");
 
         let mut oob = header(1, 0, 0, 0);
         oob.extend_from_slice(&[0xc0, 0xff, 0x00, 0x01, 0x00, 0x01]);

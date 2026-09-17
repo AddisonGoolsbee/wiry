@@ -655,8 +655,6 @@ mod tests {
         v.extend_from_slice(&idb(linktype::RAW, Some(9), false));
         v.extend_from_slice(&epb(0, 2_000_500, &[0xa1; 4], 4, false));
         v.extend_from_slice(&epb(1, 2_000_000_500, &[0xa2; 4], 4, false));
-        // Interface 9 was never described, so this block is dropped rather
-        // than decoded under some other interface's link type.
         v.extend_from_slice(&epb(9, 3_000_000, &[0xa3; 4], 4, false));
 
         let r = Reader::new(&v).unwrap();
@@ -667,7 +665,10 @@ mod tests {
         assert_eq!(recs.len(), 2);
         assert_eq!((recs[0].ts_sec, recs[0].ts_frac), (2, 500));
         assert_eq!((recs[1].ts_sec, recs[1].ts_frac), (2, 500));
-        assert!(recs.iter().all(|r| r.data[0] != 0xa3));
+        assert!(
+            recs.iter().all(|r| r.data[0] != 0xa3),
+            "interface 9 was never described, so its block cannot be decoded"
+        );
     }
 
     #[test]

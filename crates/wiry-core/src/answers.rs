@@ -536,15 +536,25 @@ mod tests {
     #[test]
     fn an_echo_reply_with_another_id_seq_or_source_does_not() {
         let sent = ip4_key(1, 0x1234, &echo(types::ECHO_REQUEST, 0xbeef, 7));
-        for wrong in [
-            ip4(1, 9, B, A, &echo(types::ECHO_REPLY, 0xbeee, 7)),
-            ip4(1, 9, B, A, &echo(types::ECHO_REPLY, 0xbeef, 8)),
-            // A third host answering for one it was never asked about.
-            ip4(1, 9, C, A, &echo(types::ECHO_REPLY, 0xbeef, 7)),
-            // Someone pinging us at the same time is not an answer.
-            ip4(1, 9, B, A, &echo(types::ECHO_REQUEST, 0xbeef, 7)),
+        for (wrong, why) in [
+            (
+                ip4(1, 9, B, A, &echo(types::ECHO_REPLY, 0xbeee, 7)),
+                "another id",
+            ),
+            (
+                ip4(1, 9, B, A, &echo(types::ECHO_REPLY, 0xbeef, 8)),
+                "another seq",
+            ),
+            (
+                ip4(1, 9, C, A, &echo(types::ECHO_REPLY, 0xbeef, 7)),
+                "a third host answering for one it was never asked about",
+            ),
+            (
+                ip4(1, 9, B, A, &echo(types::ECHO_REQUEST, 0xbeef, 7)),
+                "someone pinging us at the same time",
+            ),
         ] {
-            assert!(!replies(&sent, wrong, ProtoId::Ipv4));
+            assert!(!replies(&sent, wrong, ProtoId::Ipv4), "{why}");
         }
     }
 
@@ -568,7 +578,6 @@ mod tests {
 
     #[test]
     fn a_time_exceeded_quoting_the_probe_answers_it() {
-        // The traceroute case: a router that dropped the datagram sends this.
         let probe = udp(33434, 33435, b"hop");
         let sent = ip4_key(17, 0xabcd, &probe);
         let quoted = ip4(17, 0xabcd, A, B, &probe);
@@ -585,7 +594,6 @@ mod tests {
             let err = ip4(1, 1, C, A, &icmp_error(ty, &quoted));
             assert!(replies(&sent, err, ProtoId::Ipv4), "type {ty}");
         }
-        // An echo reply is not an error and quotes nothing.
         let not_an_error = ip4(1, 1, C, A, &icmp_error(types::ECHO_REPLY, &quoted));
         assert!(!replies(&sent, not_an_error, ProtoId::Ipv4));
     }
@@ -604,8 +612,7 @@ mod tests {
 
     #[test]
     fn an_error_quoting_a_datagram_answers_whatever_it_carried() {
-        // Even a protocol with no reply rule of its own: DEVIATIONS.md S1
-        // stops at the layers this build knows, but the quote does not.
+        // DEVIATIONS.md S1 stops at the layers this build knows; the quote does not.
         let sent = ip4_key(47, 0x7777, &[0x30, 0x00, 0x88, 0xbe, 0, 0, 0, 1, 0xff]);
         assert_eq!(sent.kind, ReplyKind::Ip);
         let quoted = ip4(
@@ -617,7 +624,6 @@ mod tests {
         );
         let err = ip4(1, 1, C, A, &icmp_error(types::DEST_UNREACH, &quoted));
         assert!(replies(&sent, err, ProtoId::Ipv4));
-        // The same datagram coming back the other way is not an answer.
         let echoed = ip4(
             47,
             0x7777,
@@ -625,7 +631,10 @@ mod tests {
             A,
             &[0x30, 0x00, 0x88, 0xbe, 0, 0, 0, 1, 0xff],
         );
-        assert!(!replies(&sent, echoed, ProtoId::Ipv4));
+        assert!(
+            !replies(&sent, echoed, ProtoId::Ipv4),
+            "the same datagram coming back the other way"
+        );
     }
 
     #[test]
@@ -638,18 +647,29 @@ mod tests {
     #[test]
     fn a_tcp_packet_of_another_conversation_does_not_answer() {
         let sent = ip4_key(6, 1, &tcp(1000, 80, 5, 0, 0b0000_0010, b""));
-        for wrong in [
-            // Same direction, not a reply.
-            ip4(6, 2, A, B, &tcp(1000, 80, 6, 0, 0b0001_0000, b"")),
-            // Right hosts, wrong port.
-            ip4(6, 2, B, A, &tcp(443, 1000, 99, 6, 0b0001_0010, b"")),
-            ip4(6, 2, B, A, &tcp(80, 1001, 99, 6, 0b0001_0010, b"")),
-            // Right ports, wrong host.
-            ip4(6, 2, C, A, &tcp(80, 1000, 99, 6, 0b0001_0010, b"")),
-            // Same pair, different protocol: no fallback on the pair alone.
-            ip4(17, 2, B, A, &udp(80, 1000, b"")),
+        for (wrong, why) in [
+            (
+                ip4(6, 2, A, B, &tcp(1000, 80, 6, 0, 0b0001_0000, b"")),
+                "same direction, not a reply",
+            ),
+            (
+                ip4(6, 2, B, A, &tcp(443, 1000, 99, 6, 0b0001_0010, b"")),
+                "right hosts, wrong sport",
+            ),
+            (
+                ip4(6, 2, B, A, &tcp(80, 1001, 99, 6, 0b0001_0010, b"")),
+                "right hosts, wrong dport",
+            ),
+            (
+                ip4(6, 2, C, A, &tcp(80, 1000, 99, 6, 0b0001_0010, b"")),
+                "right ports, wrong host",
+            ),
+            (
+                ip4(17, 2, B, A, &udp(80, 1000, b"")),
+                "same pair, different protocol: no fallback on the pair alone",
+            ),
         ] {
-            assert!(!replies(&sent, wrong, ProtoId::Ipv4));
+            assert!(!replies(&sent, wrong, ProtoId::Ipv4), "{why}");
         }
     }
 
@@ -743,16 +763,17 @@ mod tests {
         assert!(replies(&sent, good, ProtoId::Ipv4));
         let wrong_id = ip4(17, 2, B, A, &udp(53, 5300, &dns_response(0x1a2c)));
         assert!(!replies(&sent, wrong_id, ProtoId::Ipv4));
-        // A second query with the same id is not the response to the first.
         let another_query = ip4(17, 2, B, A, &udp(53, 5300, &dns(0x1a2b)));
-        assert!(!replies(&sent, another_query, ProtoId::Ipv4));
+        assert!(
+            !replies(&sent, another_query, ProtoId::Ipv4),
+            "a second query with the same id is not the response to the first"
+        );
     }
 
     #[test]
     fn a_dns_response_is_answered_by_nothing() {
-        // The mirror image, and the one that put wrong pairs in a capture of
-        // ordinary traffic: a query flowing the other way looks like a reply
-        // on addresses, ports and id alone.
+        // Once paired wrong pairs in a capture of ordinary traffic: a query
+        // flowing the other way matches on addresses, ports and id alone.
         let sent = key(
             ip4(17, 1, A, B, &udp(53, 5300, &dns_response(0x1a2b))),
             ProtoId::Ipv4,
@@ -794,15 +815,12 @@ mod tests {
         let sent = key(arp(1, A, B), ProtoId::Arp);
         assert_eq!(sent.kind, ReplyKind::Arp { pdst: B });
         assert!(replies(&sent, arp(2, B, A), ProtoId::Arp));
-        for wrong in [
-            // Someone else's address.
-            arp(2, C, A),
-            // A request, not a reply.
-            arp(1, B, A),
+        for (wrong, why) in [
+            (arp(2, C, A), "someone else's address"),
+            (arp(1, B, A), "a request, not a reply"),
         ] {
-            assert!(!replies(&sent, wrong, ProtoId::Arp));
+            assert!(!replies(&sent, wrong, ProtoId::Arp), "{why}");
         }
-        // An ARP reply is not answerable, so it gets no key at all.
         let p = Packet::dissect(arp(2, B, A), ProtoId::Arp);
         assert!(reply_key(p.raw_bytes(), p.layers()).is_none());
     }
@@ -813,22 +831,22 @@ mod tests {
             let p = Packet::dissect(buf, ProtoId::Ether);
             assert!(reply_key(p.raw_bytes(), p.layers()).is_none());
         }
-        // IPv6 carrying neither a transport this knows nor an echo request.
         let six = Packet::dissect(ip6(47, A6, B6, &[0x30, 0x00, 0x88, 0xbe]), ProtoId::Ipv6);
-        assert!(reply_key(six.raw_bytes(), six.layers()).is_none());
+        assert!(
+            reply_key(six.raw_bytes(), six.layers()).is_none(),
+            "IPv6 carrying neither a transport this knows nor an echo request"
+        );
     }
 
     #[test]
     fn an_error_quoting_a_probe_to_another_host_does_not_answer_ours() {
-        // The multi-target sr() case. Every probe wiry builds carries id 1 and
-        // the same eight ICMP octets, so the quoted addresses are the only
-        // thing that tells them apart.
+        // The multi-target sr() case: with id and payload identical across the
+        // batch, the quoted addresses are the only thing telling probes apart.
         let probe = echo(types::ECHO_REQUEST, 0, 0);
         let sent = key(ip4(1, 1, A, B, &probe), ProtoId::Ipv4);
         let theirs = ip4(1, 1, A, C, &probe);
         let err = ip4(1, 55, C, A, &icmp_error(types::TIME_EXCEEDED, &theirs));
         assert!(!replies(&sent, err, ProtoId::Ipv4));
-        // The one quoting our own probe still answers it.
         let ours = ip4(1, 1, A, B, &probe);
         let good = ip4(1, 55, C, A, &icmp_error(types::TIME_EXCEEDED, &ours));
         assert!(replies(&sent, good, ProtoId::Ipv4));
@@ -836,8 +854,6 @@ mod tests {
 
     #[test]
     fn an_error_quoting_someone_elses_datagram_does_not_answer_ours() {
-        // sr opens the handle promiscuously, so an error for a conversation
-        // that is nothing to do with us is on the wire to be mismatched.
         let probe = udp(33434, 33435, b"hop");
         let sent = ip4_key(17, 0xabcd, &probe);
         let strangers = ip4(17, 0xabcd, C, B, &probe);
@@ -847,8 +863,8 @@ mod tests {
 
     #[test]
     fn an_error_quoting_an_empty_datagram_still_needs_the_right_addresses() {
-        // With no transport octets to compare, `head` is empty and matches
-        // anything; the addresses are then the whole of the discrimination.
+        // `head` is empty here and matches anything, leaving the addresses as
+        // the whole of the discrimination.
         let sent = key(ip4(1, 1, A, B, &[]), ProtoId::Ipv4);
         let ours = ip4(1, 1, A, B, &[]);
         let theirs = ip4(1, 1, A, C, &[]);
@@ -868,7 +884,6 @@ mod tests {
     fn an_error_quoting_another_protocol_does_not_answer() {
         let probe = udp(33434, 33435, b"hop");
         let sent = ip4_key(17, 0xabcd, &probe);
-        // Same addresses, same id, same first eight octets, other protocol.
         let mut quoted = ip4(6, 0xabcd, A, B, &probe);
         quoted[9] = 6;
         let err = ip4(1, 1, C, A, &icmp_error(types::TIME_EXCEEDED, &quoted));
@@ -886,13 +901,17 @@ mod tests {
     fn an_icmpv6_echo_reply_addressed_elsewhere_does_not_answer_ours() {
         const C6: [u8; 16] = [0x20, 1, 0xd, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3];
         let sent = key(ip6(58, A6, B6, &echo(128, 0x4242, 3)), ProtoId::Ipv6);
-        for wrong in [
-            // Addressed to a third party, overheard promiscuously.
-            ip6(58, B6, C6, &echo(129, 0x4242, 3)),
-            // From a host we never asked.
-            ip6(58, C6, A6, &echo(129, 0x4242, 3)),
+        for (wrong, why) in [
+            (
+                ip6(58, B6, C6, &echo(129, 0x4242, 3)),
+                "addressed to a third party, overheard promiscuously",
+            ),
+            (
+                ip6(58, C6, A6, &echo(129, 0x4242, 3)),
+                "from a host we never asked",
+            ),
         ] {
-            assert!(!replies(&sent, wrong, ProtoId::Ipv6));
+            assert!(!replies(&sent, wrong, ProtoId::Ipv6), "{why}");
         }
     }
 
@@ -916,8 +935,8 @@ mod tests {
     fn truncation_anywhere_neither_panics_nor_matches_by_accident() {
         let sent = ip4_key(1, 0x1234, &echo(types::ECHO_REQUEST, 0xbeef, 7));
         let reply = ip4(1, 9, B, A, &echo(types::ECHO_REPLY, 0xbeef, 7));
-        // The ICMP header ends at octet 28; a clipped capture that keeps it
-        // still identifies the reply, and one that does not cannot.
+        // The ICMP id and seq end at octet 28, so that is where a clipped
+        // capture starts identifying the reply.
         for cut in 0..=reply.len() {
             let p = Packet::dissect(reply[..cut].to_vec(), ProtoId::Ipv4);
             assert_eq!(
@@ -927,8 +946,7 @@ mod tests {
             );
             let _ = reply_key(p.raw_bytes(), p.layers());
         }
-        // RFC 792 quotes the header plus 64 bits, and that is exactly the
-        // point at which a clipped quote becomes enough to match.
+        // RFC 792 quotes the header plus 64 bits: octet 28 again.
         let probe = udp(33434, 33435, b"hop");
         let quoted = ip4(17, 0xabcd, A, B, &probe);
         let sent_udp = ip4_key(17, 0xabcd, &probe);
