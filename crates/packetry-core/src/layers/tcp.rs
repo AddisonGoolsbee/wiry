@@ -1,7 +1,7 @@
 //! TCP header layout from RFC 9293 §3.1.
 
 use crate::field::FieldDesc;
-use crate::options::{be, fixed_uint, walk_tlv, Item};
+use crate::options::{Item, LenRule, OptDesc, OptTable, Shape};
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
 /// Control bits, least significant first. The ninth, NS (RFC 3540), takes the
@@ -52,38 +52,31 @@ pub mod optkind {
 }
 
 /// RFC 9293 §3.1: kinds 0 and 1 are a single octet with no length field.
-const SINGLE_BYTE: &[u8] = &[optkind::EOL, optkind::NOP];
-
-fn decode(kind: u8, payload: &[u8]) -> Item {
-    match kind {
-        // Unreachable while EOL is the walk's end code.
-        optkind::EOL => Item::flag("EOL", optkind::EOL as u32),
-        optkind::NOP => Item::flag("NOP", optkind::NOP as u32),
-        optkind::MSS => fixed_uint("MSS", kind, payload, 2),
-        optkind::WSCALE => fixed_uint("WScale", kind, payload, 1),
-        optkind::SACKOK => Item::flag("SAckOK", optkind::SACKOK as u32),
+pub static OPTIONS: OptTable = OptTable {
+    proto: "TCP",
+    rule: LenRule::WithHeader,
+    end: Some(optkind::EOL),
+    opts: &[
+        OptDesc::new("EOL", optkind::EOL, Shape::Bare),
+        OptDesc::new("NOP", optkind::NOP, Shape::Bare),
+        OptDesc::new("MSS", optkind::MSS, Shape::Uint(2)),
+        OptDesc::new("WScale", optkind::WSCALE, Shape::Uint(1)),
+        OptDesc::new("SAckOK", optkind::SACKOK, Shape::Empty),
         // RFC 2018 §3 edge pairs, left unstructured.
-        optkind::SACK => Item::bytes("SAck", kind as u32, payload),
-        optkind::TIMESTAMP if payload.len() == 8 => Item::pair(
-            "Timestamp",
-            kind as u32,
-            be(&payload[..4]),
-            be(&payload[4..]),
-        ),
-        optkind::TIMESTAMP => Item::bytes("Timestamp", kind as u32, payload),
-        optkind::UTO => fixed_uint("UTO", kind, payload, 2),
-        optkind::AO => Item::bytes("AO", kind as u32, payload),
-        optkind::TFO => Item::bytes("TFO", kind as u32, payload),
-        _ => Item::unknown(kind as u32, payload),
-    }
-}
+        OptDesc::new("SAck", optkind::SACK, Shape::Bytes),
+        OptDesc::new("Timestamp", optkind::TIMESTAMP, Shape::Pair),
+        OptDesc::new("UTO", optkind::UTO, Shape::Uint(2)),
+        OptDesc::new("AO", optkind::AO, Shape::Bytes),
+        OptDesc::new("TFO", optkind::TFO, Shape::Bytes),
+    ],
+};
 
 fn parse_options(hdr: &[u8]) -> Vec<Item> {
     let end = header_len(hdr).min(hdr.len());
     if end <= 20 {
         return Vec::new();
     }
-    walk_tlv(&hdr[20..end], SINGLE_BYTE, Some(optkind::EOL), decode)
+    OPTIONS.walk(&hdr[20..end])
 }
 
 /// RFC 9293 §3.1: Data Offset counts 32-bit words.
@@ -102,6 +95,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     next,
     build_len: 20,
     parse_options: Some(parse_options),
+    opt_table: Some(&OPTIONS),
     set_hlen: Some(set_hlen),
     bind_next: None,
     bind_next_bytes: None,
@@ -112,7 +106,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
 mod tests {
     use super::*;
     use crate::field::FieldValue;
-    use crate::options::ItemValue;
+    use crate::options::{ItemValue, OptArg};
     use crate::packet::Packet;
 
     /// MSS, SAckOK, Timestamp, NOP, Window Scale: RFC 9293 §3.1, RFC 2018 §2,
@@ -264,6 +258,47 @@ mod tests {
         assert_eq!(items[1], Item::uint("UTO", 28, 0x800a));
         assert_eq!(items[2], Item::bytes("AO", 29, &[0xaa, 0xbb]));
         assert_eq!(items[3], Item::bytes("TFO", 34, &[0xc0, 0xff]));
+    }
+
+    #[test]
+    fn encodes_a_syn_option_block() {
+        let got = OPTIONS
+            .build(&[
+                ("MSS", OptArg::Uint(1460)),
+                ("SAckOK", OptArg::Flag),
+                (
+                    "Timestamp",
+                    OptArg::List(vec![OptArg::Uint(1), OptArg::Uint(2)]),
+                ),
+                ("NOP", OptArg::Flag),
+                ("WScale", OptArg::Uint(7)),
+            ])
+            .unwrap();
+        assert_eq!(got, SYN_OPTS);
+    }
+
+    #[test]
+    fn single_byte_kinds_carry_no_length_octet() {
+        assert_eq!(
+            OPTIONS
+                .build(&[("NOP", OptArg::Flag), ("EOL", OptArg::Flag)])
+                .unwrap(),
+            vec![1, 0]
+        );
+        // RFC 2018 §2: SAckOK has an empty payload but keeps its length octet.
+        assert_eq!(
+            OPTIONS.build(&[("SAckOK", OptArg::Flag)]).unwrap(),
+            vec![4, 2]
+        );
+    }
+
+    #[test]
+    fn a_decimal_name_encodes_as_that_kind() {
+        let got = OPTIONS
+            .build(&[("31", OptArg::Bytes(vec![0xaa, 0xbb]))])
+            .unwrap();
+        assert_eq!(got, vec![0x1f, 0x04, 0xaa, 0xbb]);
+        assert!(OPTIONS.build(&[("NoSuchOption", OptArg::Uint(1))]).is_err());
     }
 
     #[test]

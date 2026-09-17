@@ -3,8 +3,7 @@
 //! `fuzz/src/lib.rs`, with deterministic inputs so it runs under `cargo test`;
 //! the two sets of assertions must stay in step.
 
-use packetry_core::layers::dns;
-use packetry_core::options::{self, Item};
+use packetry_core::layers::{bootp, dns, ipv4, tcp};
 use packetry_core::packet::Packet;
 use packetry_core::proto::{self, desc, ProtoId};
 use packetry_core::{parse, pcap, pcapng, show};
@@ -639,18 +638,17 @@ fn option_regions_never_hang_or_over_read() {
     }
 
     for (i, data) in fixed.iter().enumerate() {
-        for single in [&[0u8, 1u8][..], &[][..]] {
-            for end in [None, Some(0u8), Some(255u8)] {
-                let items = options::walk_tlv(data, single, end, |c, p| {
-                    Item::uint("o", c as u32, p.iter().map(|b| *b as u64).sum())
-                });
-                // Every item consumes an octet, so a non-advancing walk trips
-                // this rather than hanging.
-                assert!(
-                    items.len() <= data.len(),
-                    "walk_tlv emitted more items than octets (#{i}, seed {SEED:#x})"
-                );
-            }
+        for table in [&tcp::OPTIONS, &ipv4::OPTIONS, &bootp::DHCP_OPTIONS] {
+            let items = table.walk(data);
+            // Every item consumes an octet, so a non-advancing walk trips this
+            // rather than hanging.
+            assert!(
+                items.len() <= data.len(),
+                "{} walk emitted more items than octets (#{i}, seed {SEED:#x})",
+                table.proto
+            );
+            // Re-encoding anything a walk produced must fail, not panic.
+            let _ = table.encode(&items);
         }
 
         let mut pkt = Packet::build_with(&[(ProtoId::Tcp, Some(data.clone()))]);

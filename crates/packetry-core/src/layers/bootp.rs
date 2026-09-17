@@ -5,7 +5,7 @@
 //! them is RFC 2131 §3 and RFC 1497.
 
 use crate::field::FieldDesc;
-use crate::options::{be, Item, ItemValue};
+use crate::options::{Item, LenRule, OptDesc, OptTable, Shape};
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
 /// RFC 951 §3: `file` ends at 108 + 128.
@@ -76,6 +76,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     next,
     build_len: BOOTP_LEN,
     parse_options: None,
+    opt_table: None,
     set_hlen: None,
     bind_next: None,
     bind_next_bytes: Some(bind_next_bytes),
@@ -104,84 +105,50 @@ pub mod msgtype {
     pub const INFORM: u64 = 8;
 }
 
+static MSGTYPE_NAMES: &[(&str, u64)] = &[
+    ("discover", msgtype::DISCOVER),
+    ("offer", msgtype::OFFER),
+    ("request", msgtype::REQUEST),
+    ("decline", msgtype::DECLINE),
+    ("ack", msgtype::ACK),
+    ("nak", msgtype::NAK),
+    ("release", msgtype::RELEASE),
+    ("inform", msgtype::INFORM),
+];
+
 /// RFC 2132 §3.1: Pad carries no length octet; §3.2: End terminates the region.
 const PAD: u8 = 0;
 const END: u8 = 255;
 
-/// RFC 2132 address options have a length that is a multiple of four, so a
-/// trailing partial address is malformed and dropped.
-fn addrs(p: &[u8]) -> Vec<[u8; 4]> {
-    p.chunks_exact(4)
-        .map(|c| [c[0], c[1], c[2], c[3]])
-        .collect()
-}
+/// The option area itself; the cookie belongs to BOOTP.
+pub static DHCP_OPTIONS: OptTable = OptTable {
+    proto: "DHCP",
+    rule: LenRule::PayloadOnly,
+    end: Some(END),
+    opts: &[
+        OptDesc::new("pad", PAD, Shape::Bare),
+        OptDesc::new("subnet_mask", 1, Shape::Ipv4List),
+        OptDesc::new("router", 3, Shape::Ipv4List),
+        OptDesc::new("name_server", 6, Shape::Ipv4List),
+        OptDesc::new("hostname", 12, Shape::Text),
+        OptDesc::new("domain", 15, Shape::Text),
+        OptDesc::new("broadcast_address", 28, Shape::Ipv4List),
+        OptDesc::new("requested_addr", 50, Shape::Ipv4List),
+        OptDesc::new("lease_time", 51, Shape::LooseUint(4)),
+        OptDesc::new("message-type", 53, Shape::LooseUint(1)).with_names(MSGTYPE_NAMES),
+        OptDesc::new("server_id", 54, Shape::Ipv4List),
+        OptDesc::new("param_req_list", 55, Shape::Bytes),
+        OptDesc::new("max_dhcp_size", 57, Shape::LooseUint(2)),
+        OptDesc::new("renewal_time", 58, Shape::LooseUint(4)),
+        OptDesc::new("rebinding_time", 59, Shape::LooseUint(4)),
+        OptDesc::new("client_id", 61, Shape::Bytes),
+        OptDesc::new("relay_agent_information", 82, Shape::Bytes),
+        OptDesc::new("end", END, Shape::Bare),
+    ],
+};
 
-fn ipv4(name: &'static str, code: u32, p: &[u8]) -> Item {
-    Item::named(name, code, ItemValue::Ipv4List(addrs(p)))
-}
-
-fn text(name: &'static str, code: u32, p: &[u8]) -> Item {
-    Item::named(
-        name,
-        code,
-        ItemValue::Text(String::from_utf8_lossy(p).into_owned()),
-    )
-}
-
-fn decode(code: u8, p: &[u8]) -> Item {
-    match code {
-        PAD => Item::flag("pad", 0),
-        END => Item::flag("end", 255),
-        1 => ipv4("subnet_mask", 1, p),
-        3 => ipv4("router", 3, p),
-        6 => ipv4("name_server", 6, p),
-        12 => text("hostname", 12, p),
-        15 => text("domain", 15, p),
-        28 => ipv4("broadcast_address", 28, p),
-        50 => ipv4("requested_addr", 50, p),
-        51 => Item::uint("lease_time", 51, be(p)),
-        53 => Item::uint("message-type", 53, be(p)),
-        54 => ipv4("server_id", 54, p),
-        55 => Item::bytes("param_req_list", 55, p),
-        57 => Item::uint("max_dhcp_size", 57, be(p)),
-        58 => Item::uint("renewal_time", 58, be(p)),
-        59 => Item::uint("rebinding_time", 59, be(p)),
-        61 => Item::bytes("client_id", 61, p),
-        82 => Item::bytes("relay_agent_information", 82, p),
-        _ => Item::unknown(code as u32, p),
-    }
-}
-
-/// Not `options::walk_tlv`: there the length octet counts the code and length
-/// octets themselves (TCP/IPv4), whereas RFC 2132 §2 counts only the option
-/// data. `data` is the option area itself; the cookie belongs to BOOTP.
 fn parse_options(data: &[u8]) -> Vec<Item> {
-    let mut out = Vec::new();
-    let mut i = 0usize;
-    // A zero-length option is legal here, so bound the walk by option count.
-    let mut guard = 0;
-    while i < data.len() && guard < 512 {
-        guard += 1;
-        let code = data[i];
-        if code == PAD || code == END {
-            out.push(decode(code, &[]));
-            i += 1;
-            if code == END {
-                break;
-            }
-            continue;
-        }
-        if i + 1 >= data.len() {
-            break;
-        }
-        let len = data[i + 1] as usize;
-        if i + 2 + len > data.len() {
-            break;
-        }
-        out.push(decode(code, &data[i + 2..i + 2 + len]));
-        i += 2 + len;
-    }
-    out
+    DHCP_OPTIONS.walk(data)
 }
 
 pub static DHCP_DESC: ProtoDesc = ProtoDesc {
@@ -193,6 +160,7 @@ pub static DHCP_DESC: ProtoDesc = ProtoDesc {
     next: dhcp_next,
     build_len: 0,
     parse_options: Some(parse_options),
+    opt_table: Some(&DHCP_OPTIONS),
     set_hlen: None,
     bind_next: None,
     bind_next_bytes: None,
@@ -203,6 +171,7 @@ pub static DHCP_DESC: ProtoDesc = ProtoDesc {
 mod tests {
     use super::*;
     use crate::field::FieldValue;
+    use crate::options::{ItemValue, OptArg};
     use crate::packet::Packet;
 
     const CHADDR: [u8; 6] = [0x00, 0x0c, 0x29, 0x1a, 0x2b, 0x3c];
@@ -521,6 +490,82 @@ mod tests {
         assert_eq!(items[0].value, ItemValue::Ipv4List(vec![[10, 0, 0, 1]]));
         assert_eq!(items[1].value, ItemValue::Text("lan.com".into()));
         assert_eq!(items[2].value, ItemValue::Ipv4List(vec![[10, 0, 0, 255]]));
+    }
+
+    #[test]
+    fn encodes_a_discover_option_block() {
+        let got = DHCP_OPTIONS
+            .build(&[
+                ("message-type", OptArg::Uint(msgtype::DISCOVER)),
+                (
+                    "client_id",
+                    OptArg::Bytes([&[1u8][..], &CHADDR[..]].concat()),
+                ),
+                (
+                    "param_req_list",
+                    OptArg::List(vec![
+                        OptArg::Uint(1),
+                        OptArg::Uint(3),
+                        OptArg::Uint(6),
+                        OptArg::Uint(15),
+                    ]),
+                ),
+                ("end", OptArg::Flag),
+            ])
+            .unwrap();
+        assert_eq!(got, discover_block());
+    }
+
+    #[test]
+    fn encodes_an_ack_option_block() {
+        let got = DHCP_OPTIONS
+            .build(&[
+                ("message-type", OptArg::Text("ack".into())),
+                ("subnet_mask", OptArg::Text("255.255.255.0".into())),
+                ("router", OptArg::Text("192.168.1.1".into())),
+                (
+                    "name_server",
+                    OptArg::List(vec![
+                        OptArg::Text("8.8.8.8".into()),
+                        OptArg::Text("8.8.4.4".into()),
+                    ]),
+                ),
+                ("lease_time", OptArg::Uint(3600)),
+                ("server_id", OptArg::Text("192.168.1.1".into())),
+                ("end", OptArg::Flag),
+            ])
+            .unwrap();
+        assert_eq!(got, ack_block());
+    }
+
+    #[test]
+    fn the_length_octet_counts_only_the_payload() {
+        // RFC 2132 §2, against the TCP/IPv4 rule: three octets carry a
+        // two-octet option, not four.
+        let got = DHCP_OPTIONS
+            .build(&[("message-type", OptArg::Uint(1))])
+            .unwrap();
+        assert_eq!(got, vec![53, 1, 1]);
+    }
+
+    #[test]
+    fn pad_and_end_carry_no_length_octet() {
+        let got = DHCP_OPTIONS
+            .build(&[("pad", OptArg::Flag), ("end", OptArg::Flag)])
+            .unwrap();
+        assert_eq!(got, vec![PAD, END]);
+    }
+
+    #[test]
+    fn a_decimal_name_encodes_as_that_code() {
+        // RFC 2132 §9.13 vendor class, unnamed here.
+        let got = DHCP_OPTIONS
+            .build(&[("60", OptArg::Bytes(b"MSFT 5.0".to_vec()))])
+            .unwrap();
+        assert_eq!(got, [&[60u8, 8][..], b"MSFT 5.0"].concat());
+        assert!(DHCP_OPTIONS
+            .build(&[("no_such_option", OptArg::Flag)])
+            .is_err());
     }
 
     #[test]

@@ -53,6 +53,8 @@ pub struct ProtoDesc {
     pub next: fn(&[u8]) -> Next,
     pub build_len: usize,
     pub parse_options: Option<OptionParser>,
+    /// The one table this protocol's options are named by, in both directions.
+    pub opt_table: Option<&'static crate::options::OptTable>,
     /// Written after option bytes are appended (IPv4 ihl, TCP data offset).
     pub set_hlen: Option<fn(&mut [u8], usize)>,
     pub bind_next: Option<fn(&mut [u8], ProtoId)>,
@@ -221,6 +223,7 @@ pub fn register(
         next: registered_next,
         build_len,
         parse_options: None,
+        opt_table: None,
         set_hlen: None,
         bind_next: None,
         bind_next_bytes: None,

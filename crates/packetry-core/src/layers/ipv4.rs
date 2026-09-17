@@ -2,7 +2,7 @@
 //! "Protocol Numbers" registry.
 
 use crate::field::FieldDesc;
-use crate::options::{fixed_uint, walk_tlv, Item};
+use crate::options::{Item, LenRule, OptDesc, OptTable, Shape};
 use crate::proto::{ipproto, Next, ProtoDesc, ProtoId};
 
 /// RFC 791 §3.1 lists the 3 bits most significant first; this table is
@@ -87,30 +87,29 @@ pub mod opttype {
 }
 
 /// RFC 791 §3.1: types 0 and 1 are a single octet with no length field.
-const SINGLE_BYTE: &[u8] = &[opttype::EOL, opttype::NOP];
-
-fn decode(ty: u8, payload: &[u8]) -> Item {
-    match ty {
-        // Unreachable while EOL is the walk's end code.
-        opttype::EOL => Item::flag("EOL", opttype::EOL as u32),
-        opttype::NOP => Item::flag("NOP", opttype::NOP as u32),
-        opttype::RR => Item::bytes("RR", ty as u32, payload),
-        opttype::TIMESTAMP => Item::bytes("Timestamp", ty as u32, payload),
-        opttype::SECURITY => Item::bytes("Security", ty as u32, payload),
-        opttype::LSRR => Item::bytes("LSRR", ty as u32, payload),
-        opttype::SID => fixed_uint("SID", ty, payload, 2),
-        opttype::SSRR => Item::bytes("SSRR", ty as u32, payload),
-        opttype::RA => fixed_uint("RA", ty, payload, 2),
-        _ => Item::unknown(ty as u32, payload),
-    }
-}
+pub static OPTIONS: OptTable = OptTable {
+    proto: "IP",
+    rule: LenRule::WithHeader,
+    end: Some(opttype::EOL),
+    opts: &[
+        OptDesc::new("EOL", opttype::EOL, Shape::Bare),
+        OptDesc::new("NOP", opttype::NOP, Shape::Bare),
+        OptDesc::new("RR", opttype::RR, Shape::Bytes),
+        OptDesc::new("Timestamp", opttype::TIMESTAMP, Shape::Bytes),
+        OptDesc::new("Security", opttype::SECURITY, Shape::Bytes),
+        OptDesc::new("LSRR", opttype::LSRR, Shape::Bytes),
+        OptDesc::new("SID", opttype::SID, Shape::Uint(2)),
+        OptDesc::new("SSRR", opttype::SSRR, Shape::Bytes),
+        OptDesc::new("RA", opttype::RA, Shape::Uint(2)),
+    ],
+};
 
 fn parse_options(hdr: &[u8]) -> Vec<Item> {
     let end = header_len(hdr).min(hdr.len());
     if end <= 20 {
         return Vec::new();
     }
-    walk_tlv(&hdr[20..end], SINGLE_BYTE, Some(opttype::EOL), decode)
+    OPTIONS.walk(&hdr[20..end])
 }
 
 /// RFC 791 §3.1: IHL counts 32-bit words.
@@ -129,6 +128,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     next,
     build_len: 20,
     parse_options: Some(parse_options),
+    opt_table: Some(&OPTIONS),
     set_hlen: Some(set_hlen),
     bind_next: Some(bind_next),
     bind_next_bytes: None,
@@ -139,7 +139,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
 mod tests {
     use super::*;
     use crate::field::FieldValue;
-    use crate::options::ItemValue;
+    use crate::options::{ItemValue, OptArg};
     use crate::packet::Packet;
 
     /// RFC 2113 §2.1 Router Alert, padded to a word with EOL.
@@ -236,6 +236,35 @@ mod tests {
             items[4].value,
             ItemValue::Bytes(vec![0x05, 0x00, 0xaa, 0xbb, 0xcc, 0xdd])
         );
+    }
+
+    #[test]
+    fn encodes_router_alert_and_record_route() {
+        assert_eq!(
+            OPTIONS.build(&[("RA", OptArg::Uint(0))]).unwrap(),
+            vec![0x94, 0x04, 0x00, 0x00]
+        );
+        let rr = OPTIONS
+            .build(&[("RR", OptArg::Bytes(vec![0x08, 10, 0, 0, 1, 0, 0, 0, 0]))])
+            .unwrap();
+        assert_eq!(rr, RR_OPTS[..11]);
+    }
+
+    #[test]
+    fn single_byte_types_carry_no_length_octet() {
+        let got = OPTIONS
+            .build(&[("NOP", OptArg::Flag), ("EOL", OptArg::Flag)])
+            .unwrap();
+        assert_eq!(got, vec![1, 0]);
+    }
+
+    #[test]
+    fn a_decimal_name_encodes_as_that_type() {
+        let got = OPTIONS
+            .build(&[("82", OptArg::Bytes(vec![0xaa, 0xbb]))])
+            .unwrap();
+        assert_eq!(got, vec![0x52, 0x04, 0xaa, 0xbb]);
+        assert!(OPTIONS.build(&[("NoSuchOption", OptArg::Uint(1))]).is_err());
     }
 
     #[test]

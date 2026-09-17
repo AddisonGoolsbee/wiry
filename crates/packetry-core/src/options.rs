@@ -20,7 +20,7 @@ pub struct Item {
 }
 
 impl Item {
-    pub(crate) fn named(name: &'static str, code: u32, value: ItemValue) -> Self {
+    pub fn named(name: &'static str, code: u32, value: ItemValue) -> Self {
         Self {
             name: Cow::Borrowed(name),
             code,
@@ -53,13 +53,334 @@ impl Item {
     }
 }
 
-/// Falls back to the raw payload when the capture disagrees with the registry.
-pub(crate) fn fixed_uint(name: &'static str, code: u8, payload: &[u8], width: usize) -> Item {
-    if payload.len() == width {
-        Item::uint(name, code as u32, be(payload))
-    } else {
-        Item::bytes(name, code as u32, payload)
+/// A value offered for encoding, before the table decides what shape it takes.
+/// `Text` covers a dotted quad, a symbolic name and a string payload alike.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OptArg {
+    Flag,
+    Uint(u64),
+    Bytes(Vec<u8>),
+    Text(String),
+    List(Vec<OptArg>),
+}
+
+/// The payload layout of one option, read in both directions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// One octet: no length octet and no payload.
+    Bare,
+    /// A length octet despite an empty payload. SAckOK is this and not `Bare`;
+    /// emitting it bare desynchronises every option after it.
+    Empty,
+    /// Big-endian integer; a payload of another width decodes as raw bytes.
+    Uint(usize),
+    /// Big-endian integer, decoded from whatever width arrived.
+    LooseUint(usize),
+    /// Two big-endian 32-bit words.
+    Pair,
+    Bytes,
+    Ipv4List,
+    Text,
+}
+
+impl Shape {
+    /// Octets an integer value takes when this shape is asked to hold one.
+    const fn width(self) -> usize {
+        match self {
+            Shape::Uint(w) | Shape::LooseUint(w) => w,
+            Shape::Pair => 8,
+            Shape::Ipv4List => 4,
+            Shape::Bytes | Shape::Text => 1,
+            Shape::Bare | Shape::Empty => 0,
+        }
     }
+}
+
+pub struct OptDesc {
+    pub name: &'static str,
+    pub code: u8,
+    pub shape: Shape,
+    /// Symbolic values accepted in place of the integer (DHCP message types).
+    pub names: &'static [(&'static str, u64)],
+}
+
+impl OptDesc {
+    pub const fn new(name: &'static str, code: u8, shape: Shape) -> Self {
+        Self {
+            name,
+            code,
+            shape,
+            names: &[],
+        }
+    }
+
+    pub const fn with_names(mut self, names: &'static [(&'static str, u64)]) -> Self {
+        self.names = names;
+        self
+    }
+}
+
+/// What the length octet counts. TCP (RFC 9293 §3.1) and IPv4 (RFC 791 §3.1)
+/// count the code and length octets themselves, so the payload is `len - 2`;
+/// DHCP (RFC 2132 §2) counts only the option data. Applying one rule to the
+/// other silently mis-codes every option that follows rather than failing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LenRule {
+    WithHeader,
+    PayloadOnly,
+}
+
+/// One table per protocol, serving decode and encode alike.
+pub struct OptTable {
+    pub proto: &'static str,
+    pub rule: LenRule,
+    /// The code that closes the region. `WithHeader` stops before it;
+    /// `PayloadOnly` emits it first, since RFC 2132 §3.2 End is an option.
+    pub end: Option<u8>,
+    pub opts: &'static [OptDesc],
+}
+
+impl OptTable {
+    pub fn by_code(&self, code: u8) -> Option<&OptDesc> {
+        self.opts.iter().find(|d| d.code == code)
+    }
+
+    pub fn by_name(&self, name: &str) -> Option<&OptDesc> {
+        self.opts.iter().find(|d| d.name == name)
+    }
+
+    fn is_bare(&self, code: u8) -> bool {
+        self.by_code(code).is_some_and(|d| d.shape == Shape::Bare)
+    }
+
+    pub fn decode(&self, code: u8, p: &[u8]) -> Item {
+        let Some(d) = self.by_code(code) else {
+            return Item::unknown(code as u32, p);
+        };
+        let c = code as u32;
+        match d.shape {
+            Shape::Bare | Shape::Empty => Item::flag(d.name, c),
+            Shape::Uint(w) if p.len() == w => Item::uint(d.name, c, be(p)),
+            // The capture disagrees with the registry; keep the raw payload.
+            Shape::Uint(_) => Item::bytes(d.name, c, p),
+            Shape::LooseUint(_) => Item::uint(d.name, c, be(p)),
+            Shape::Pair if p.len() == 8 => Item::pair(d.name, c, be(&p[..4]), be(&p[4..])),
+            Shape::Pair | Shape::Bytes => Item::bytes(d.name, c, p),
+            Shape::Ipv4List => Item::named(d.name, c, ItemValue::Ipv4List(addrs(p))),
+            Shape::Text => Item::named(
+                d.name,
+                c,
+                ItemValue::Text(String::from_utf8_lossy(p).into_owned()),
+            ),
+        }
+    }
+
+    /// Malformed input stops the walk rather than erroring: truncation is
+    /// normal on a snaplen-clipped capture.
+    pub fn walk(&self, data: &[u8]) -> Vec<Item> {
+        let mut out = Vec::new();
+        let mut i = 0usize;
+        // Bound the walk: a zero-length option would otherwise spin forever.
+        let mut guard = 0;
+        while i < data.len() && guard < 512 {
+            guard += 1;
+            let code = data[i];
+            if self.rule == LenRule::WithHeader && Some(code) == self.end {
+                break;
+            }
+            if self.is_bare(code) {
+                out.push(self.decode(code, &[]));
+                i += 1;
+                if Some(code) == self.end {
+                    break;
+                }
+                continue;
+            }
+            if i + 1 >= data.len() {
+                break;
+            }
+            let len = data[i + 1] as usize;
+            let next = match self.rule {
+                LenRule::WithHeader if len < 2 => break,
+                LenRule::WithHeader => i + len,
+                LenRule::PayloadOnly => i + 2 + len,
+            };
+            if next > data.len() {
+                break;
+            }
+            out.push(self.decode(code, &data[i + 2..next]));
+            i = next;
+        }
+        out
+    }
+
+    /// Resolves a name — or a decimal code for an option this table does not
+    /// name — and coerces the value into the shape that name implies.
+    pub fn item(&self, name: &str, arg: &OptArg) -> Result<Item, String> {
+        if let Some(d) = self.by_name(name) {
+            return Ok(Item {
+                name: Cow::Borrowed(d.name),
+                code: d.code as u32,
+                value: value_of(d.shape, d.names, arg)?,
+            });
+        }
+        if let Ok(code) = name.parse::<u8>() {
+            return Ok(Item {
+                name: Cow::Owned(name.to_string()),
+                code: code as u32,
+                value: value_of(Shape::Bytes, &[], arg)?,
+            });
+        }
+        Err(format!("unknown {} option {name:?}", self.proto))
+    }
+
+    /// The inverse of `walk`.
+    pub fn encode(&self, items: &[Item]) -> Result<Vec<u8>, String> {
+        let mut out = Vec::new();
+        for it in items {
+            let code = u8::try_from(it.code)
+                .map_err(|_| format!("{} option code {} is out of range", self.proto, it.code))?;
+            let shape = self.by_code(code).map_or(Shape::Bytes, |d| d.shape);
+            if shape == Shape::Bare {
+                out.push(code);
+                continue;
+            }
+            let p = payload(shape, &it.value);
+            let len = match self.rule {
+                LenRule::WithHeader => p.len() + 2,
+                LenRule::PayloadOnly => p.len(),
+            };
+            if len > 255 {
+                return Err(format!(
+                    "{} option {:?} is too long to encode",
+                    self.proto, it.name
+                ));
+            }
+            out.push(code);
+            out.push(len as u8);
+            out.extend_from_slice(&p);
+        }
+        Ok(out)
+    }
+
+    /// Encode an option region from named values, the way a caller types them:
+    /// `[("MSS", OptArg::Uint(1460)), ("SAckOK", OptArg::Flag)]`.
+    pub fn build<S: AsRef<str>>(&self, opts: &[(S, OptArg)]) -> Result<Vec<u8>, String> {
+        let items = opts
+            .iter()
+            .map(|(n, v)| self.item(n.as_ref(), v))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.encode(&items)
+    }
+}
+
+fn payload(shape: Shape, v: &ItemValue) -> Vec<u8> {
+    if matches!(shape, Shape::Bare | Shape::Empty) {
+        return Vec::new();
+    }
+    match v {
+        ItemValue::Flag => Vec::new(),
+        ItemValue::Uint(n) => be_bytes(*n, shape.width()),
+        ItemValue::Pair(a, b) => {
+            let mut out = be_bytes(*a, 4);
+            out.extend_from_slice(&be_bytes(*b, 4));
+            out
+        }
+        ItemValue::Bytes(b) => b.clone(),
+        ItemValue::Ipv4List(l) => l.concat(),
+        ItemValue::Text(s) => s.as_bytes().to_vec(),
+    }
+}
+
+fn value_of(shape: Shape, names: &[(&str, u64)], arg: &OptArg) -> Result<ItemValue, String> {
+    match shape {
+        Shape::Bare | Shape::Empty => Ok(ItemValue::Flag),
+        Shape::Uint(_) | Shape::LooseUint(_) | Shape::Pair => num_value(shape, names, arg),
+        Shape::Ipv4List => ip_value(arg),
+        Shape::Text | Shape::Bytes => Ok(ItemValue::Bytes(flat_bytes(arg))),
+    }
+}
+
+fn num_value(shape: Shape, names: &[(&str, u64)], arg: &OptArg) -> Result<ItemValue, String> {
+    match arg {
+        OptArg::Flag => Ok(ItemValue::Uint(0)),
+        OptArg::Uint(n) => Ok(ItemValue::Uint(*n)),
+        OptArg::Bytes(b) => Ok(ItemValue::Bytes(b.clone())),
+        OptArg::Text(s) => names
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(s))
+            .map(|(_, v)| ItemValue::Uint(*v))
+            .or_else(|| s.parse::<u64>().ok().map(ItemValue::Uint))
+            .ok_or_else(|| format!("cannot encode {s:?} as a number")),
+        OptArg::List(v) => match v.as_slice() {
+            [one] => num_value(shape, names, one),
+            [OptArg::Uint(a), OptArg::Uint(b)] if shape == Shape::Pair => {
+                Ok(ItemValue::Pair(*a, *b))
+            }
+            _ => {
+                let mut out = Vec::new();
+                for e in v {
+                    match e {
+                        OptArg::Uint(n) => out.extend_from_slice(&be_bytes(*n, 4)),
+                        _ => return Err("cannot encode a mixed list as a number".into()),
+                    }
+                }
+                Ok(ItemValue::Bytes(out))
+            }
+        },
+    }
+}
+
+fn ip_value(arg: &OptArg) -> Result<ItemValue, String> {
+    let mut out = Vec::new();
+    push_addrs(arg, &mut out)?;
+    Ok(if out.len() % 4 == 0 {
+        ItemValue::Ipv4List(addrs(&out))
+    } else {
+        ItemValue::Bytes(out)
+    })
+}
+
+fn push_addrs(arg: &OptArg, out: &mut Vec<u8>) -> Result<(), String> {
+    match arg {
+        OptArg::Flag => {}
+        OptArg::Uint(n) => out.extend_from_slice(&be_bytes(*n, 4)),
+        OptArg::Bytes(b) => out.extend_from_slice(b),
+        OptArg::Text(s) => {
+            let a = crate::parse::ipv4(s).ok_or_else(|| format!("{s:?} is not an IPv4 address"))?;
+            out.extend_from_slice(&a);
+        }
+        OptArg::List(v) => {
+            for e in v {
+                push_addrs(e, out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// An integer stands for one octet here, which is what a DHCP parameter
+/// request list is a list of.
+fn flat_bytes(arg: &OptArg) -> Vec<u8> {
+    match arg {
+        OptArg::Flag => Vec::new(),
+        OptArg::Uint(n) => vec![*n as u8],
+        OptArg::Bytes(b) => b.clone(),
+        OptArg::Text(s) => s.as_bytes().to_vec(),
+        OptArg::List(v) => v.iter().flat_map(flat_bytes).collect(),
+    }
+}
+
+/// RFC 2132 address options have a length that is a multiple of four, so a
+/// trailing partial address is malformed and dropped.
+fn addrs(p: &[u8]) -> Vec<[u8; 4]> {
+    p.chunks_exact(4)
+        .map(|c| [c[0], c[1], c[2], c[3]])
+        .collect()
+}
+
+fn be_bytes(v: u64, width: usize) -> Vec<u8> {
+    v.to_be_bytes()[8 - width.min(8)..].to_vec()
 }
 
 pub(crate) fn be(b: &[u8]) -> u64 {
@@ -70,62 +391,24 @@ pub(crate) fn be(b: &[u8]) -> u64 {
     v
 }
 
-/// TCP/IPv4 length convention: the length octet counts the code and length
-/// octets themselves, so the payload is `len - 2` bytes. DHCP (RFC 2132 §2)
-/// counts only the option data and so does NOT use this function — the wrong
-/// convention silently mis-decodes every option. `layers/bootp.rs` walks its own.
-///
-/// `single_byte` names the codes that occupy one byte with no length octet.
-/// Malformed input stops the walk rather than erroring: truncation is normal on
-/// a snaplen-clipped capture.
-pub fn walk_tlv<F>(
-    data: &[u8],
-    single_byte: &[u8],
-    end_code: Option<u8>,
-    mut decode: F,
-) -> Vec<Item>
-where
-    F: FnMut(u8, &[u8]) -> Item,
-{
-    let mut out = Vec::new();
-    let mut i = 0usize;
-    // Bound the walk: a length octet of zero would otherwise spin forever.
-    let mut guard = 0;
-    while i < data.len() && guard < 512 {
-        guard += 1;
-        let code = data[i];
-        if Some(code) == end_code {
-            break;
-        }
-        if single_byte.contains(&code) {
-            out.push(decode(code, &[]));
-            i += 1;
-            continue;
-        }
-        if i + 1 >= data.len() {
-            break;
-        }
-        let len = data[i + 1] as usize;
-        if len < 2 || i + len > data.len() {
-            break;
-        }
-        out.push(decode(code, &data[i + 2..i + len]));
-        i += len;
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const TLV: OptTable = OptTable {
+        proto: "T",
+        rule: LenRule::WithHeader,
+        end: Some(0),
+        opts: &[
+            OptDesc::new("NOP", 1, Shape::Bare),
+            OptDesc::new("MSS", 2, Shape::Uint(2)),
+            OptDesc::new("WScale", 3, Shape::Uint(1)),
+        ],
+    };
+
     #[test]
     fn walks_a_simple_tlv_run() {
-        let data = [2u8, 4, 0x05, 0xb4, 1, 3, 3, 7];
-        let items = walk_tlv(&data, &[1], Some(0), |c, p| match c {
-            1 => Item::flag("NOP", 1),
-            _ => Item::uint("opt", c as u32, be(p)),
-        });
+        let items = TLV.walk(&[2u8, 4, 0x05, 0xb4, 1, 3, 3, 7]);
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].value, ItemValue::Uint(0x05b4));
         assert_eq!(items[1].value, ItemValue::Flag);
@@ -134,29 +417,18 @@ mod tests {
 
     #[test]
     fn stops_at_end_code() {
-        let data = [2u8, 4, 0x05, 0xb4, 0, 9, 9, 9];
-        let items = walk_tlv(&data, &[1], Some(0), |c, p| {
-            Item::uint("o", c as u32, be(p))
-        });
+        let items = TLV.walk(&[2u8, 4, 0x05, 0xb4, 0, 9, 9, 9]);
         assert_eq!(items.len(), 1);
     }
 
     #[test]
     fn truncated_option_stops_cleanly() {
-        let data = [2u8, 8, 0x05, 0xb4];
-        let items = walk_tlv(&data, &[1], Some(0), |c, p| {
-            Item::uint("o", c as u32, be(p))
-        });
-        assert!(items.is_empty());
+        assert!(TLV.walk(&[2u8, 8, 0x05, 0xb4]).is_empty());
     }
 
     #[test]
     fn zero_length_does_not_hang() {
-        let data = [2u8, 0, 2, 0, 2, 0];
-        let items = walk_tlv(&data, &[], Some(255), |c, p| {
-            Item::uint("o", c as u32, be(p))
-        });
-        assert!(items.is_empty());
+        assert!(TLV.walk(&[2u8, 0, 2, 0, 2, 0]).is_empty());
     }
 
     #[test]
@@ -165,5 +437,72 @@ mod tests {
         assert_eq!(be(&[0x05, 0xb4]), 1460);
         assert_eq!(be(&[0, 0, 0, 1]), 1);
         assert_eq!(be(&[]), 0);
+    }
+
+    #[test]
+    fn a_decimal_name_encodes_as_that_code() {
+        let b = TLV.build(&[("99", OptArg::Bytes(vec![0xaa]))]).unwrap();
+        assert_eq!(b, vec![99, 3, 0xaa]);
+    }
+
+    #[test]
+    fn an_unknown_name_is_rejected() {
+        assert!(TLV.build(&[("NoSuchOption", OptArg::Flag)]).is_err());
+        assert!(TLV.build(&[("256", OptArg::Flag)]).is_err());
+    }
+
+    #[test]
+    fn an_oversized_payload_is_rejected() {
+        let long = OptArg::Bytes(vec![0u8; 254]);
+        assert!(TLV.build(&[("99", long)]).is_err());
+    }
+
+    fn sample(shape: Shape) -> Vec<u8> {
+        match shape {
+            Shape::Bare | Shape::Empty => vec![],
+            Shape::Uint(w) | Shape::LooseUint(w) => vec![1u8; w],
+            Shape::Pair => vec![0, 0, 0, 1, 0, 0, 0, 2],
+            Shape::Bytes => vec![0xaa, 0xbb],
+            Shape::Ipv4List => vec![10, 0, 0, 1],
+            Shape::Text => b"lan".to_vec(),
+        }
+    }
+
+    /// Encoding what a walk produced must reproduce exactly those items, for
+    /// every option either direction names.
+    fn assert_round_trips(table: &OptTable) {
+        let (closing, body): (Vec<_>, Vec<_>) =
+            table.opts.iter().partition(|d| Some(d.code) == table.end);
+        let mut items: Vec<Item> = body
+            .iter()
+            .map(|d| table.decode(d.code, &sample(d.shape)))
+            .collect();
+        // A closing code ends the region, so it can only come last, and only
+        // where the walk emits it at all.
+        if table.rule == LenRule::PayloadOnly {
+            items.extend(closing.iter().map(|d| table.decode(d.code, &[])));
+        }
+        let bytes = table.encode(&items).expect("every named option encodes");
+        assert_eq!(table.walk(&bytes), items, "{} round trip", table.proto);
+    }
+
+    #[test]
+    fn every_named_option_round_trips() {
+        assert_round_trips(&crate::layers::tcp::OPTIONS);
+        assert_round_trips(&crate::layers::ipv4::OPTIONS);
+        assert_round_trips(&crate::layers::bootp::DHCP_OPTIONS);
+    }
+
+    #[test]
+    fn the_two_length_conventions_differ() {
+        use crate::layers::{bootp::DHCP_OPTIONS, tcp};
+        // Both payloads are two octets; only TCP's length octet counts the
+        // code and length octets as well.
+        let mss = tcp::OPTIONS.build(&[("MSS", OptArg::Uint(1460))]).unwrap();
+        assert_eq!(mss, vec![2, 4, 0x05, 0xb4]);
+        let size = DHCP_OPTIONS
+            .build(&[("max_dhcp_size", OptArg::Uint(1500))])
+            .unwrap();
+        assert_eq!(size, vec![57, 2, 0x05, 0xdc]);
     }
 }
