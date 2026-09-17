@@ -3,6 +3,7 @@
 //! `fuzz/src/lib.rs`, with deterministic inputs so it runs under `cargo test`;
 //! the two sets of assertions must stay in step.
 
+use packetry_core::answers;
 use packetry_core::layers::{bootp, dns, ipv4, tcp};
 use packetry_core::packet::Packet;
 use packetry_core::proto::{self, desc, ProtoId};
@@ -351,6 +352,30 @@ fn random_bytes_dissect_at_every_entry_point() {
         start.elapsed() < BUDGET,
         "random dissection did not finish promptly (seed {SEED:#x})"
     );
+}
+
+#[test]
+fn reply_matching_survives_malformed_packets() {
+    let mut rng = Rng::new(SEED ^ 0x5eed);
+    let frames = valid_frames();
+    for i in 0..4000 {
+        let (name, base) = &frames[rng.below(frames.len())];
+        let cut = rng.below(base.len() + 1);
+        let mut sent_bytes = base[..cut].to_vec();
+        sent_bytes.extend(rng.bytes_below(120));
+        let sent = Packet::dissect(sent_bytes, ProtoId::Ether);
+        let Some(key) = answers::reply_key(sent.raw_bytes(), sent.layers()) else {
+            continue;
+        };
+        assert!(
+            !answers::answers(&key, &[], &[]),
+            "{name} #{i} answered an empty packet (seed {SEED:#x})"
+        );
+        let len = rng.below(200);
+        let recv = Packet::dissect(rng.bytes(len), ProtoId::Ether);
+        let _ = answers::answers(&key, recv.raw_bytes(), recv.layers());
+        let _ = answers::ack_consistent(&key, recv.raw_bytes(), recv.layers());
+    }
 }
 
 #[test]

@@ -21,6 +21,8 @@ use crate::proto::{Next, ProtoDesc, ProtoId};
 pub mod types {
     pub const ECHO_REPLY: u8 = 0;
     pub const DEST_UNREACH: u8 = 3;
+    /// Deprecated by RFC 6633, still quoted back by older routers.
+    pub const SOURCE_QUENCH: u8 = 4;
     pub const REDIRECT: u8 = 5;
     pub const ECHO_REQUEST: u8 = 8;
     pub const TIME_EXCEEDED: u8 = 11;
