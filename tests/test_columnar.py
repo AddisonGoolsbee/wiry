@@ -270,3 +270,16 @@ def test_pandas_export(capture):
     want = loop_column(capture, "IP", "dst")
     assert df["IP.dst"].isna().tolist() == [v is None for v in want]
     assert df["IP.dst"].dropna().tolist() == [v for v in want if v is not None]
+
+
+def test_filter_reads_a_condition_list_as_the_predicate(capture):
+    """`columns()` takes specs first and `filter()` takes a layer, so the
+    natural call raised "not a layer" instead of filtering."""
+    positional = capture.filter([("TCP", "dport", "==", 22)])
+    keyword = capture.filter(where=[("TCP", "dport", "==", 22)])
+    assert [bytes(p) for p in positional] == [bytes(p) for p in keyword]
+
+    assert capture.filter_indices([("TCP", "dport", "==", 22)]) == \
+        capture.filter_indices(where=[("TCP", "dport", "==", 22)])
+
+    assert len(capture.filter("TCP")) == len(capture.filter(layer="TCP"))

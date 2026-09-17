@@ -287,6 +287,18 @@ class _LayerView:
         return hash((self._name, self._idx))
 
 
+def _as_layer_and_where(layer: Any, where: Any) -> tuple:
+    """Accept a condition list as the first positional argument.
+
+    `columns()` takes its specs first and `filter()` takes a layer, so the
+    natural `filter([("TCP", "dport", "==", 80)])` raised "not a layer". A list
+    is never a layer, so reading one as the predicate costs nothing.
+    """
+    if where is None and isinstance(layer, (list, tuple)):
+        return None, layer
+    return layer, where
+
+
 def _layer_name(x: Any) -> str:
     """Accept a layer class, an instance, or a plain string."""
     if isinstance(x, str):
@@ -712,11 +724,13 @@ class PacketList:
     def filter(self, layer: Any = None, where: Any = None) -> "PacketList":
         """A view over matching packets. The predicate is evaluated in Rust."""
         from .columnar import filter_packets
+        layer, where = _as_layer_and_where(layer, where)
         return filter_packets(self, layer, where)
 
     def filter_indices(self, layer: Any = None, where: Any = None) -> list[int]:
         """Positions of the matching packets."""
         from .columnar import filter_indices
+        layer, where = _as_layer_and_where(layer, where)
         return filter_indices(self, layer, where)
 
     def head(self, n: int) -> "PacketList":
