@@ -1,281 +1,228 @@
 # wiry
 
-Fast packet dissection and crafting for Python. Rust core, familiar API.
+Packet dissection and crafting for Python, with scapy's API and a Rust core.
+MIT OR Apache-2.0.
 
 ```python
-from wiry import *
-
-pkt = Ether()/IP(dst="10.0.0.1")/TCP(dport=443, flags="S")
-pkt.show()
+from wiry import rdpcap
 
 cap = rdpcap("capture.pcap")
-print(cap.count_layer(TCP), "TCP packets")
-print(cap.field_column(IP, "src")[:5])
+cap.columns([("IP", "src"), ("IP", "dst"), ("TCP", "dport")])
 ```
 
-**Status: early. Working and measured, but not yet at feature parity.** Read
-[DEVIATIONS.md](DEVIATIONS.md) before depending on it; it lists every gap.
+Those two lines read a 256 MB capture off disk and pull three fields out of all
+549,726 packets in 295 ms, without building a Python object for a single one of
+them.
 
-## Why
+**wiry implements 15 protocols. scapy registers 1,746.** If yours is not
+Ethernet, 802.1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP,
+Loopback or Linux cooked capture, it dissects to `Raw` and round-trips unchanged,
+and you get bytes rather than fields.
 
-Packet dissection in Python is slow for a structural reason: every field of every
-layer becomes a Python object, whether or not you read it. Reading two fields out
-of a capture costs you the whole object graph.
+The method surface is narrower too. `show2`, `sprintf`, `fragment`, `json` and
+`command` are absent. Most of what else scapy's `Packet` carries is its own
+internal machinery, `do_build`, `post_dissect`, `self_build` and the rest, which
+exists because scapy assembles an object graph per packet. wiry does not, so it
+has no equivalent and needs none.
 
-wiry keeps a packet as one byte buffer plus a small table of
-`(protocol, offset, header length)` spans. Dissection walks the layer chain
-touching only the bytes needed to find each next header. Field values decode on
-demand. A capture stays in Rust; Python objects appear only for packets you
-actually index.
+That is the trade. Everything below assumes you already know it.
 
 ## Numbers
 
-Measured against scapy 2.7.0 on `bigFlows.pcap`, a public 256 MB capture of
-549,726 real packets from the tcpreplay project. Apple M1 Pro, 8 cores,
-macOS 26.6, CPython 3.13.5. Reproduce with `python dev/bench.py <pcap>`. Figures vary a few percent
-between runs; these are from the lower of two.
+`bigFlows.pcap`, a public 256 MB capture of 549,726 real packets from the
+tcpreplay project. Apple M1 Pro, macOS 26.6, CPython 3.13.5, scapy 2.7.0,
+dpkt 1.9.8. Best of three. Reproduce with `python dev/bench.py <pcap>`.
 
-| Workload | scapy | wiry | |
+| Read 2 fields from every packet | rate | |
+|---|---|---|
+| scapy `PcapReader` loop | 9,942 pkt/s | |
+| dpkt `Reader` loop | 169,009 pkt/s | |
+| wiry per-packet loop | 335,549 pkt/s | **2.0x dpkt** |
+| wiry `columns()` | 4,026,073 pkt/s | **23.8x dpkt** |
+
+| Other workloads | scapy | wiry | |
 |---|---|---|---|
-| Read + 2 fields per packet | 11,490 pkt/s | 196,892 pkt/s | **17.1x** |
-| Same, bulk column API | 11,490 pkt/s | 4,071,061 pkt/s | **354.3x** |
-| Dissect + re-serialise | 11,347 pkt/s | 626,076 pkt/s | **55.2x** |
-| Build + serialise Ether/IP/TCP | 4,641 pkt/s | 120,557 pkt/s | **26.0x** |
+| Dissect + re-serialise | 9,446 pkt/s | 808,850 pkt/s | **85.6x** |
+| Build + serialise Ether/IP/TCP | 3,939 pkt/s | 102,924 pkt/s | **26.1x** |
 
-Memory, each measured in its own process (`python dev/bench_memory.py <pcap>`):
+Memory, each in its own process (`python dev/bench_memory.py <pcap>`):
 
 | | packets held | peak RSS | per packet |
 |---|---|---|---|
-| scapy | 200,000 | 1,318 MB | 6.59 KB |
-| wiry | 549,726 | 347 MB | **0.63 KB** |
+| scapy | 200,000 | 1,317 MB | 6.59 KB |
+| wiry | 549,726 | 344 MB | **0.63 KB** |
 
-wiry read the entire 549,726-packet file and extracted a field from every
-packet in 0.21 s. scapy took 18.23 s to do the same for 200,000 of them.
+Read the per-packet row honestly: **against dpkt it is 2.0x, not an
+order of magnitude.** Every per-packet API pays for one Python object per packet
+and that cost sets the ceiling. dpkt sits near it and so do we. `columns()`
+amortises the cost instead, returning one list per field for the whole capture,
+and that is where the 23.8x comes from.
 
-Three honest caveats about these numbers:
+The same effect caps the bulk API. Four separate `field_column()` calls dissect
+the capture four times, yet cost 1.7x one fused `columns()` pass rather than 4x.
+Fusing the passes removes three quarters of the dissection and well under half
+the runtime, so most of what is left is building the Python lists. That is the
+floor, and no amount of Rust moves it.
 
-- **The 354.3x is a different API, not the same one made faster.** It is
-  `field_column`, which does whole-capture work in one crossing of the Rust
-  boundary. The like-for-like per-packet loop number is 17.1x. Both are reported
-  above and both are in the benchmark script.
-- **These figures fell as correctness work landed.** An earlier build read at
-  19.9x and built at 31.2x. Bounds checks, Ethernet-trailer handling and a rich
-  flag type cost roughly 10% on the per-packet paths. That trade was worth it:
-  the same work fixed length and checksum corruption on 1,568 of 14,261 real
-  packets.
-- **wiry currently implements fewer protocols than scapy.** Speed and
-  coverage are not the same axis. The benchmark only touches Ethernet, IPv4, TCP
-  and UDP, which both libraries fully implement, so the comparison is on shared
-  ground. See the supported surface below.
+These figures fell about 10% as correctness work landed. Bounds checks and
+Ethernet-trailer handling cost that much, and the same work fixed length and
+checksum corruption on 1,568 of 14,261 real packets.
 
-## What works
+## Crafting
 
-Ethernet, 802.1Q VLAN, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP and
-DHCP. Anything else dissects to `Raw`, exactly as scapy does for protocols it
-lacks, so bytes always round-trip unchanged.
-
-Beyond the fixed headers:
-
-- **TCP, IPv4 and DHCP options** parse into a named list: `pkt[TCP].options`
-  gives `[('MSS', 1460), ('SAckOK', None), ('WScale', 7)]`.
-- **DNS question and record sections**, including name compression, via
-  `pkt[DNS].qd` and `pkt[DNS].an`.
-- **ICMP's type-dependent fields**: a redirect has `gw`, a timestamp has
-  `ts_ori`/`ts_rx`/`ts_tx`, an unreachable has `nexthopmtu`, and asking a message
-  for a field its type does not define is an error rather than a wrong answer.
-- **pcap and pcapng** both read, dispatched on the file's own magic.
-- **Layers you define yourself**, declared in Python and executed in Rust; see
-  below.
-
-Verified against scapy 2.7.0 over an entire real capture: all 14,261 layer
-chains agree, all 155,501 field comparisons are equal, and all 14,261 packets
-round-trip byte-identical. 38 of 38 construction cases are byte-identical too,
-and field names match scapy exactly across all eleven layers.
-
-Scapy's own regression suite runs against wiry: 37 pass, 14 fail, 629 skip.
-Every skip is a scope boundary such as live capture or a layer we do not
-implement; every remaining failure is a feature we do not claim, and each is
-listed in [DEVIATIONS.md](DEVIATIONS.md).
-
-235 Rust and 578 Python tests pass. All three crates forbid unsafe code, and
-the dissector is covered by seven fuzz targets plus seeded property tests that
-run on stable.
-
-`sniff(offline=...)` is complete and needs no privileges, no network and no
-optional feature: the whole state machine — `count`, `store`, `prn`, `lfilter`,
-`stop_filter`, `timeout`, BPF `filter=` and the `where=` extension — is driven
-from a capture file and tested that way. Capturing from an interface,
-`AsyncSniffer`, `send`/`sendp` and `sr`/`sr1`/`srp`/`srp1` are the same state
-machine with the wire in front of it, and need the `live` feature; without it
-they raise `CaptureUnavailable` naming the rebuild command. Those paths need a
-real interface and root, so their round-trip checks live in `dev/live/` rather
-than in the shipped suite. See [DEVIATIONS.md](DEVIATIONS.md) S2, E9, E14,
-E15 and E17.
-
-## Install
-
-```sh
-pip install wiry        # not yet published
-```
-
-From source:
-
-```sh
-git clone https://github.com/AddisonGoolsbee/wiry && cd wiry
-pip install maturin && maturin develop --release
-```
-
-## API
-
-The surface intentionally mirrors what people already type.
+dpkt cannot build a packet from field defaults. wiry can, 26.1x faster than
+scapy, and 38 of 38 enumerated construction cases come out byte-identical to
+scapy's bytes. Source MACs are pinned on both sides for that comparison, because
+scapy fills them from the live interface at build time and wiry deliberately does
+not, so that `bytes(Ether())` does not depend on the host.
 
 ```python
 from wiry import *
 
-# construct
-p = Ether(dst="00:11:22:33:44:55")/IP(src="10.0.0.1", dst="10.0.0.2")/TCP(dport=80)
-raw(p)                      # bytes, with checksums and lengths filled in
-p.summary()                 # 'Ether / IP / TCP'
-p.show()                    # every field
-
-# dissect
-q = Ether(some_bytes)
-q[IP].ttl                   # 64
-q[TCP].flags                # <Flag 2 (S)>: equals 2 and 'S', and q[TCP].flags.S
-q[0].name                   # 'Ether'; q.getlayer(IP, ttl=64) filters on fields
-TCP in q                    # True
-q.haslayer(UDP)             # False
-
-# mutate and re-serialise; checksums recompute
-q[TCP].dport = 443
-raw(q)
-
-# captures
-cap = rdpcap("in.pcap")
-len(cap)
-cap[0].summary()
-for pkt in PcapReader("in.pcap"):
-    ...
-wrpcap("out.pcap", [p])
+p = Ether(dst="00:11:22:33:44:55")/IP(dst="10.0.0.2")/TCP(dport=80, flags="S")
+raw(p)                      # checksums and lengths filled in
+p[TCP].dport = 443          # mutate; checksums recompute
 ```
 
-### Bulk API
+Capture and injection work too: `sniff`, `send`, `sendp`, `sr`, `sr1`, `srp`,
+`srp1` and `AsyncSniffer`, with scapy's arguments and semantics. Two limits, both
+real. They need the `live` cargo feature, which is **off in the first release**,
+so a plain `pip install` raises `CaptureUnavailable` naming the rebuild command.
+And they are Linux and macOS only.
 
-The per-packet loop is already much faster, but a Python-level loop still pays a
-boundary crossing per packet. When you want one thing across a whole capture,
-ask for it in one call:
+Windows gets everything else. Dissection, crafting, capture files and `columns()`
+are pure Rust with no libpcap, so they build and pass the same test suite there.
+What Windows does not get is the wire: live capture needs Npcap, and raw sends
+have been restricted by the OS since XP SP2. Those entry points exist and raise
+`CaptureUnavailable` rather than being missing.
+
+`sniff(offline=...)` needs none of that. It runs the whole state machine from a
+capture file with no privileges and no feature flag: `count`, `store`, `prn`,
+`lfilter`, `stop_filter`, `timeout` and the `where=` extension.
+
+## Captures as columns
+
+The part scapy has no equivalent for. A capture already lives in Rust as one
+buffer; pulling a few fields out of all of it should not mean building a Python
+object per packet.
 
 ```python
-cap.count_layer(TCP)            # int
-cap.field_column(IP, "src")     # one entry per packet, None where absent
-cap.times()                     # timestamps
+from wiry import rdpcap, IP, TCP
+
+cap = rdpcap("capture.pcap")
+
+cap.columns([("IP", "src"), ("TCP", "dport")])
+cap.columns([("IP", "src")], where=[("TCP", "dport", "==", 443)])
+cap.count_layer(TCP)
+cap.field_column(IP, "src")
+cap.to_dict()
 ```
 
-These are the APIs that give the 391.6x figure. They agree exactly with the
-equivalent Python loop, and the test suite asserts that invariant.
+One call, one pass, one crossing. Filters are data rather than callbacks, so
+selection stays in Rust. Dataframes export lazily to polars, arrow and pandas:
+`pip install 'wiry[polars]'`.
 
-## Your own protocol layers
+## Your own layers
 
 A layer you declare is data, not code. Python hands the description to Rust once,
 at class-definition time, and the same dissector that runs the built-in layers
-runs yours — nothing crosses back into Python per packet or per field.
+runs yours. Nothing crosses back into Python per packet or per field, so a
+declared layer reads at built-in speed.
 
 ```python
-from wiry import Packet, bind_layers, IP, UDP
-from wiry.fields import ByteField, BitField, ShortField, IntField, IPField
+from wiry import Packet, bind_layers, UDP, IP
+from wiry.fields import ByteField, ShortField, IPField
 
 class MyProto(Packet):
     name = "MyProto"
     fields_desc = [
         ByteField("version", 1),
-        BitField("flags", 0, 4),
-        BitField("reserved", 0, 4),
         ShortField("length", 0),
-        IntField("magic", 0xDEADBEEF),
         IPField("peer", "0.0.0.0"),
     ]
 
 bind_layers(UDP, MyProto, dport=9999)
 
-pkt = IP()/UDP()/MyProto(version=2, peer="10.0.0.1")   # dport set by the binding
-back = IP(bytes(pkt))
-back[MyProto].peer          # '10.0.0.1'
-MyProto in back             # True
+pkt = IP()/UDP()/MyProto(version=2, peer="10.0.0.1")
+IP(bytes(pkt))[MyProto].peer        # '10.0.0.1'
 ```
 
-From there it is an ordinary layer: `/` stacking, `pkt[MyProto]`, `in`, field
-get and set, `show()`, `summary()`, `bytes()`, dissection out of a capture, and
-the columnar API (`cap.columns([("MyProto", "version")])`).
+From there it is an ordinary layer: stacking, indexing, `in`, get and set,
+`show()`, dissection out of a capture, and `columns()`. See
+[DEVIATIONS.md](DEVIATIONS.md) E3 for what a declared layer cannot express.
 
-`wiry.fields` has `ByteField`, `ShortField`, `IntField`, `LongField`, their
-`X` and `LE` variants, `BitField`, `FlagsField`, `IPField`, `IP6Field`,
-`MACField`, `StrFixedLenField` and `StrField`. Bit offsets come from summing
-widths in declaration order, so bit fields may straddle octets as long as the
-layer totals a whole number of bytes. See [DEVIATIONS.md](DEVIATIONS.md) E3 for
-what a declared layer cannot yet express.
+## How we know it is right
 
-## Captures as columns
+Against a real 14,261-packet capture, compared with scapy 2.7.0: all 14,261
+layer chains agree, all 155,501 field comparisons are equal, and every packet
+re-serialises byte-identically.
 
-This is the part scapy has no equivalent for. A capture already lives in Rust as
-one buffer; pulling a few fields out of all of it should not mean building a
-Python object per packet.
+scapy's own regression suite runs against wiry: **39 pass, 636 skip, 5 fail.**
+A skip is a scope boundary, most often a layer we do not implement or a test
+whose `~` marker asks for a Linux host, root or tshark. Of the 5 failures, 2 are
+scapy's `Net` address generators, 1 needs gzip input, 1 needs Windows, and 1
+asserts by patching a scapy internal we do not have. Every gap is enumerated in
+[DEVIATIONS.md](DEVIATIONS.md).
 
-```python
-cap = rdpcap("capture.pcap")
+281 Rust and 594 Python tests pass, 286 Rust with live capture built in. All
+three crates set `#![forbid(unsafe_code)]`, which constrains this code and says
+nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
+compiled in. The dissector carries seven fuzz targets plus seeded property tests
+that run on stable.
 
-cap.columns([("IP", "src"), ("IP", "dst"), ("TCP", "dport")])
-cap.columns([("TCP", "dport")], layer="TCP")
-cap.columns(conds=[("TCP", "dport", "==", 443)])
-cap.to_dict()
+Three adversarial reviews went looking for wrong answers, hostile-input
+failures and races in the capture surface. They found fifteen bugs, including a
+field write that could corrupt the layer beside it, a reply matcher that paired
+answers with the wrong probe, and an option value that could crash the
+interpreter. All are fixed, with a regression test each.
+
+## When not to use wiry
+
+- **You need a protocol outside the fifteen.** scapy has 1,746 and an interactive
+  shell. It is a more capable tool and will stay one.
+- **You have a few thousand packets.** scapy takes a second. Nothing here matters.
+- **You only want a fast parser and dpkt's API suits you.** dpkt is 2.0x
+  behind per packet, BSD-licensed, and fine. Its last release was 2022.
+
+Use wiry when you are moving a lot of packets offline, when you want scapy's API
+without GPL-2.0, or when `columns()` is the shape of your problem.
+
+## Install
+
+```sh
+pip install wiry
 ```
 
-One call, one pass, one crossing: each packet is dissected once and every
-requested field read from that dissection. Filters are data rather than
-callbacks, so selection stays in Rust.
+PyPI currently holds a 0.0.0 placeholder. Until the first real release, build
+from source.
 
-Dataframes, each library imported lazily so none of them is a dependency:
+From source, with live capture:
 
-```python
-from wiry.columnar import to_polars, to_arrow, to_pandas
-
-df = to_polars(cap)
+```sh
+git clone https://github.com/AddisonGoolsbee/wiry && cd wiry
+pip install maturin
+MATURIN_PEP517_ARGS="--features live" maturin develop --release
 ```
-
-Install with `pip install 'wiry[polars]'`, or `[arrow]`, or `[pandas]`.
-
-Four columns over the same 549,726-packet capture:
-
-| Approach | Rate | |
-|---|---|---|
-| `columns()`, one pass | 1,946,683 pkt/s | |
-| four separate `field_column()` calls | 1,345,818 pkt/s | 1.4x slower |
-| Python loop over packets | 179,148 pkt/s | 10.9x slower |
-| scapy loop over packets | 10,609 pkt/s | **183x slower** |
-
-Filtering to TCP first reaches 8,779,263 pkt/s, against a 758x slower scapy
-equivalent. The honest caveat: the win over four `field_column()` calls is only
-1.4x, because once the work is in Rust it is building the Python results that
-dominates, not the dissection.
 
 ## Relationship to scapy
 
-wiry is an independent, clean-room implementation. It shares no code with
-scapy.
+wiry is an independent clean-room implementation and shares no code with scapy.
 
-scapy is licensed GPL-2.0. Reimplementing an API is settled fair use
-(*Google LLC v. Oracle America*, 2021): names, signatures and calling conventions
-are interface, not expression. Copying an implementation is a different thing,
-and this project does not. Every protocol layout here is written from its RFC or
-IANA registry, cited in a comment at the top of each layer module, and
-contributors are asked not to read scapy's source while writing the equivalent
-layer. See [CONTRIBUTING.md](CONTRIBUTING.md).
+scapy is GPL-2.0. Reimplementing an API is settled fair use (*Google LLC v.
+Oracle America*, 2021): names, signatures and calling conventions are interface,
+not expression. Copying an implementation is a different thing, and this project
+does not. Every protocol layout here is written from its RFC or IANA registry,
+cited at the top of each layer module, and contributors are asked not to read
+scapy's source while writing the equivalent layer. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-That is why wiry can be MIT OR Apache-2.0, which means it can go into
-products that GPL would exclude, and the Rust core is usable from Rust.
+That is what makes the permissive licence defensible, and it is why the Rust
+core is usable from Rust.
 
-scapy is a far more capable tool and will remain so. If you need its protocol
-breadth, its interactive shell, or live capture, use scapy. Use wiry when
-you are moving a lot of packets offline and the dissection cost is what hurts.
+## Status
+
+Early. Working, measured, and short of parity. Read
+[DEVIATIONS.md](DEVIATIONS.md) before depending on it.
 
 ## License
 
