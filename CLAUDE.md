@@ -153,6 +153,12 @@ This audience will pull a benchmark apart, and should.
    dismissed.
 6. **Keep dpkt in the table.** It is the fast incumbent and the margin over it is
    thin. Hiding it would be the single most discrediting omission available.
+7. **Measure on an idle machine, and re-measure if anything else was running.**
+   Background load does not slow every tool equally. One run taken while an agent
+   was working showed dpkt down 17% and wiry down 2% against their idle figures,
+   which would have published a 2.0x margin that is really about 1.7x. Load
+   flatters whichever tool is least sensitive to it, and that is not something
+   best-of-N fixes.
 
 ## 7. Naming
 
