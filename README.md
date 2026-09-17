@@ -200,8 +200,17 @@ From source, with live capture:
 
 ```sh
 git clone https://github.com/AddisonGoolsbee/wiry && cd wiry
-pip install maturin
-MATURIN_PEP517_ARGS="--features live" maturin develop --release
+MATURIN_PEP517_ARGS="--features pyo3/extension-module,live" pip install .
+```
+
+Confirm it took with `python -c "import wiry; print(wiry.capture_available())"`.
+Building this way needs libpcap, which macOS already ships and which Debian and
+Ubuntu call `libpcap-dev`.
+
+The Rust crate is separate and needs none of that:
+
+```sh
+cargo add wiry
 ```
 
 ## Relationship to scapy
