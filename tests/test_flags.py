@@ -6,7 +6,7 @@ and RFC 2131 figure 2.
 
 import pytest
 
-from packetry import BOOTP, IP, TCP, FlagValue
+from wiry import BOOTP, IP, TCP, FlagValue
 
 # RFC 9293 §3.1, least significant bit first.
 TCP_BITS = {"F": 1, "S": 2, "R": 4, "P": 8, "A": 16, "U": 32, "E": 64, "C": 128}

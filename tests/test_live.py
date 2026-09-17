@@ -7,14 +7,14 @@ before touching a device, and the errors it raises when it cannot open one.
 
 import pytest
 
-import packetry as P
-from packetry import capture as C
+import wiry as P
+from wiry import capture as C
 
 live = pytest.mark.skipif(
     not P.capture_available(), reason="built without the live feature"
 )
 
-NO_SUCH_IF = "packetry-no-such-if0"
+NO_SUCH_IF = "wiry-no-such-if0"
 
 
 def test_live_args_mirror_the_sniff_keywords():
@@ -89,7 +89,7 @@ def test_a_failed_start_leaves_the_sniffer_idle_and_restartable():
 
 
 def test_an_unset_ether_src_is_filled_only_at_send_time():
-    from packetry import Ether, IP
+    from wiry import Ether, IP
 
     pkt = Ether() / IP()
     filled = C._with_src(pkt, "aa:bb:cc:dd:ee:ff")
@@ -100,7 +100,7 @@ def test_an_unset_ether_src_is_filled_only_at_send_time():
 
 
 def test_an_explicit_ether_src_is_never_overwritten():
-    from packetry import Ether, IP
+    from wiry import Ether, IP
 
     pkt = Ether(src="02:00:00:00:00:09") / IP()
     assert bytes(C._with_src(pkt, "aa:bb:cc:dd:ee:ff"))[6:12] == bytes.fromhex(
@@ -109,7 +109,7 @@ def test_an_explicit_ether_src_is_never_overwritten():
 
 
 def test_no_interface_address_is_an_ordinary_outcome():
-    from packetry import Ether, IP
+    from wiry import Ether, IP
 
     pkt = Ether() / IP()
     assert C._with_src(pkt, None) is pkt
@@ -119,15 +119,15 @@ def test_no_interface_address_is_an_ordinary_outcome():
 def test_the_interface_address_is_unknown_off_linux_and_never_a_path():
     import sys
 
-    assert P._packetry.interface_mac("../../etc/passwd") is None
-    assert P._packetry.interface_mac("packetry-no-such-if0") is None
+    assert P._wiry.interface_mac("../../etc/passwd") is None
+    assert P._wiry.interface_mac("wiry-no-such-if0") is None
     if sys.platform != "linux":
-        assert P._packetry.interface_mac("lo") is None
+        assert P._wiry.interface_mac("lo") is None
 
 
 @live
 def test_send_refuses_ipv6_and_names_sendp():
-    from packetry import IPv6, UDP
+    from wiry import IPv6, UDP
 
     with pytest.raises(NotImplementedError) as exc:
         P.send(IPv6() / UDP())
@@ -136,7 +136,7 @@ def test_send_refuses_ipv6_and_names_sendp():
 
 @live
 def test_send_refuses_the_arguments_it_does_not_implement():
-    from packetry import Ether, IP
+    from wiry import Ether, IP
 
     with pytest.raises(NotImplementedError):
         P.sendp(Ether() / IP(), socket=object(), iface=NO_SUCH_IF)
@@ -146,7 +146,7 @@ def test_send_refuses_the_arguments_it_does_not_implement():
 
 @live
 def test_sendp_on_an_unknown_interface_raises_oserror():
-    from packetry import Ether, IP
+    from wiry import Ether, IP
 
     with pytest.raises(OSError):
         P.sendp(Ether() / IP(), iface=NO_SUCH_IF, verbose=0)
@@ -154,7 +154,7 @@ def test_sendp_on_an_unknown_interface_raises_oserror():
 
 @live
 def test_a_negative_retry_is_refused_rather_than_guessed_at():
-    from packetry import Ether, ARP
+    from wiry import Ether, ARP
 
     with pytest.raises(NotImplementedError) as exc:
         P.srp(Ether() / ARP(pdst="10.0.0.1"), iface=NO_SUCH_IF, retry=-1,
@@ -164,7 +164,7 @@ def test_a_negative_retry_is_refused_rather_than_guessed_at():
 
 @live
 def test_sr_refuses_ipv6_and_names_sendp():
-    from packetry import IPv6, UDP
+    from wiry import IPv6, UDP
 
     with pytest.raises(NotImplementedError) as exc:
         P.sr(IPv6() / UDP(), iface=NO_SUCH_IF, timeout=0.1, verbose=0)
@@ -174,7 +174,7 @@ def test_sr_refuses_ipv6_and_names_sendp():
 @live
 @pytest.mark.parametrize("fn", ["sr", "sr1", "srp", "srp1"])
 def test_every_exchange_reaches_the_backend(fn):
-    from packetry import Ether, IP, ICMP
+    from wiry import Ether, IP, ICMP
 
     pkt = IP(dst="10.99.0.2") / ICMP() if fn.startswith("sr") and "p" not in fn \
         else Ether() / IP(dst="10.99.0.2") / ICMP()

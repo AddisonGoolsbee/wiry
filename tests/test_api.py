@@ -5,8 +5,8 @@ import contextlib
 
 import pytest
 
-import packetry
-from packetry import (
+import wiry
+from wiry import (
     ARP, Dot1Q, Ether, ICMP, IP, IPv6, Padding, Raw, TCP, UDP, hexdump_str,
     known_layers, ls, raw,
 )
@@ -268,7 +268,7 @@ def test_hexdump_str_accepts_raw_bytes_and_a_width():
 
 
 def test_hexdump_prints(capsys):
-    packetry.hexdump(b"AB")
+    wiry.hexdump(b"AB")
     assert capsys.readouterr().out == hexdump_str(b"AB")
 
 
@@ -280,9 +280,9 @@ def test_known_layers_matches_the_exported_classes():
     names = known_layers()
     assert names[0] == "Ether"
     assert {"IP", "IPv6", "TCP", "UDP", "ICMP", "ARP", "Raw"} <= set(names)
-    for name in packetry._LAYERS:
+    for name in wiry._LAYERS:
         assert name in names
-        assert getattr(packetry, name)._name == name
+        assert getattr(wiry, name)._name == name
 
 
 def test_ls_lists_layers_and_fields():
@@ -344,10 +344,10 @@ def test_iterating_a_packet_yields_an_independent_copy(pkt):
 
 
 def test_a_str_payload_is_latin_1_bytes():
-    assert bytes(packetry.Raw("sca") / "py") == b"scapy"
-    assert bytes("sca" / packetry.Raw("py")) == b"scapy"
-    assert bytes(packetry.Raw("\xff")) == b"\xff"
-    joined = packetry.Raw("sca")
+    assert bytes(wiry.Raw("sca") / "py") == b"scapy"
+    assert bytes("sca" / wiry.Raw("py")) == b"scapy"
+    assert bytes(wiry.Raw("\xff")) == b"\xff"
+    joined = wiry.Raw("sca")
     joined.add_payload("py")
     assert bytes(joined) == b"scapy"
 
@@ -355,9 +355,9 @@ def test_a_str_payload_is_latin_1_bytes():
 def test_public_names_are_exported():
     for name in ("Packet", "PacketList", "rdpcap", "wrpcap", "PcapReader", "raw",
                  "hexdump", "hexdump_str", "ls", "known_layers"):
-        assert name in packetry.__all__
-        assert hasattr(packetry, name)
-    assert set(packetry._LAYERS) <= set(packetry.__all__)
+        assert name in wiry.__all__
+        assert hasattr(wiry, name)
+    assert set(wiry._LAYERS) <= set(wiry.__all__)
 
 
 def test_raw_helper_is_the_same_as_bytes(pkt):

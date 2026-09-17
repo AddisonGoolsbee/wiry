@@ -1,11 +1,11 @@
 //! Shared assertions: dissection does not panic, it terminates, and no span
-//! points outside the buffer it came from. packetry-core's
+//! points outside the buffer it came from. wiry-core's
 //! `tests/robustness.rs` keeps a deterministic copy of these; the two must
 //! stay in step.
 
-use packetry_core::packet::Packet;
-use packetry_core::proto::{self, desc, ProtoId};
-use packetry_core::{parse, show};
+use wiry_core::packet::Packet;
+use wiry_core::proto::{self, desc, ProtoId};
+use wiry_core::{parse, show};
 
 pub const ALL_PROTOS: [ProtoId; 14] = [
     ProtoId::Raw,

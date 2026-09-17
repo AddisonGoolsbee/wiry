@@ -1,4 +1,4 @@
-use packetry_core::pcap;
+use wiry_core::pcap;
 
 /// (offset into the image, caplen, ts_sec, ts_frac), matching the index a read
 /// pcap file produces.

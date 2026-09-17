@@ -1,5 +1,5 @@
 [package]
-name = "packetry-core"
+name = "wiry-core"
 description = "Fast, clean-room packet dissection and construction engine"
 version.workspace = true
 edition.workspace = true

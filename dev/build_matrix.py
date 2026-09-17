@@ -12,7 +12,7 @@ Run: python dev/build_matrix.py [-v]
 
 import sys
 
-import packetry as B
+import wiry as B
 
 try:
     import scapy.all as S
@@ -31,7 +31,7 @@ MAC2 = "66:77:88:99:aa:bb"
 
 
 def cases():
-    """(label, packetry packet, scapy packet) triples."""
+    """(label, wiry packet, scapy packet) triples."""
     out = []
 
     def add(label, a, b):
@@ -121,7 +121,7 @@ def check_bytes():
             a = bytes(mine)
         except Exception as exc:
             err += 1
-            print(f"  ERROR  {label}: packetry raised {type(exc).__name__}: {exc}")
+            print(f"  ERROR  {label}: wiry raised {type(exc).__name__}: {exc}")
             continue
         try:
             b = bytes(theirs)

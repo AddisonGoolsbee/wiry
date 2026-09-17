@@ -1,8 +1,8 @@
-# Contributing to packetry
+# Contributing to wiry
 
 ## Provenance policy (read this before writing any protocol layer)
 
-packetry is a **clean-room** implementation. It is API-compatible with Scapy and
+wiry is a **clean-room** implementation. It is API-compatible with Scapy and
 shares no code with it.
 
 Scapy is licensed **GPL-2.0-only**. Reimplementing its *API* is settled fair use

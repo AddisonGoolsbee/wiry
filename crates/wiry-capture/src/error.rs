@@ -17,7 +17,7 @@ impl fmt::Display for CaptureError {
         match self {
             CaptureError::Unsupported => write!(
                 f,
-                "this build of packetry has no live capture support. Rebuild with \
+                "this build of wiry has no live capture support. Rebuild with \
                  the `live` feature: maturin develop --release --features \
                  pyo3/extension-module,live. Reading and writing capture files \
                  does not need it."

@@ -4,7 +4,7 @@ import struct
 
 import pytest
 
-from packetry import (
+from wiry import (
     ARP, DNS, Dot1Q, Ether, ICMP, IP, IPv6, Raw, TCP, UDP,
 )
 from helpers import (

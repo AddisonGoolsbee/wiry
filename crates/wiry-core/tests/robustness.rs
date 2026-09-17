@@ -3,12 +3,12 @@
 //! `fuzz/src/lib.rs`, with deterministic inputs so it runs under `cargo test`;
 //! the two sets of assertions must stay in step.
 
-use packetry_core::answers;
-use packetry_core::layers::{bootp, dns, ipv4, tcp};
-use packetry_core::packet::Packet;
-use packetry_core::proto::{self, desc, ProtoId};
-use packetry_core::{parse, pcap, pcapng, show};
 use std::time::{Duration, Instant};
+use wiry_core::answers;
+use wiry_core::layers::{bootp, dns, ipv4, tcp};
+use wiry_core::packet::Packet;
+use wiry_core::proto::{self, desc, ProtoId};
+use wiry_core::{parse, pcap, pcapng, show};
 
 /// Fixed so a failure is reproducible; printed in every assertion message.
 const SEED: u64 = 0x2545_F491_4F6C_DD1D;

@@ -14,7 +14,7 @@ import resource
 import sys
 import time
 
-import packetry as B
+import wiry as B
 
 try:
     import scapy.all as S
@@ -61,7 +61,7 @@ def bench_read(path, limit):
         return n, tcp
 
     dt, (n, tcp) = timed(blitz_lazy)
-    results["packetry"] = row("packetry  per-packet loop", dt, n, f"({tcp} tcp)")
+    results["wiry"] = row("wiry  per-packet loop", dt, n, f"({tcp} tcp)")
 
     # Bulk mode works over the whole capture, so the rate is per packet.
     def blitz_bulk():
@@ -71,8 +71,8 @@ def bench_read(path, limit):
         return len(col), tcp
 
     dt, (n2, c) = timed(blitz_bulk)
-    results["packetry_bulk"] = row(
-        f"packetry  bulk column API ({n2:,} pkts)", dt, n2, f"({c} tcp)"
+    results["wiry_bulk"] = row(
+        f"wiry  bulk column API ({n2:,} pkts)", dt, n2, f"({c} tcp)"
     )
 
     if HAVE_SCAPY:
@@ -109,7 +109,7 @@ def bench_roundtrip(path, limit):
         return n, total
 
     dt, (n, _) = timed(blitz)
-    results["packetry"] = row("packetry", dt, n)
+    results["wiry"] = row("wiry", dt, n)
 
     if HAVE_SCAPY:
         def scapy_rt():
@@ -143,7 +143,7 @@ def bench_build(n=20000):
         return n
 
     dt, _ = timed(blitz)
-    results["packetry"] = row("packetry  Ether/IP/TCP", dt, n)
+    results["wiry"] = row("wiry  Ether/IP/TCP", dt, n)
 
     if HAVE_SCAPY:
         def scapy_b():
@@ -169,7 +169,7 @@ def bench_memory(path):
     n = len(pl)
     after = rss_mb()
     print(f"  file {size:,.0f} MB, {n:,} packets")
-    print(f"  packetry rdpcap peak RSS delta: {after - base:,.0f} MB")
+    print(f"  wiry rdpcap peak RSS delta: {after - base:,.0f} MB")
     print("  (scapy rdpcap on a capture this size is measured separately;")
     print("   it materialises one Python object graph per packet)")
     return n
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     limit = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
     print(f"file: {pcap}  ({os.path.getsize(pcap) / 1e6:,.1f} MB)")
     if not HAVE_SCAPY:
-        print("scapy not installed; showing packetry numbers only")
+        print("scapy not installed; showing wiry numbers only")
 
     r1 = bench_read(pcap, limit)
     summarise("read+fields", r1)

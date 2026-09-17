@@ -6,7 +6,7 @@ the feature on skips only the assertions that are about its absence.
 
 import pytest
 
-import packetry as P
+import wiry as P
 
 NAMES = [
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
@@ -26,7 +26,7 @@ def test_every_name_exists(name):
 
 
 def test_importing_the_module_directly_works():
-    from packetry import capture
+    from wiry import capture
 
     assert capture.sniff is P.sniff
 
@@ -68,7 +68,7 @@ def test_sniffing_with_no_source_at_all_raises():
 
 @absent
 def test_a_bpf_filter_offline_explains_the_feature(tmp_path):
-    from packetry import Ether, IP, TCP
+    from wiry import Ether, IP, TCP
 
     path = tmp_path / "one.pcap"
     P.wrpcap(str(path), [Ether() / IP() / TCP()])
@@ -103,7 +103,7 @@ def test_conf_iface_raises_only_when_read():
 
 @absent
 def test_offline_sniffing_still_works(tmp_path):
-    from packetry import Ether, IP, TCP, UDP
+    from wiry import Ether, IP, TCP, UDP
 
     path = tmp_path / "mixed.pcap"
     P.wrpcap(

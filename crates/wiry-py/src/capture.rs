@@ -1,10 +1,10 @@
 //! Bindings for the capture crate: availability, interface listing and the
 //! error mapping every live entry point shares.
 
-use packetry_capture::{CaptureError, Interface};
 use pyo3::exceptions::{PyPermissionError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use wiry_capture::{CaptureError, Interface};
 
 // pyo3 0.22's exception boilerplate tests `feature = "gil-refs"`, which is this
 // crate's feature set once it declares one of its own.
@@ -14,7 +14,7 @@ mod exc {
     use pyo3::exceptions::PyOSError;
 
     create_exception!(
-        _packetry,
+        _wiry,
         CaptureUnavailable,
         PyOSError,
         "Live capture is not available in this build or on this host."
@@ -36,14 +36,14 @@ pub(crate) fn to_py_err(e: CaptureError) -> PyErr {
 
 #[pyfunction]
 pub(crate) fn capture_available() -> bool {
-    packetry_capture::available()
+    wiry_capture::available()
 }
 
 /// Raises the canonical explanation when this build cannot capture, so every
 /// caller reports the same rebuild instruction.
 #[pyfunction]
 pub(crate) fn capture_check() -> PyResult<()> {
-    if packetry_capture::available() {
+    if wiry_capture::available() {
         Ok(())
     } else {
         Err(to_py_err(CaptureError::Unsupported))
@@ -61,7 +61,7 @@ fn iface_dict<'py>(py: Python<'py>, i: &Interface) -> PyResult<Bound<'py, PyDict
 
 #[pyfunction]
 pub(crate) fn list_interfaces(py: Python<'_>) -> PyResult<Py<PyList>> {
-    let ifs = packetry_capture::list_interfaces().map_err(to_py_err)?;
+    let ifs = wiry_capture::list_interfaces().map_err(to_py_err)?;
     let out = PyList::empty_bound(py);
     for i in &ifs {
         out.append(iface_dict(py, i)?)?;
@@ -73,7 +73,7 @@ pub(crate) fn list_interfaces(py: Python<'_>) -> PyResult<Py<PyList>> {
 /// platform but Linux. Callers must treat that as ordinary.
 #[pyfunction]
 pub(crate) fn interface_mac(name: &str) -> Option<String> {
-    packetry_capture::interface_mac(name).map(|m| {
+    wiry_capture::interface_mac(name).map(|m| {
         m.iter()
             .map(|b| format!("{b:02x}"))
             .collect::<Vec<_>>()
@@ -83,5 +83,5 @@ pub(crate) fn interface_mac(name: &str) -> Option<String> {
 
 #[pyfunction]
 pub(crate) fn default_interface() -> PyResult<String> {
-    packetry_capture::default_interface().map_err(to_py_err)
+    wiry_capture::default_interface().map_err(to_py_err)
 }

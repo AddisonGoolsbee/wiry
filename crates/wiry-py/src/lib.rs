@@ -10,17 +10,17 @@ mod capture;
 mod live;
 mod sniff;
 
-use packetry_capture::Flow;
-use packetry_core::field::{self, FieldDesc, FieldKind, FieldValue};
-use packetry_core::options::OptArg;
-use packetry_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
-use packetry_core::pcap;
-use packetry_core::proto::{self, ProtoId};
-use packetry_core::show;
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PySequence};
 use std::sync::Arc;
+use wiry_capture::Flow;
+use wiry_core::field::{self, FieldDesc, FieldKind, FieldValue};
+use wiry_core::options::OptArg;
+use wiry_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
+use wiry_core::pcap;
+use wiry_core::proto::{self, ProtoId};
+use wiry_core::show;
 
 fn proto_by_name(name: &str) -> PyResult<ProtoId> {
     proto::by_name(name).ok_or_else(|| PyValueError::new_err(format!("unknown layer {name:?}")))
@@ -184,9 +184,9 @@ pub(crate) fn build_query(
         } else if let Ok(b) = v.extract::<Vec<u8>>() {
             CondVal::Bytes(b)
         } else if let Ok(s) = v.extract::<String>() {
-            match packetry_core::parse::value_for(f, &s) {
-                Some(packetry_core::parse::ValueBits::Uint(n)) => CondVal::Uint(n),
-                Some(packetry_core::parse::ValueBits::Bytes(b)) => CondVal::Bytes(b),
+            match wiry_core::parse::value_for(f, &s) {
+                Some(wiry_core::parse::ValueBits::Uint(n)) => CondVal::Uint(n),
+                Some(wiry_core::parse::ValueBits::Bytes(b)) => CondVal::Bytes(b),
                 None => {
                     return Err(PyValueError::new_err(format!(
                         "cannot parse {s:?} for field {fname:?}"
@@ -277,12 +277,12 @@ impl PyPkt {
             .ok_or_else(|| PyIndexError::new_err("layer out of range"))?;
         let f = proto::active_field_of(span.proto, self.inner.header(layer), name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
-        match packetry_core::parse::value_for(f, val) {
-            Some(packetry_core::parse::ValueBits::Uint(v)) => {
+        match wiry_core::parse::value_for(f, val) {
+            Some(wiry_core::parse::ValueBits::Uint(v)) => {
                 self.inner.set_uint(layer, name, v);
                 Ok(())
             }
-            Some(packetry_core::parse::ValueBits::Bytes(b)) => {
+            Some(wiry_core::parse::ValueBits::Bytes(b)) => {
                 self.inner.set_bytes(layer, name, &b);
                 Ok(())
             }
@@ -311,7 +311,7 @@ impl PyPkt {
     /// `None` means the protocol has no option region at all, unlike an empty
     /// list, which means it has one and it is empty.
     fn options(&self, py: Python<'_>, layer: usize) -> Option<Py<PyList>> {
-        use packetry_core::options::ItemValue;
+        use wiry_core::options::ItemValue;
         let items = self.inner.options(layer)?;
         let out = PyList::empty_bound(py);
         for it in &items {
@@ -333,7 +333,7 @@ impl PyPkt {
     }
 
     fn dns_records(&self, py: Python<'_>, layer: usize) -> PyResult<Option<PyObject>> {
-        use packetry_core::layers::dns::{self, RData};
+        use wiry_core::layers::dns::{self, RData};
         let Some(span) = self.inner.layers().get(layer) else {
             return Ok(None);
         };
@@ -577,7 +577,7 @@ impl PyPktList {
                 .filter(|(off, len, _, _)| {
                     let a = *off;
                     let b = a + *len as usize;
-                    packetry_core::packet::dissect_spans(&buf[a..b], link)
+                    wiry_core::packet::dissect_spans(&buf[a..b], link)
                         .iter()
                         .any(|s| s.proto == id)
                 })
@@ -739,8 +739,7 @@ impl PyPktList {
         // file exactly as it would on a wire.
         let filter = match bpf {
             Some(e) => Some(
-                packetry_capture::compile_filter(self.dlt, e, 262_144)
-                    .map_err(capture::to_py_err)?,
+                wiry_capture::compile_filter(self.dlt, e, 262_144).map_err(capture::to_py_err)?,
             ),
             None => None,
         };
@@ -835,11 +834,11 @@ fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
         .allow_threads(|| -> Result<_, String> {
             let base = data.as_ptr() as usize;
             let mut index = Vec::new();
-            if packetry_core::pcapng::is_pcapng(&data) {
-                let r = packetry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())?;
+            if wiry_core::pcapng::is_pcapng(&data) {
+                let r = wiry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())?;
                 let dlt = r.header.linktype;
                 let nanos = r.header.nanos();
-                for rec in packetry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())? {
+                for rec in wiry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())? {
                     let off = rec.data.as_ptr() as usize - base;
                     index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
                 }
@@ -1027,11 +1026,11 @@ fn apply_fields(
             .ok_or_else(|| PyIndexError::new_err("layer out of range"))?;
         let f = proto::active_field_of(span.proto, pkt.header(*layer), name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
-        match packetry_core::parse::value_for(f, s) {
-            Some(packetry_core::parse::ValueBits::Uint(v)) => {
+        match wiry_core::parse::value_for(f, s) {
+            Some(wiry_core::parse::ValueBits::Uint(v)) => {
                 pkt.set_uint(*layer, name, v);
             }
-            Some(packetry_core::parse::ValueBits::Bytes(b)) => {
+            Some(wiry_core::parse::ValueBits::Bytes(b)) => {
                 pkt.set_bytes(*layer, name, &b);
             }
             None => {
@@ -1239,9 +1238,9 @@ fn bind_layer(
         let n = if let Ok(n) = v.extract::<u64>() {
             n
         } else if let Ok(s) = v.extract::<String>() {
-            match packetry_core::parse::value_for(f, &s) {
-                Some(packetry_core::parse::ValueBits::Uint(n)) => n,
-                Some(packetry_core::parse::ValueBits::Bytes(b)) if b.len() <= 8 => {
+            match wiry_core::parse::value_for(f, &s) {
+                Some(wiry_core::parse::ValueBits::Uint(n)) => n,
+                Some(wiry_core::parse::ValueBits::Bytes(b)) if b.len() <= 8 => {
                     b.iter().fold(0u64, |acc, x| (acc << 8) | *x as u64)
                 }
                 _ => {
@@ -1261,7 +1260,7 @@ fn bind_layer(
 }
 
 #[pymodule]
-fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPkt>()?;
     m.add_class::<PyPktList>()?;
     m.add_function(wrap_pyfunction!(read_pcap, m)?)?;

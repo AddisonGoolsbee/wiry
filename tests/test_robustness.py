@@ -4,10 +4,10 @@ import struct
 
 import pytest
 
-import packetry
-from packetry import DNS, IP, TCP, UDP
+import wiry
+from wiry import DNS, IP, TCP, UDP
 
-_b = packetry._packetry
+_b = wiry._wiry
 
 
 def pkt():
@@ -42,7 +42,7 @@ def test_building_with_no_layers_raises(fn):
 @pytest.mark.parametrize(
     "load", [2**31, 0, 5, True, [1, 2, 3], range(5), 1.5]
 )
-@pytest.mark.parametrize("layer", [packetry.Raw, packetry.Padding])
+@pytest.mark.parametrize("layer", [wiry.Raw, wiry.Padding])
 def test_a_non_bytes_load_is_refused_not_allocated(layer, load):
     with pytest.raises(TypeError):
         bytes(IP() / layer(load=load))
@@ -50,20 +50,20 @@ def test_a_non_bytes_load_is_refused_not_allocated(layer, load):
 
 @pytest.mark.parametrize("load", [b"ab", bytearray(b"ab"), memoryview(b"ab"), "ab"])
 def test_a_bytes_like_load_still_builds(load):
-    assert bytes(packetry.Raw(load=load)) == b"ab"
+    assert bytes(wiry.Raw(load=load)) == b"ab"
 
 
 @pytest.mark.parametrize("length", [2**34, 2**16, 8192, -1, True, "4", 4.0])
 def test_an_undeclarable_field_width_is_refused_before_it_allocates(length):
     with pytest.raises(ValueError):
-        packetry.fields.StrFixedLenField("x", b"", length=length)
+        wiry.fields.StrFixedLenField("x", b"", length=length)
 
 
 def test_the_widest_declarable_field_still_works():
-    f = packetry.fields.StrFixedLenField(
-        "x", b"ab", length=packetry.fields.MAX_FIELD_OCTETS
+    f = wiry.fields.StrFixedLenField(
+        "x", b"ab", length=wiry.fields.MAX_FIELD_OCTETS
     )
-    assert len(f.spec()[4]) == packetry.fields.MAX_FIELD_OCTETS
+    assert len(f.spec()[4]) == wiry.fields.MAX_FIELD_OCTETS
 
 
 def dns_bomb() -> bytes:

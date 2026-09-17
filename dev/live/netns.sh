@@ -2,7 +2,7 @@
 # veth pair in a namespace, so capture tests see only their own traffic.
 set -euo pipefail
 
-NS=packetry-test
+NS=wiry-test
 VETH=pkt0
 PEER=pkt1
 

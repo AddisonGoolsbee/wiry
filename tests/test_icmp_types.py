@@ -11,7 +11,7 @@ import struct
 import pytest
 from helpers import checksum
 
-from packetry import ICMP, IP, Ether, Raw
+from wiry import ICMP, IP, Ether, Raw
 
 
 def icmp(type_: int, code: int, rest: bytes, payload: bytes = b"") -> ICMP:

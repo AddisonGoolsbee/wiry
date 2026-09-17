@@ -1,8 +1,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use packetry_core::packet::Packet;
-use packetry_fuzz::ALL_PROTOS;
+use wiry_core::packet::Packet;
+use wiry_fuzz::ALL_PROTOS;
 
 fuzz_target!(|data: &[u8]| {
     let Some((sel, body)) = data.split_first() else {
@@ -10,5 +10,5 @@ fuzz_target!(|data: &[u8]| {
     };
     let link = ALL_PROTOS[*sel as usize % ALL_PROTOS.len()];
     let mut pkt = Packet::dissect(body.to_vec(), link);
-    packetry_fuzz::exercise(&mut pkt);
+    wiry_fuzz::exercise(&mut pkt);
 });

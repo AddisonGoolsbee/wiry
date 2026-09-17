@@ -1,7 +1,7 @@
-"""Run scapy's own regression tests against packetry.
+"""Run scapy's own regression tests against wiry.
 
 The strongest adversarial check available: thousands of assertions written by
-scapy's maintainers, executed against our implementation with `packetry`
+scapy's maintainers, executed against our implementation with `wiry`
 substituted for `scapy.all`.
 
 The suite is not vendored. Point this at a local clone:
@@ -22,7 +22,7 @@ import sys
 import traceback
 from pathlib import Path
 
-import packetry
+import wiry
 
 # Names we deliberately do not provide: a scope boundary, not a defect.
 OUT_OF_SCOPE = {
@@ -60,7 +60,7 @@ def parse_uts(path):
 
 
 def namespace():
-    ns = {k: getattr(packetry, k) for k in dir(packetry) if not k.startswith("_")}
+    ns = {k: getattr(wiry, k) for k in dir(wiry) if not k.startswith("_")}
     ns["__name__"] = "scapy_suite"
     return ns
 
@@ -87,7 +87,7 @@ def classify_error(exc, code, supported):
 
 
 def run(path, verbose=False, limit=None):
-    supported = set(dir(packetry))
+    supported = set(dir(wiry))
     results = {"pass": 0, "skip": 0, "fail": 0}
     failures = []
     skips = {}

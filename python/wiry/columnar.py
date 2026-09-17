@@ -157,7 +157,7 @@ def _require(module: str, extra: str) -> Any:
     except ImportError as exc:
         raise ImportError(
             f"{module} is needed for this export but is not installed. "
-            f"Install it with `pip install 'packetry[{extra}]'` "
+            f"Install it with `pip install 'wiry[{extra}]'` "
             f"or `pip install {module}`."
         ) from exc
 

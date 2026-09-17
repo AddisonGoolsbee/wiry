@@ -1,6 +1,6 @@
 [package]
-name = "packetry-capture"
-description = "Live packet capture and injection for packetry"
+name = "wiry-capture"
+description = "Live packet capture and injection for wiry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-packetry-core = { path = "../packetry-core" }
+wiry-core = { path = "../wiry-core" }
 # Pinned exactly: 2.5.0 declares MSRV 1.64 but master already declares 1.85 and
 # edition 2024, so a 2.6 would break this workspace's MSRV on `cargo update`.
 pcap = { version = "=2.5.0", optional = true }

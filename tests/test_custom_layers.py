@@ -6,8 +6,8 @@ packet library.
 
 import pytest
 
-from packetry import IP, UDP, Ether, Packet, TCP, bind_layers, known_layers, rdpcap, wrpcap
-from packetry.fields import (
+from wiry import IP, UDP, Ether, Packet, TCP, bind_layers, known_layers, rdpcap, wrpcap
+from wiry.fields import (
     BitField, ByteField, FlagsField, IP6Field, IPField, IntField, LEShortField,
     LongField, MACField, ShortField, StrField, StrFixedLenField, XByteField,
     XIntField, XShortField,

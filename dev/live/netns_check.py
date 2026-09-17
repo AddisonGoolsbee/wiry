@@ -7,8 +7,8 @@ suite: it needs root and a real interface.
 import sys
 import time
 
-import packetry as P
-from packetry import ARP, Ether, ICMP, IP, Raw, UDP
+import wiry as P
+from wiry import ARP, Ether, ICMP, IP, Raw, UDP
 
 FAILED = []
 
@@ -30,7 +30,7 @@ def main(veth):
         Ether(dst="02:00:00:00:00:02", src="02:00:00:00:00:01")
         / IP(src="10.99.0.1", dst="10.99.0.2")
         / UDP(sport=4444, dport=4445)
-        / Raw(load=b"packetry-netns-probe")
+        / Raw(load=b"wiry-netns-probe")
     )
 
     # Capture must be open before sending, or a fast frame is missed.
@@ -46,7 +46,7 @@ def main(veth):
         check("bytes are identical", bytes(got[0]) == frame)
         check("dissects to the sent stack", got[0].layers()[:4]
               == ["Ether", "IP", "UDP", "Raw"], str(got[0].layers()))
-        check("payload survived", got[0][Raw].load == b"packetry-netns-probe")
+        check("payload survived", got[0][Raw].load == b"wiry-netns-probe")
 
     # A filter that cannot match must return nothing rather than hang.
     t0 = time.monotonic()

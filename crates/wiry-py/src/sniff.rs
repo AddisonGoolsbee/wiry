@@ -11,10 +11,10 @@
 
 use std::time::{Duration, Instant};
 
-use packetry_capture::{CompiledFilter, Flow};
-use packetry_core::packet::{dissect_spans, Packet as CorePacket};
-use packetry_core::proto::ProtoId;
 use pyo3::prelude::*;
+use wiry_capture::{CompiledFilter, Flow};
+use wiry_core::packet::{dissect_spans, Packet as CorePacket};
+use wiry_core::proto::ProtoId;
 
 use crate::{PyPkt, Query};
 

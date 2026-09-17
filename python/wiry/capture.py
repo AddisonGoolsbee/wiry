@@ -1,11 +1,11 @@
 """Live capture and injection, plus the offline driver for ``sniff``.
 
-Import cost is zero until one of these names is touched: ``packetry`` exports
+Import cost is zero until one of these names is touched: ``wiry`` exports
 them through its module ``__getattr__``.
 
 ``sniff`` runs one state machine whatever feeds it. Filters are ANDed cheapest
 first: ``filter=`` (BPF, in the kernel's own bytecode) rejects a packet for
-nothing, ``where=`` (a packetry extension, evaluated in Rust) rejects one before
+nothing, ``where=`` (a wiry extension, evaluated in Rust) rejects one before
 it ever becomes a Python object, and only survivors reach ``lfilter=``.
 
 Everything except ``sniff(offline=...)`` needs the live backend. Without it the
@@ -22,7 +22,7 @@ import weakref
 from typing import Any, Callable, Optional
 
 from . import Packet, PacketList
-from . import _packetry as _b
+from . import _wiry as _b
 from .columnar import _normalize_where
 
 CaptureUnavailable = _b.CaptureUnavailable
@@ -129,7 +129,7 @@ def sniff(
 
     ``count=0`` is unbounded and ``store=0`` returns an empty ``PacketList``.
     ``timeout`` is a wall-clock deadline for the whole call, not libpcap's read
-    timeout. ``where=`` is a packetry extension, keyword-only: the same Rust-side
+    timeout. ``where=`` is a wiry extension, keyword-only: the same Rust-side
     query ``PacketList.filter(where=...)`` takes, so a packet it rejects is never
     built as a Python object.
 

@@ -1,10 +1,10 @@
-"""packetry: fast packet dissection and crafting with a familiar API."""
+"""wiry: fast packet dissection and crafting with a familiar API."""
 
 from __future__ import annotations
 
 from typing import Any, Iterator, Sequence
 
-from . import _packetry as _b
+from . import _wiry as _b
 
 __version__ = _b.__version__
 

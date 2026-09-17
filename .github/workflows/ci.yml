@@ -71,10 +71,10 @@ jobs:
       # Package-qualified: the workspace root is virtual, so a bare --features
       # cannot name a member's feature.
       - name: cargo clippy (live)
-        run: cargo clippy --workspace --all-targets --features packetry-py/live -- -D warnings
+        run: cargo clippy --workspace --all-targets --features wiry-py/live -- -D warnings
 
       - name: cargo test (live)
-        run: cargo test --workspace --features packetry-py/live
+        run: cargo test --workspace --features wiry-py/live
 
   msrv:
     name: msrv 1.75
@@ -90,7 +90,7 @@ jobs:
       # The pcap crate is pinned exactly because its master branch already
       # declares a much newer MSRV; this job is what catches a bump.
       - name: cargo check (live)
-        run: cargo check --workspace --features packetry-py/live
+        run: cargo check --workspace --features wiry-py/live
 
   python:
     name: python ${{ matrix.python-version }} / ${{ matrix.os }} ${{ matrix.features && '(live)' || '' }}

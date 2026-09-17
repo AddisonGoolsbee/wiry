@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use packetry_core::layers::dns;
+use wiry_core::layers::dns;
 use std::time::Instant;
 
 fuzz_target!(|data: &[u8]| {

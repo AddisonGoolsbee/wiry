@@ -1,9 +1,9 @@
 use crate::error::CaptureError;
-use packetry_core::packet::dissect_spans;
-use packetry_core::proto::ProtoId;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::Duration;
+use wiry_core::packet::dissect_spans;
+use wiry_core::proto::ProtoId;
 
 /// Sends already-built IPv4 datagrams through a raw socket, letting the kernel
 /// route and resolve. Parsing the routing table ourselves would need three OS

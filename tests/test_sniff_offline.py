@@ -9,8 +9,8 @@ import time
 
 import pytest
 
-import packetry as P
-from packetry import ARP, Ether, IP, TCP, UDP
+import wiry as P
+from wiry import ARP, Ether, IP, TCP, UDP
 
 # 4 TCP to port 80, 3 UDP to 53, 2 ARP. Chosen so every predicate below has a
 # partition it selects and one it rejects.

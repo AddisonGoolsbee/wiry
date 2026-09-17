@@ -6,7 +6,7 @@ Run: python dev/api_audit.py
 
 import sys
 
-import packetry as B
+import wiry as B
 
 try:
     import scapy.all as S

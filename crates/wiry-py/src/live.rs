@@ -20,13 +20,13 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use packetry_capture::{open_live, CaptureBuf, Flow, Handle, LiveConfig, PacketMeta, Record};
-use packetry_core::answers::{answers, reply_key, ReplyKey};
-use packetry_core::packet::dissect_spans;
-use packetry_core::pcap;
-use packetry_core::proto::ProtoId;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use wiry_capture::{open_live, CaptureBuf, Flow, Handle, LiveConfig, PacketMeta, Record};
+use wiry_core::answers::{answers, reply_key, ReplyKey};
+use wiry_core::packet::dissect_spans;
+use wiry_core::pcap;
+use wiry_core::proto::ProtoId;
 
 use crate::capture::to_py_err;
 use crate::sniff::SniffState;
@@ -525,7 +525,7 @@ pub(crate) fn send_datagrams(
     let mut sent = 0usize;
     loop {
         sent += py
-            .allow_threads(|| packetry_capture::send_l3(&frames, count, inter))
+            .allow_threads(|| wiry_capture::send_l3(&frames, count, inter))
             .map_err(to_py_err)?;
         if !repeat {
             return Ok(sent);
@@ -660,7 +660,7 @@ pub(crate) fn sr_live(
             if l2 {
                 one_run(&mut h, &batch, 1, gap)?;
             } else {
-                packetry_capture::send_l3(&batch, 1, inter).map_err(to_py_err)?;
+                wiry_capture::send_l3(&batch, 1, inter).map_err(to_py_err)?;
             }
             Ok(())
         })?;

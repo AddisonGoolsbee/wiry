@@ -5,7 +5,7 @@ RFC 768 defines the UDP length the same way. Trailing pad octets belong to the
 frame, not to the datagram, so they fall outside both.
 """
 
-from packetry import IP, UDP, Ether, Padding, Raw, TCP, raw
+from wiry import IP, UDP, Ether, Padding, Raw, TCP, raw
 
 
 def test_padding_alone_is_just_its_bytes():

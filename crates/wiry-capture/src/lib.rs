@@ -120,7 +120,7 @@ mod tests {
     fn a_hardware_address_is_never_read_from_outside_the_interface_table() {
         assert_eq!(interface_mac(""), None);
         assert_eq!(interface_mac("../../etc/passwd"), None);
-        assert_eq!(interface_mac("packetry-no-such-if0"), None);
+        assert_eq!(interface_mac("wiry-no-such-if0"), None);
     }
 
     #[test]

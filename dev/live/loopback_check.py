@@ -7,8 +7,8 @@ for and the one a Linux-only test would never reach.
 import sys
 import time
 
-import packetry as P
-from packetry import IP, Raw, UDP
+import wiry as P
+from wiry import IP, Raw, UDP
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
 
     import socket
     sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sk.sendto(b"packetry-lo-probe", ("127.0.0.1", 4445))
+    sk.sendto(b"wiry-lo-probe", ("127.0.0.1", 4445))
     sk.close()
 
     s.join()
@@ -35,7 +35,7 @@ def main():
         sys.exit(f"lo0 should dissect as Loopback (DLT_NULL), got {pkt.layers()[0]}")
     if IP not in pkt or UDP not in pkt:
         sys.exit("the null header should be followed by IP/UDP")
-    if pkt[Raw].load != b"packetry-lo-probe":
+    if pkt[Raw].load != b"wiry-lo-probe":
         sys.exit("payload did not survive")
     print("loopback capture works, and the DLT_NULL header dissected")
 

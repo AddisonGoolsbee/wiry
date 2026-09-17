@@ -1,9 +1,9 @@
-# packetry
+# wiry
 
 Fast packet dissection and crafting for Python. Rust core, familiar API.
 
 ```python
-from packetry import *
+from wiry import *
 
 pkt = Ether()/IP(dst="10.0.0.1")/TCP(dport=443, flags="S")
 pkt.show()
@@ -22,7 +22,7 @@ Packet dissection in Python is slow for a structural reason: every field of ever
 layer becomes a Python object, whether or not you read it. Reading two fields out
 of a capture costs you the whole object graph.
 
-packetry keeps a packet as one byte buffer plus a small table of
+wiry keeps a packet as one byte buffer plus a small table of
 `(protocol, offset, header length)` spans. Dissection walks the layer chain
 touching only the bytes needed to find each next header. Field values decode on
 demand. A capture stays in Rust; Python objects appear only for packets you
@@ -35,7 +35,7 @@ Measured against scapy 2.7.0 on `bigFlows.pcap`, a public 256 MB capture of
 macOS 26.6, CPython 3.13.5. Reproduce with `python dev/bench.py <pcap>`. Figures vary a few percent
 between runs; these are from the lower of two.
 
-| Workload | scapy | packetry | |
+| Workload | scapy | wiry | |
 |---|---|---|---|
 | Read + 2 fields per packet | 11,490 pkt/s | 196,892 pkt/s | **17.1x** |
 | Same, bulk column API | 11,490 pkt/s | 4,071,061 pkt/s | **354.3x** |
@@ -47,9 +47,9 @@ Memory, each measured in its own process (`python dev/bench_memory.py <pcap>`):
 | | packets held | peak RSS | per packet |
 |---|---|---|---|
 | scapy | 200,000 | 1,318 MB | 6.59 KB |
-| packetry | 549,726 | 347 MB | **0.63 KB** |
+| wiry | 549,726 | 347 MB | **0.63 KB** |
 
-packetry read the entire 549,726-packet file and extracted a field from every
+wiry read the entire 549,726-packet file and extracted a field from every
 packet in 0.21 s. scapy took 18.23 s to do the same for 200,000 of them.
 
 Three honest caveats about these numbers:
@@ -63,7 +63,7 @@ Three honest caveats about these numbers:
   flag type cost roughly 10% on the per-packet paths. That trade was worth it:
   the same work fixed length and checksum corruption on 1,568 of 14,261 real
   packets.
-- **packetry currently implements fewer protocols than scapy.** Speed and
+- **wiry currently implements fewer protocols than scapy.** Speed and
   coverage are not the same axis. The benchmark only touches Ethernet, IPv4, TCP
   and UDP, which both libraries fully implement, so the comparison is on shared
   ground. See the supported surface below.
@@ -92,7 +92,7 @@ chains agree, all 155,501 field comparisons are equal, and all 14,261 packets
 round-trip byte-identical. 38 of 38 construction cases are byte-identical too,
 and field names match scapy exactly across all eleven layers.
 
-Scapy's own regression suite runs against packetry: 37 pass, 14 fail, 629 skip.
+Scapy's own regression suite runs against wiry: 37 pass, 14 fail, 629 skip.
 Every skip is a scope boundary such as live capture or a layer we do not
 implement; every remaining failure is a feature we do not claim, and each is
 listed in [DEVIATIONS.md](DEVIATIONS.md).
@@ -115,13 +115,13 @@ E15 and E17.
 ## Install
 
 ```sh
-pip install packetry        # not yet published
+pip install wiry        # not yet published
 ```
 
 From source:
 
 ```sh
-git clone https://github.com/packetry/packetry && cd packetry
+git clone https://github.com/AddisonGoolsbee/wiry && cd wiry
 pip install maturin && maturin develop --release
 ```
 
@@ -130,7 +130,7 @@ pip install maturin && maturin develop --release
 The surface intentionally mirrors what people already type.
 
 ```python
-from packetry import *
+from wiry import *
 
 # construct
 p = Ether(dst="00:11:22:33:44:55")/IP(src="10.0.0.1", dst="10.0.0.2")/TCP(dport=80)
@@ -181,8 +181,8 @@ at class-definition time, and the same dissector that runs the built-in layers
 runs yours — nothing crosses back into Python per packet or per field.
 
 ```python
-from packetry import Packet, bind_layers, IP, UDP
-from packetry.fields import ByteField, BitField, ShortField, IntField, IPField
+from wiry import Packet, bind_layers, IP, UDP
+from wiry.fields import ByteField, BitField, ShortField, IntField, IPField
 
 class MyProto(Packet):
     name = "MyProto"
@@ -207,7 +207,7 @@ From there it is an ordinary layer: `/` stacking, `pkt[MyProto]`, `in`, field
 get and set, `show()`, `summary()`, `bytes()`, dissection out of a capture, and
 the columnar API (`cap.columns([("MyProto", "version")])`).
 
-`packetry.fields` has `ByteField`, `ShortField`, `IntField`, `LongField`, their
+`wiry.fields` has `ByteField`, `ShortField`, `IntField`, `LongField`, their
 `X` and `LE` variants, `BitField`, `FlagsField`, `IPField`, `IP6Field`,
 `MACField`, `StrFixedLenField` and `StrField`. Bit offsets come from summing
 widths in declaration order, so bit fields may straddle octets as long as the
@@ -236,12 +236,12 @@ callbacks, so selection stays in Rust.
 Dataframes, each library imported lazily so none of them is a dependency:
 
 ```python
-from packetry.columnar import to_polars, to_arrow, to_pandas
+from wiry.columnar import to_polars, to_arrow, to_pandas
 
 df = to_polars(cap)
 ```
 
-Install with `pip install 'packetry[polars]'`, or `[arrow]`, or `[pandas]`.
+Install with `pip install 'wiry[polars]'`, or `[arrow]`, or `[pandas]`.
 
 Four columns over the same 549,726-packet capture:
 
@@ -259,7 +259,7 @@ dominates, not the dissection.
 
 ## Relationship to scapy
 
-packetry is an independent, clean-room implementation. It shares no code with
+wiry is an independent, clean-room implementation. It shares no code with
 scapy.
 
 scapy is licensed GPL-2.0. Reimplementing an API is settled fair use
@@ -270,11 +270,11 @@ IANA registry, cited in a comment at the top of each layer module, and
 contributors are asked not to read scapy's source while writing the equivalent
 layer. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-That is why packetry can be MIT OR Apache-2.0, which means it can go into
+That is why wiry can be MIT OR Apache-2.0, which means it can go into
 products that GPL would exclude, and the Rust core is usable from Rust.
 
 scapy is a far more capable tool and will remain so. If you need its protocol
-breadth, its interactive shell, or live capture, use scapy. Use packetry when
+breadth, its interactive shell, or live capture, use scapy. Use wiry when
 you are moving a lot of packets offline and the dissection cost is what hurts.
 
 ## License
