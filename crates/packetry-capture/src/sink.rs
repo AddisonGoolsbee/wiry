@@ -1,5 +1,9 @@
 use packetry_core::pcap;
 
+/// (offset into the image, caplen, ts_sec, ts_frac), matching the index a read
+/// pcap file produces.
+pub type Record = (usize, u32, u32, u32);
+
 /// What the caller wants after seeing a packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flow {
@@ -32,7 +36,7 @@ impl<F: FnMut(&PacketMeta, &[u8]) -> Flow> PacketSink for F {
 /// bytes and share every bulk path.
 pub struct CaptureBuf {
     buf: Vec<u8>,
-    index: Vec<(usize, u32, u32, u32)>,
+    index: Vec<Record>,
     linktype: u32,
 }
 
@@ -71,7 +75,7 @@ impl CaptureBuf {
         &self.buf
     }
 
-    pub fn into_parts(self) -> (Vec<u8>, Vec<(usize, u32, u32, u32)>, u32) {
+    pub fn into_parts(self) -> (Vec<u8>, Vec<Record>, u32) {
         (self.buf, self.index, self.linktype)
     }
 }

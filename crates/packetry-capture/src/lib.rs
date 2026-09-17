@@ -7,7 +7,7 @@ pub mod error;
 pub mod sink;
 
 pub use error::CaptureError;
-pub use sink::{CaptureBuf, Flow, PacketMeta, PacketSink};
+pub use sink::{CaptureBuf, Flow, PacketMeta, PacketSink, Record};
 
 #[cfg(feature = "live")]
 mod l3;
