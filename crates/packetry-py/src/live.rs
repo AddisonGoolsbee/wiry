@@ -107,8 +107,8 @@ impl LiveRun {
         }
     }
 
-    /// The capture as the parts `PyPktList` is built from. Returned rather
-    /// than built here, because the background thread holds no GIL.
+    /// The parts `PyPktList` is built from, rather than the list itself: the
+    /// background thread holds no GIL.
     fn finish(self) -> (Vec<u8>, Vec<Record>, u32) {
         let (buf, index, _) = self.out.into_parts();
         (buf, index, self.dlt)
@@ -296,6 +296,16 @@ impl Done {
     }
 }
 
+/// Signals on the way out however the thread leaves, so a join never waits on
+/// a thread that has already gone.
+struct Finally(Arc<Done>);
+
+impl Drop for Finally {
+    fn drop(&mut self) {
+        self.0.signal();
+    }
+}
+
 type Captured = (Vec<u8>, Vec<Record>, u32);
 
 /// `sniff` on a thread of its own, which owns the handle. Everything Python
@@ -404,9 +414,8 @@ impl LiveSniffer {
         let stop = Arc::clone(&self.stop);
         let done = Arc::clone(&self.done);
         self.thread = Some(std::thread::spawn(move || {
-            let outcome = run.run_detached(&stop);
-            done.signal();
-            outcome.map(|()| run.finish())
+            let _signal = Finally(done);
+            run.run_detached(&stop).map(|()| run.finish())
         }));
         Ok(())
     }
@@ -462,9 +471,8 @@ impl Drop for LiveSniffer {
     }
 }
 
-/// One pass over `frames`, `count` times, sleeping `inter` between frames.
-/// The repetition lives here so a `sendp` of a thousand frames crosses the
-/// boundary once, not a thousand times.
+/// The repetition lives here, so a `sendp` of a thousand frames crosses the
+/// boundary once rather than a thousand times.
 fn one_run(h: &mut Handle, frames: &[Vec<u8>], count: usize, gap: Duration) -> PyResult<usize> {
     let mut sent = 0usize;
     for _ in 0..count {
@@ -526,8 +534,8 @@ pub(crate) fn send_datagrams(
     }
 }
 
-/// One send-and-receive exchange. The state of a single `sr` call, so the
-/// collect phase can be run in bounded slices without unpicking it.
+/// The state of one `sr` call, so the collect phase can run in bounded slices
+/// without unpicking it.
 struct Exchange {
     keys: Vec<Option<ReplyKey>>,
     got: Vec<bool>,

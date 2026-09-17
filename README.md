@@ -97,17 +97,20 @@ Every skip is a scope boundary such as live capture or a layer we do not
 implement; every remaining failure is a feature we do not claim, and each is
 listed in [DEVIATIONS.md](DEVIATIONS.md).
 
-228 Rust and 568 Python tests pass. All three crates forbid unsafe code, and
+235 Rust and 578 Python tests pass. All three crates forbid unsafe code, and
 the dissector is covered by seven fuzz targets plus seeded property tests that
 run on stable.
 
 `sniff(offline=...)` is complete and needs no privileges, no network and no
 optional feature: the whole state machine — `count`, `store`, `prn`, `lfilter`,
 `stop_filter`, `timeout`, BPF `filter=` and the `where=` extension — is driven
-from a capture file and tested that way. Capturing from an interface, and
-`send`/`sr`, need the `live` feature and are still being wired; without it they
-raise `CaptureUnavailable` naming the rebuild command. See
-[DEVIATIONS.md](DEVIATIONS.md) S2 and E15.
+from a capture file and tested that way. Capturing from an interface,
+`AsyncSniffer`, `send`/`sendp` and `sr`/`sr1`/`srp`/`srp1` are the same state
+machine with the wire in front of it, and need the `live` feature; without it
+they raise `CaptureUnavailable` naming the rebuild command. Those paths need a
+real interface and root, so their round-trip checks live in `dev/live/` rather
+than in the shipped suite. See [DEVIATIONS.md](DEVIATIONS.md) S2, E9, E14,
+E15 and E17.
 
 ## Install
 

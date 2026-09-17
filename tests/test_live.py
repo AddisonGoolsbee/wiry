@@ -167,7 +167,7 @@ def test_sr_refuses_ipv6_and_names_sendp():
     from packetry import IPv6, UDP
 
     with pytest.raises(NotImplementedError) as exc:
-        P.sr(IPv6() / UDP(), timeout=0.1, verbose=0)
+        P.sr(IPv6() / UDP(), iface=NO_SUCH_IF, timeout=0.1, verbose=0)
     assert "sendp" in str(exc.value)
 
 

@@ -285,6 +285,12 @@ def _as_list(x: Any) -> list:
     return list(x)
 
 
+def _octets(pkt: Any) -> bytes:
+    """A packet as the bytes that go on the wire. Strings encode as latin-1,
+    as they do everywhere else here."""
+    return pkt.encode("latin-1") if isinstance(pkt, str) else bytes(pkt)
+
+
 def _refuse_ipv6(pkts: list, what: str) -> None:
     for p in pkts:
         if isinstance(p, Packet) and "IPv6" in p.layers():
@@ -313,7 +319,7 @@ def _with_src(pkt: Any, mac: Optional[str]) -> Any:
 
 
 def _report(sent: int, verbose: Optional[int]) -> None:
-    if (conf.verb if verbose is None else verbose):
+    if conf.verb if verbose is None else verbose:
         print(f"Sent {sent} packets.")
 
 
@@ -345,7 +351,7 @@ def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
     _refuse_unsupported(realtime, socket)
     pkts = _as_list(x)
     _refuse_ipv6(pkts, "send")
-    frames = [bytes(p) for p in pkts]
+    frames = [_octets(p) for p in pkts]
     sent = _b.send_datagrams(frames, _passes(count), float(inter), bool(loop))
     _report(sent, verbose)
     return pkts if return_packets else None
@@ -365,7 +371,8 @@ def sendp(x: Any, inter: float = 0, loop: int = 0, iface: Any = None,
     _refuse_unsupported(realtime, socket)
     name = _iface_name(iface)
     pkts = _as_list(x)
-    frames = [bytes(_with_src(p, _b.interface_mac(name))) for p in pkts]
+    mac = _b.interface_mac(name)
+    frames = [_octets(_with_src(p, mac)) for p in pkts]
     sent = _b.send_frames(frames, name, _passes(count), float(inter), bool(loop))
     _report(sent, verbose)
     return pkts if return_packets else None
@@ -382,14 +389,15 @@ def _exchange(x: Any, l2: bool, iface: Any, filter: Optional[str],
             "a negative retry= means scapy's 'resend only while nothing at all "
             "has answered'; pass a count of resends instead"
         )
-    name = _iface_name(iface)
     pkts = _as_list(x)
+    if not l2:
+        _refuse_ipv6(pkts, what)
+    name = _iface_name(iface)
     if l2:
         mac = _b.interface_mac(name)
-        frames = [bytes(_with_src(p, mac)) for p in pkts]
+        frames = [_octets(_with_src(p, mac)) for p in pkts]
     else:
-        _refuse_ipv6(pkts, what)
-        frames = [bytes(p) for p in pkts]
+        frames = [_octets(p) for p in pkts]
     recv, pairs, unans = _b.sr_live(
         frames, name, l2, filter,
         None if timeout is None else float(timeout),
@@ -399,7 +407,7 @@ def _exchange(x: Any, l2: bool, iface: Any, filter: Optional[str],
     got = PacketList(recv)
     answered = [(pkts[i], got[j]) for i, j in pairs]
     unanswered = [pkts[i] for i in unans]
-    if (conf.verb if verbose is None else verbose):
+    if conf.verb if verbose is None else verbose:
         print(f"Received {len(got)} packets, got {len(answered)} answers, "
               f"remaining {len(unanswered)} packets")
     return answered, unanswered
