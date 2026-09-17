@@ -117,6 +117,13 @@ Concretely:
 - Construction accumulates a layer stack in Python and serialises in **one**
   call (`build_and_serialize`), rather than one call per field.
 
+**The rule governs bulk analytic paths.** Where an API's own contract is a
+per-packet Python callback — `sniff`'s `prn`, `lfilter` and `stop_filter` — the
+crossing is the feature, not a violation. `sniff` keeps the callback-free case
+on the fast path: one `allow_threads` around the whole loop and one crossing at
+the end, with BPF and the Rust-side query rejecting packets before any Python
+object exists. Only a supplied callback reacquires per packet.
+
 **Invariant: the bulk path must never disagree with the per-packet path.** The
 test suite asserts this. If they ever diverge, the bulk path is wrong.
 
@@ -136,7 +143,7 @@ live in `layers/dns.rs`.
 | Decision | Rationale |
 |---|---|
 | Protocols: Ether, Loopback, CookedLinux, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP, Raw, Padding | Scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. This set covers the overwhelming majority of real scripts. dpkt does 1.35M downloads/month with ~80 protocols. |
-| **No live capture in v1** (`sniff`, `send`, `sr`) | Needs raw sockets, root, and per-OS backends; untestable in CI. The measured 1,000x is in parse and build. The API shape is reserved so capture is additive, not breaking. |
+| **Live capture behind the `live` feature, off by default** | Needs raw sockets, root, and per-OS backends; untestable in ordinary CI. `sniff(offline=...)` is complete without it, because the whole state machine is driven by `offline=`, so the live backend is an I/O shim over proven logic rather than a second implementation. |
 | Unknown protocols dissect to `Raw` | Bytes always round-trip, at any depth. |
 | Offline `pcap` first, `pcapng` second | pcap was enough to get a measured number; pcapng is common in modern captures and is being added. |
 
@@ -237,8 +244,12 @@ Beyond parity:
 
 ### What remains
 
-The live-capture surface (`sniff`, `send`, `sr`) is deliberately out of scope
-and its API shape is reserved so adding it stays additive.
+The live-capture surface is landing incrementally. `sniff(offline=...)` runs
+the real state machine — counters, deadline, BPF, the Rust-side query and the
+Python callbacks — with no privileges, no network and no `live` feature, so it
+is fully tested. `send`, `sendp`, `sr`, `sr1`, `srp`, `srp1` and
+`sniff(iface=...)` exist as names and raise `CaptureUnavailable` naming the
+rebuild command. Privileged round-trip checks live in `dev/live/`.
 
 Known gaps are enumerated in `DEVIATIONS.md`. The notable ones: two default
 values where scapy reads the live interface or ships a sample DNS question;
