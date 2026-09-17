@@ -138,6 +138,7 @@ dependencies = [
 name = "packetry-py"
 version = "0.1.0"
 dependencies = [
+ "packetry-capture",
  "packetry-core",
  "pyo3",
 ]
