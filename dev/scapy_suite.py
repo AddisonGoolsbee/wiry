@@ -26,19 +26,19 @@ import wiry
 
 # Names we deliberately do not provide: a scope boundary, not a defect.
 OUT_OF_SCOPE = {
-    "conf", "sniff", "send", "sendp", "sr", "sr1", "srp", "srp1", "srloop",
-    "AsyncSniffer", "L3socket", "L2socket", "get_if_hwaddr", "getmacbyip",
+    "srloop", "L3socket", "L2socket", "get_if_hwaddr", "getmacbyip",
     "fuzz", "RandIP", "RandShort", "RandNum", "RandString", "corrupt_bytes",
-    "PacketList", "Automaton", "answering_machine", "load_contrib", "load_layer",
-    "TCPSession", "IPSession", "AsyncSniffer", "wireshark", "tcpdump", "hexdiff",
+    "Automaton", "answering_machine", "load_contrib", "load_layer",
+    "TCPSession", "IPSession", "wireshark", "tcpdump", "hexdiff",
     "sprintf", "pdfdump", "psdump", "voip_play", "traceroute", "arping",
 }
 
 
 def parse_uts(path):
-    """Yield (campaign, name, code) for each test block."""
+    """Yield (campaign, name, keywords, code) for each test block."""
     campaign = ""
     name = None
+    kw = set()
     buf = []
     for line in Path(path).read_text(errors="replace").splitlines():
         if line.startswith("+ "):
@@ -46,17 +46,21 @@ def parse_uts(path):
             continue
         if line.startswith("= "):
             if name is not None:
-                yield campaign, name, "\n".join(buf)
+                yield campaign, name, kw, "\n".join(buf)
             name = line[2:].strip()
+            kw = set()
             buf = []
             continue
         if name is None:
             continue
-        if line.startswith(("~ ", "* ", "#", "%")):
+        if line.startswith("~ "):
+            kw.update(line[2:].split())
+            continue
+        if line.startswith(("* ", "#", "%")):
             continue
         buf.append(line)
     if name is not None:
-        yield campaign, name, "\n".join(buf)
+        yield campaign, name, kw, "\n".join(buf)
 
 
 def namespace():
@@ -67,6 +71,28 @@ def namespace():
 
 IDENT = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\b")
 
+# `~` keywords scapy uses to gate a test on its host. We honour the ones that
+# describe an environment we are not in; a test we skip for this reason says so.
+_PLATFORM = {
+    "linux": sys.platform.startswith("linux"),
+    "windows": sys.platform == "win32",
+    "osx": sys.platform == "darwin",
+    "bsd": sys.platform.startswith(("freebsd", "openbsd", "netbsd", "darwin")),
+}
+# External programs scapy shells out to, none of which we provide.
+_NEEDS_TOOL = {"tshark", "tcpdump", "wireshark", "netaccess", "vcan_socket",
+               "needs_root", "root", "manufdb"}
+
+
+def environment_block(kw):
+    for key, present in _PLATFORM.items():
+        if key in kw and not present:
+            return f"needs a {key} host"
+    tool = kw & _NEEDS_TOOL
+    if tool:
+        return f"needs {sorted(tool)[0]}"
+    return None
+
 
 def wanted_names(code):
     return set(IDENT.findall(code))
@@ -75,6 +101,12 @@ def wanted_names(code):
 def classify_error(exc, code, supported):
     """Decide whether a failure is a scope boundary or a real defect."""
     text = f"{type(exc).__name__}: {exc}"
+    if type(exc).__name__ == "CaptureUnavailable":
+        return "skip", "needs the live feature"
+    if isinstance(exc, (PermissionError, OSError)) and any(
+        w in str(exc).lower() for w in ("permission", "/dev/bpf", "operation not permitted")
+    ):
+        return "skip", "needs capture privileges"
     if isinstance(exc, (NameError, ImportError, ModuleNotFoundError)):
         m = re.search(r"'([A-Za-z_][A-Za-z0-9_]*)'", str(exc))
         missing = m.group(1) if m else ""
@@ -92,10 +124,16 @@ def run(path, verbose=False, limit=None):
     failures = []
     skips = {}
 
-    for i, (campaign, name, code) in enumerate(parse_uts(path)):
+    for i, (campaign, name, kw, code) in enumerate(parse_uts(path)):
         if limit and i >= limit:
             break
         if not code.strip():
+            continue
+
+        blocked_env = environment_block(kw)
+        if blocked_env:
+            results["skip"] += 1
+            skips[blocked_env] = skips.get(blocked_env, 0) + 1
             continue
 
         names = wanted_names(code)
