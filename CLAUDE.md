@@ -1,281 +1,224 @@
 # wiry — project context and decisions
 
-Orientation for anyone (human or model) picking this up. It records **why**
-things are the way they are, so decisions do not get silently reversed.
+Why things are the way they are, so decisions do not get silently reversed.
 
-Companion documents: `DEVIATIONS.md` (every known gap), `CONTRIBUTING.md` (the
-provenance rule), `README.md` (the public pitch and measured numbers).
+Companions: `DEVIATIONS.md` (every known gap), `CONTRIBUTING.md` (the provenance
+rule), `README.md` (the public pitch and measured numbers).
 
 ---
 
-## 1. What this is and what it is for
+## 1. What this is
 
-A fast, drop-in-shaped alternative to Scapy: a Rust engine with a Python facade
-that looks like the API people already type.
+A Rust engine with a Python facade shaped like scapy's API.
 
 The goal is **recognition through open source, not revenue.** That shapes real
 choices: permissive licensing over copyleft, reproducible public benchmarks over
-marketing claims, and honesty about gaps over inflated coverage.
+marketing claims, and stated gaps over implied coverage.
 
-### Why Scapy specifically
+### Why scapy specifically
 
-Measured before writing any code, and the case is unusually strong:
+Measured before any code was written:
 
 | Fact | Consequence |
 |---|---|
-| Scapy dissects ~13,600 pkt/s; builds ~4,600 pkt/s | Slow enough to be worth replacing |
-| A Rust probe on the same packets hit 13.4M pkt/s | ~1,000x headroom, far beyond a patch |
-| Slowness is architectural: one Python object per layer per packet | Cannot be fixed incrementally in Python |
-| Maintainers are grinding for +7.7% in issue #5085 | The Python ceiling is visibly reached |
-| ~3–5M downloads/month, 12.5k stars, actively maintained | Real, live audience |
-| dpkt is 18–21x faster but unmaintained since 2022 and parse-only | The fast option is abandoned |
-| pypacker was 25–50x faster and died in 2020 **because it changed the API** | Keeping the API is the whole thesis |
-| Every Scapy fork (kamene, scapy3k) is dead | Forking is not the move |
-| Only Rust+PyO3 attempt (`packet-rs`) has 19 stars, dead since 2024 | The lane is empty |
+| scapy dissects ~13,600 pkt/s; builds ~4,600 pkt/s | Slow enough to be worth replacing |
+| A Rust probe on the same packets hit 13.4M pkt/s | ~1,000x headroom, beyond a patch |
+| One Python object per layer per packet | Architectural, so unfixable in Python |
+| Maintainers grinding for +7.7% in issue #5085 | The Python ceiling is visibly reached |
+| ~3–5M downloads/month, 12.5k stars | Real, live audience |
+| dpkt is faster but unmaintained since 2022 and parse-only | The fast option is abandoned |
+| pypacker was 25–50x faster and died in 2020 **because it changed the API** | Keeping the API is the thesis |
+| Every scapy fork (kamene, scapy3k) is dead | Forking is not the move |
+| The one Rust+PyO3 attempt has 19 stars, dead since 2024 | The lane is empty |
 
-Three earlier candidates were investigated and **rejected**, and the reasoning
-should not be re-litigated without new evidence:
+Three earlier candidates were rejected; do not re-litigate without new evidence.
+**GraphQL codegen**: an 8x speedup was available in plain JavaScript by fixing
+wasteful `@babel/traverse` usage, so the incumbent could neutralise a rewrite in a
+patch release. Slowness must be architectural, not an unfixed bug. **pytest**:
+benchmarked on five real repos, collection is only 3.5–34% of runtime and the
+rest is CPython running user test bodies. **AWS CLI**: the repo owner works at
+Amazon, so both the Washington and California invention-assignment carve-outs
+fail for work relating to the employer's business.
 
-- **GraphQL codegen** — an 8x speedup was available in plain JavaScript by fixing
-  wasteful `@babel/traverse` usage. The incumbent could neutralise a rewrite in a
-  patch release. Slowness must be *architectural*, not an unfixed bug.
-- **pytest** — benchmarked on five real repos. Collection is only 3.5–34% of
-  runtime; the rest is CPython running user test bodies, which no rewrite can
-  touch. A test runner is the wrong shape. Linters and compilers are the right
-  shape because ~100% of their work is replaceable.
-- **AWS CLI** — technically open (Apache 2.0, and the Smithy models are reusable),
-  but the repo owner works at Amazon, so both the Washington and California
-  invention-assignment carve-outs fail for work "relating directly to the
-  employer's business."
+## 2. Licensing — the biggest risk, and how it is managed
 
-## 2. Licensing — the single biggest risk, and how it is managed
-
-**Scapy is GPL-2.0-only. This project is MIT OR Apache-2.0.** That is only
-defensible because of a strict separation:
+**scapy is GPL-2.0-only. This project is MIT OR Apache-2.0.** Defensible only
+because of a strict separation:
 
 - **Reimplementing an API is settled fair use** (*Google LLC v. Oracle America*,
-  594 U.S. ___ (2021)). Names, signatures and calling conventions are interface,
-  not expression. So `IP(dst=...)/TCP(dport=...)` behaving identically is fine.
-- **Copying the implementation is not.** Scapy's ~107,000 lines of layer
+  594 U.S. 1 (2021)). Names, signatures and calling conventions are interface.
+- **Copying an implementation is not.** scapy's ~107,000 lines of layer
   definitions are exactly what one would be tempted to port, and porting them
-  would make this a derivative work and force GPLv2.
+  would force GPLv2 on everything here.
 
-Therefore, non-negotiable rules (also in `CONTRIBUTING.md`):
+Non-negotiable, and repeated in `CONTRIBUTING.md`:
 
-1. Protocol layouts are derived from **RFCs and IANA registries**, cited in a
-   comment at the top of every layer module.
-2. Contributors **do not read Scapy source** while writing the equivalent layer.
-3. **No runtime dependency on Scapy.** A fallback that imports Scapy for
-   unimplemented protocols would relicense the whole project. Unknown protocols
-   dissect to `Raw` instead, which is what Scapy itself does for layers it lacks.
+1. Protocol layouts come from **RFCs and IANA registries**, cited at the top of
+   every layer module.
+2. Contributors **do not read scapy source** while writing the equivalent layer.
+3. **No runtime dependency on scapy.** A fallback that imported scapy for
+   unimplemented protocols would relicense the project. Unknown protocols
+   dissect to `Raw`, which is what scapy does for layers it lacks.
 4. **Shipped test vectors are hand-built from RFCs**, never generated by running
-   Scapy. A corpus mechanically derived from GPL code is a grey area worth
-   avoiding entirely. `dev/parity_check.py` *does* compare against Scapy as a
-   development oracle; it is not part of the shipped suite and its output is
-   never committed.
+   scapy. `dev/parity_check.py` does compare against scapy as a development
+   oracle; it is not shipped and its output is never committed.
 
-Why permissive matters even though Scapy users already accept GPL: it reaches
-people Scapy cannot. Vendors shipping proprietary products cannot link GPLv2, and
-crates.io runs on MIT/Apache so a GPL core would be unusable to Rust developers.
-Permissive strictly grows the addressable audience, which is the actual goal.
+Permissive licensing reaches people scapy cannot: vendors shipping proprietary
+products, and crates.io, which runs on MIT/Apache.
 
-## 3. Architecture — the decisions that produce the speedup
+## 3. Architecture
 
 ### Lazy, span-based dissection
 
 A packet is **one contiguous byte buffer plus a small table of
 `(protocol, offset, header length)` spans** (`packet.rs`). Dissection walks the
 layer chain touching only the bytes needed to find each next header. Field values
-decode on demand from the still-borrowed bytes (`field.rs`).
+decode on demand from still-borrowed bytes (`field.rs`). Reading two fields costs
+two fields.
 
-This is the core insight. Scapy's cost is building an object graph per packet
-whether or not you read it. Reading two fields should cost two fields.
+### Mutation in place, recomputation lazy
 
-### Mutation is in-place, recomputation is lazy
+Setting a field writes into the buffer and marks enclosing layers dirty, so
+lengths and checksums propagate outward. `to_bytes()` recomputes only what
+changed (`compute.rs`).
 
-Setting a field writes directly into the buffer and marks enclosing layers dirty
-(lengths and checksums propagate outward). `to_bytes()` recomputes only what
-changed (`compute.rs`). Untouched layers are never re-emitted.
-
-### The FFI boundary rule — the most important constraint in the project
+### The FFI boundary rule — the most important constraint here
 
 **Cross at file or list granularity. Never per field, never per packet in bulk
 paths.**
 
-This is not a style preference. Prisma moved its Rust query engine *back* to
-TypeScript because per-row serialisation across the boundary cost more than the
-Rust saved; one benchmark went 185ms → 55ms purely by deleting the hop. A naive
-binding here would hand Python one object per layer per packet and lose the
-entire win.
+Prisma moved its Rust query engine *back* to TypeScript because per-row
+serialisation across the boundary cost more than the Rust saved; one benchmark
+went 185ms to 55ms purely by deleting the hop. A naive binding here would hand
+Python one object per layer per packet and lose the entire win.
 
-Concretely:
 - A capture stays in Rust as one buffer plus a record index (`PyPktList`).
-  `rdpcap` costs about what reading the file costs; packets dissect only when
-  indexed.
-- Bulk helpers (`count_layer`, `field_column`) do whole-capture work in one call
-  and release the GIL while doing it. This is where the 391x comes from.
-- Construction accumulates a layer stack in Python and serialises in **one**
-  call (`build_and_serialize`), rather than one call per field.
+  `rdpcap` costs about what reading the file costs.
+- Bulk helpers do whole-capture work in one call and release the GIL.
+- Construction accumulates a layer stack in Python and serialises in **one** call.
 
 **The rule governs bulk analytic paths.** Where an API's own contract is a
-per-packet Python callback — `sniff`'s `prn`, `lfilter` and `stop_filter` — the
-crossing is the feature, not a violation. `sniff` keeps the callback-free case
-on the fast path: one `allow_threads` around the whole loop and one crossing at
-the end, with BPF and the Rust-side query rejecting packets before any Python
-object exists. Only a supplied callback reacquires per packet.
+per-packet Python callback — `sniff`'s `prn`, `lfilter`, `stop_filter` — the
+crossing is the feature. `sniff` keeps the callback-free case on the fast path:
+one `allow_threads` around the whole loop, one crossing at the end, with BPF and
+the Rust-side query rejecting packets before any Python object exists.
 
 **Invariant: the bulk path must never disagree with the per-packet path.** The
-test suite asserts this. If they ever diverge, the bulk path is wrong.
+suite asserts this. If they diverge, the bulk path is wrong.
 
-### Why the flat field model, and its known limit
+### The flat field model and its limit
 
-Protocols are described by a static `FieldDesc` table (name, bit offset, bit
-length, kind, default). It is fast and simple, but it cannot express
-type-dependent or variable-length structure. That limit is logged as **E1**.
+Protocols are a static `FieldDesc` table (name, bit offset, bit length, kind,
+default). Fast and simple, and it cannot express type-dependent or
+variable-length structure. Logged as **E1**. Variable-length regions live in
+`options.rs` (`walk_tlv` plus a uniform `Item`); DNS record sections need a
+different shape again and live in `layers/dns.rs`.
 
-Variable-length regions are handled separately by `options.rs`, which provides a
-`walk_tlv` primitive plus a uniform `Item` result, wired in through
-`ProtoDesc.parse_options`. DNS record sections need a different shape again and
-live in `layers/dns.rs`.
-
-## 4. Scope decisions
+## 4. Scope
 
 | Decision | Rationale |
 |---|---|
-| Protocols: Ether, Loopback, CookedLinux, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP, Raw, Padding | Scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. This set covers the overwhelming majority of real scripts. dpkt does 1.35M downloads/month with ~80 protocols. |
-| **Live capture behind the `live` feature, off by default** | Needs raw sockets, root, and per-OS backends; untestable in ordinary CI. `sniff(offline=...)` is complete without it, because the whole state machine is driven by `offline=`, so the live backend is an I/O shim over proven logic rather than a second implementation. |
+| Ether, Loopback, CookedLinux, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP, Raw, Padding | scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. dpkt does 1.35M downloads/month with ~80 protocols. |
+| **Live capture behind the `live` feature, off by default** | Needs raw sockets, root and per-OS backends. `sniff(offline=...)` drives the whole state machine without it, so the live backend is an I/O shim over proven logic rather than a second implementation. |
 | Unknown protocols dissect to `Raw` | Bytes always round-trip, at any depth. |
-| Offline `pcap` first, `pcapng` second | pcap was enough to get a measured number; pcapng is common in modern captures and is being added. |
 
 ## 5. Engineering conventions
 
 - **Build**: maturin, abi3 wheels (`abi3-py39`), one wheel per platform.
 - **`extension-module` is NOT a default Cargo feature.** It disables linking
   against libpython, which breaks `cargo test`. `pyproject.toml` enables it at
-  maturin build time, which is the only place it matters. Do not "fix" this by
-  putting it back in `Cargo.toml`.
-- **`panic = "abort"` must stay off.** A Python extension module must not abort
-  the host process; unwinding is required.
+  maturin build time. Do not "fix" this by putting it back in `Cargo.toml`.
+- **`panic = "abort"` must stay off.** An extension module must not abort the
+  host process; unwinding is required.
 - **Robustness over strictness in dissection.** Truncated and malformed input is
-  the normal case on snaplen-clipped captures. Parsers return what they managed
-  and never panic. Every walk over attacker-controlled length fields must be
-  bounded — DNS name compression pointers especially, where a loop is a
-  denial-of-service bug.
-- **CI enforces `cargo fmt --check` and `clippy -D warnings`.** Keep them green.
+  normal on snaplen-clipped captures. Parsers return what they managed and never
+  panic. Every walk over an attacker-controlled length field must be bounded.
+- **CI enforces `cargo fmt --check` and `clippy -D warnings` in both feature
+  configurations.**
 
 ## 6. Benchmarking honesty
 
-The audience for this project will pull a benchmark apart, and should. Rules:
+This audience will pull a benchmark apart, and should.
 
-1. **Report lazy and eager modes separately.** Quoting only the favourable one
-   invites a fair cherry-picking objection.
+1. **Report lazy and eager modes separately.**
 2. **Compare identical packet sets.** An early draft compared a bulk call over
    549k packets against a loop over 100k and produced a flattering, wrong ratio.
-3. **Measure memory in isolated subprocesses.** `ru_maxrss` is a high-water mark,
-   so co-hosting two libraries makes the second inherit the first's peak.
-4. **Benchmark only on shared ground.** wiry implements fewer protocols than
-   Scapy; the benchmark touches Ethernet, IPv4, TCP and UDP, which both fully
-   implement. Say so in the README, because speed and coverage are different axes.
-5. **Publish the script and the corpus.** `dev/bench.py`, `dev/bench_memory.py`,
-   and a public pcap URL. A number nobody can reproduce gets dismissed.
-
-### Measured, on `bigFlows.pcap` (256 MB, 549,726 real packets), M1 Pro, CPython 3.13.5, scapy 2.7.0
-
-| Workload | Speedup |
-|---|---|
-| Read + 2 fields per packet | 19.9x |
-| Same, bulk column API | 391.6x |
-| Dissect + re-serialise | 58.7x |
-| Build + serialise | 31.2x |
-| Memory per packet | 11x less (0.62 KB vs 6.67 KB) |
-
-### Correctness, verified not assumed
-
-Against a real 14,261-packet capture: 2,000/2,000 layer chains agree with Scapy,
-21,982/21,982 field comparisons are equal, 2,000/2,000 packets round-trip
-byte-identical. Build parity is 4/5; the miss is Scapy filling the host interface
-MAC, which needs interface introspection that is out of scope (logged as E9).
+   A later one published a per-packet rate computed over 20,000 packets while
+   charging wiry for parsing all 549,726; `dev/bench.py` now defaults to the
+   whole file and warns when a limit would repeat the mistake.
+3. **Measure memory in isolated subprocesses.** `ru_maxrss` is a high-water mark.
+4. **Benchmark only on shared ground.** The corpus touches Ethernet, IPv4, TCP
+   and UDP, which wiry, scapy and dpkt all fully implement.
+5. **Publish the script and the corpus.** A number nobody can reproduce gets
+   dismissed.
+6. **Keep dpkt in the table.** It is the fast incumbent and the margin over it is
+   thin. Hiding it would be the single most discrediting omission available.
 
 ## 7. Naming
 
-`wiry` is **provisional**. It was verified free on PyPI, crates.io and GitHub
-at the time of choosing, but nothing is registered. Renaming is cheap now and
-expensive after publication.
+`wiry` is registered on PyPI, crates.io and GitHub
+(`github.com/AddisonGoolsbee/wiry`). It is no longer provisional.
 
 Do **not** put "scapy" in the package name. PyPI policy blocks confusingly
 similar names, and the precedent is against it: polars never called itself
 "pandas-rs", ruff never called itself "flake8-rs". Describing the project as
-"Scapy-compatible" in prose is fine and accurate.
+"scapy-compatible" in prose is fine.
+
+`AGENTS.md` is a symlink to this file, so both conventions resolve to one
+document.
 
 ## 8. How work is organised
 
-Protocol layers are deliberately uniform and independent so they can be built in
-parallel by separate agents. Each owns its own file, follows the pattern in
-`layers/ether.rs` and `layers/ipv4.rs`, cites its RFC, and adds hand-built tests.
-Shared files (`proto.rs`, `packet.rs`, `options.rs`, the PyO3 crate) are edited by
-the orchestrator only, to avoid concurrent-edit conflicts.
+Protocol layers are uniform and independent so separate agents can build them in
+parallel. Each owns its file, follows `layers/ether.rs`, cites its RFC, and adds
+hand-built tests. Shared files (`proto.rs`, `packet.rs`, `options.rs`, the PyO3
+crate) are edited by the orchestrator only.
 
 ## 9. Current state
 
-All thirteen in-scope layers are complete, including TCP/IPv4/DHCP options in
-both directions, DNS record sections with name compression, and pcap plus pcapng
-reading. Field names match scapy exactly across all eleven audited layers, zero
-missing and zero extra.
+All fifteen in-scope layers are complete, including TCP/IPv4/DHCP options in both
+directions, DNS record sections with name compression, and pcap plus pcapng
+reading. Field names match scapy exactly across every audited layer.
 
 Beyond parity:
 
 - **Columnar API.** `columns()` extracts many fields in one pass and one
-  crossing; filters are data, not callbacks, so selection stays in Rust. This is
-  the differentiator, since scapy has no equivalent. Dataframe exports to polars,
-  arrow and pandas are optional extras, never dependencies.
+  crossing; filters are data rather than callbacks, so selection stays in Rust.
+  scapy has no equivalent.
 - **Layers declared from Python (E3).** pydantic-core's design: Python describes
   a layer as data and the Rust interpreter executes it, so nothing crosses back
-  per packet or per field. `ProtoId` is a newtype over `u16` whose built-in
-  values keep the static dispatch table and whose higher values index a leaked,
-  append-only registry, which is why a declared layer costs a built-in one
-  nothing. This is the feature whose absence killed pypacker; do not let a Python
-  callback into the dissection loop while extending it.
-- **Fuzzing.** Seven libFuzzer targets plus seeded property tests that run on
-  stable as part of `cargo test`. Both crates forbid unsafe.
+  per packet. `ProtoId` is a newtype over `u16` whose built-in values keep the
+  static dispatch table and whose higher values index a leaked, append-only
+  registry, so a declared layer costs a built-in one nothing. This is the feature
+  whose absence killed pypacker; do not let a Python callback into the dissection
+  loop while extending it.
+- **Live capture.** `sniff(offline=...)` runs the real state machine with no
+  privileges and no feature flag. `sniff(iface=...)`, `AsyncSniffer`, `send`,
+  `sendp`, `sr`, `sr1`, `srp` and `srp1` put the wire in front of that same
+  machine behind the `live` feature, raising `CaptureUnavailable` without it.
+  Reply matching is pure logic in `answers.rs`, unit-testable offline. Privileged
+  round-trip checks live in `dev/live/`, never in `tests/`.
+- **Fuzzing.** Seven libFuzzer targets plus seeded property tests on stable. All
+  three crates forbid unsafe.
 - **Two parity harnesses.** `dev/parity_check.py` covers dissection over real
-  captures; `dev/build_matrix.py` enumerates construction. Both must stay at
-  100%. The second exists because the first alone let a dropped payload survive
-  a green suite: read-path coverage does not imply write-path coverage.
-
-### What remains
-
-The live-capture surface is wired. `sniff(offline=...)` runs the real state
-machine — counters, deadline, BPF, the Rust-side query and the Python
-callbacks — with no privileges, no network and no `live` feature, so it is
-fully tested; `sniff(iface=...)`, `AsyncSniffer`, `send`, `sendp`, `sr`, `sr1`,
-`srp` and `srp1` put the wire in front of that same machine and need the
-feature, raising `CaptureUnavailable` without it. Nothing in the live driver
-decides when to keep, count or stop: it releases the GIL across every blocking
-read, polls the stop conditions between reads rather than per matched packet,
-and takes its link type from the handle rather than assuming Ethernet.
-Privileged round-trip checks live in `dev/live/`, never in `tests/`.
-
-Known gaps are enumerated in `DEVIATIONS.md`. The notable ones: two default
-values where scapy reads the live interface or ships a sample DNS question;
-conditions that would need to see a layer other than their own; DHCP option 82
-sub-options; pcapng writing; and SACK blocks not split into edge pairs.
+  captures; `dev/build_matrix.py` enumerates construction. The second exists
+  because the first alone let a dropped payload survive a green suite.
 
 ### Conventions worth not rediscovering
 
-- Read paths and write paths need separate test coverage. They have separate
-  harnesses for a reason.
-- TLV length octets do not mean the same thing in every protocol. TCP and IPv4
-  count the code and length octets; DHCP counts only the payload. The wrong rule
-  mis-decodes silently rather than failing.
+- Read paths and write paths need separate coverage. An `exercise()` that only
+  reads leaves the entire write half of the engine unfuzzed; three panics lived
+  there.
+- TLV length octets differ by protocol. TCP and IPv4 count the code and length
+  octets; DHCP counts only the payload. The wrong rule mis-decodes silently.
 - A timing assertion placed after the call it measures cannot catch a hang. Run
   the suspect work on a worker thread with a deadline.
 - A read timeout from libpcap is the driver's chance to poll its deadline and
-  its stop flag, not an error. Never set that timeout to 0: the pcap README
-  warns it can hang `next_packet` on macOS, and it would also stop the loop
-  ever waking.
-- A Rust thread that calls into Python after the interpreter has finalised
-  segfaults, which bypasses the protection `panic = "abort"` is kept off to
-  provide. Anything owning such a thread stops and joins it on drop, and joins
-  with the GIL released so a `prn` waiting to acquire it is not deadlocked.
-- Benchmarks report lazy and eager modes, compare identical packet sets, and
-  measure memory in isolated processes, because `ru_maxrss` is a high-water mark.
+  stop flag, not an error. Never set it to 0: the pcap README warns it can hang
+  `next_packet` on macOS.
+- A Rust thread that calls into Python after finalisation segfaults, bypassing
+  the protection `panic = "abort"` is kept off to provide. Anything owning such a
+  thread stops and joins it on drop, with the GIL released.
+- `#![forbid(unsafe_code)]` is per-crate and says nothing about dependencies.
+  Claiming otherwise to a Python audience is indefensible, since PyO3 itself
+  contains hundreds of unsafe blocks.

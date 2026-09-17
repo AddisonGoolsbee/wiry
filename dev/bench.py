@@ -1,4 +1,4 @@
-"""Head-to-head benchmark against Scapy on real captures.
+"""Head-to-head benchmark against scapy and dpkt on a real capture.
 
 Reports two modes deliberately:
   lazy  - read a couple of fields per packet, the common scripting pattern
@@ -6,6 +6,10 @@ Reports two modes deliberately:
 Reporting only the lazy number invites the fair accusation of cherry-picking.
 
 Run: python dev/bench.py <pcap> [limit]
+
+`limit` truncates scapy's and dpkt's streaming loops but not wiry's rdpcap,
+which always parses the whole file, so a limit below the packet count charges
+wiry for work it does not report. Default is the whole capture.
 """
 
 import gc
@@ -25,17 +29,30 @@ try:
 except ImportError:
     HAVE_SCAPY = False
 
+try:
+    import dpkt
+
+    HAVE_DPKT = True
+except ImportError:
+    HAVE_DPKT = False
+
+REPS = 3
+
 
 def rss_mb():
     r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return r / (1024 * 1024) if sys.platform == "darwin" else r / 1024
 
 
-def timed(fn):
-    gc.collect()
-    t0 = time.perf_counter()
-    out = fn()
-    return time.perf_counter() - t0, out
+def best(fn):
+    out = None
+    dt = float("inf")
+    for _ in range(REPS):
+        gc.collect()
+        t0 = time.perf_counter()
+        out = fn()
+        dt = min(dt, time.perf_counter() - t0)
+    return dt, out
 
 
 def row(label, dt, n, extra=""):
@@ -48,7 +65,7 @@ def bench_read(path, limit):
     print(f"\n=== READ + FIELD ACCESS ({limit:,} packets) ===")
     results = {}
 
-    def blitz_lazy():
+    def wiry_lazy():
         pl = B.rdpcap(path)
         n = min(limit, len(pl))
         tcp = 0
@@ -60,20 +77,41 @@ def bench_read(path, limit):
                 tcp += 1
         return n, tcp
 
-    dt, (n, tcp) = timed(blitz_lazy)
-    results["wiry"] = row("wiry  per-packet loop", dt, n, f"({tcp} tcp)")
+    dt, (n, tcp) = best(wiry_lazy)
+    results["wiry"] = row("wiry      per-packet loop", dt, n, f"({tcp} tcp)")
 
-    # Bulk mode works over the whole capture, so the rate is per packet.
-    def blitz_bulk():
+    def wiry_bulk():
         pl = B.rdpcap(path)
         col = pl.field_column("TCP", "dport")
         tcp = sum(1 for x in col if x is not None)
         return len(col), tcp
 
-    dt, (n2, c) = timed(blitz_bulk)
+    dt, (n2, c) = best(wiry_bulk)
     results["wiry_bulk"] = row(
-        f"wiry  bulk column API ({n2:,} pkts)", dt, n2, f"({c} tcp)"
+        f"wiry      bulk column API ({n2:,} pkts)", dt, n2, f"({c} tcp)"
     )
+
+    if HAVE_DPKT:
+        def dpkt_lazy():
+            cnt = 0
+            tcp = 0
+            with open(path, "rb") as f:
+                for _ts, buf in dpkt.pcap.Reader(f):
+                    cnt += 1
+                    eth = dpkt.ethernet.Ethernet(buf)
+                    ip = eth.data
+                    if isinstance(ip, dpkt.ip.IP):
+                        t = ip.data
+                        if isinstance(t, dpkt.tcp.TCP):
+                            _ = ip.src
+                            _ = t.dport
+                            tcp += 1
+                    if cnt >= limit:
+                        break
+            return cnt, tcp
+
+        dt, (n4, tcp4) = best(dpkt_lazy)
+        results["dpkt"] = row("dpkt      Reader loop", dt, n4, f"({tcp4} tcp)")
 
     if HAVE_SCAPY:
         def scapy_lazy():
@@ -90,7 +128,7 @@ def bench_read(path, limit):
                         break
             return cnt, tcp
 
-        dt, (n3, tcp3) = timed(scapy_lazy)
+        dt, (n3, tcp3) = best(scapy_lazy)
         results["scapy"] = row("scapy     PcapReader loop", dt, n3, f"({tcp3} tcp)")
 
     return results
@@ -100,7 +138,7 @@ def bench_roundtrip(path, limit):
     print(f"\n=== DISSECT + RE-SERIALISE ({limit:,} packets) ===")
     results = {}
 
-    def blitz():
+    def wiry_rt():
         pl = B.rdpcap(path)
         n = min(limit, len(pl))
         total = 0
@@ -108,7 +146,7 @@ def bench_roundtrip(path, limit):
             total += len(bytes(pl[i]))
         return n, total
 
-    dt, (n, _) = timed(blitz)
+    dt, (n, _) = best(wiry_rt)
     results["wiry"] = row("wiry", dt, n)
 
     if HAVE_SCAPY:
@@ -123,7 +161,7 @@ def bench_roundtrip(path, limit):
                         break
             return cnt, total
 
-        dt, (n2, _) = timed(scapy_rt)
+        dt, (n2, _) = best(scapy_rt)
         results["scapy"] = row("scapy", dt, n2)
 
     return results
@@ -133,7 +171,7 @@ def bench_build(n=20000):
     print(f"\n=== BUILD + SERIALISE ({n:,} packets) ===")
     results = {}
 
-    def blitz():
+    def wiry_b():
         for _ in range(n):
             bytes(
                 B.Ether(dst="00:11:22:33:44:55")
@@ -142,8 +180,8 @@ def bench_build(n=20000):
             )
         return n
 
-    dt, _ = timed(blitz)
-    results["wiry"] = row("wiry  Ether/IP/TCP", dt, n)
+    dt, _ = best(wiry_b)
+    results["wiry"] = row("wiry      Ether/IP/TCP", dt, n)
 
     if HAVE_SCAPY:
         def scapy_b():
@@ -155,9 +193,10 @@ def bench_build(n=20000):
                 )
             return n
 
-        dt, _ = timed(scapy_b)
+        dt, _ = best(scapy_b)
         results["scapy"] = row("scapy     Ether/IP/TCP", dt, n)
 
+    print("  dpkt      cannot build a packet from field defaults")
     return results
 
 
@@ -170,24 +209,30 @@ def bench_memory(path):
     after = rss_mb()
     print(f"  file {size:,.0f} MB, {n:,} packets")
     print(f"  wiry rdpcap peak RSS delta: {after - base:,.0f} MB")
-    print("  (scapy rdpcap on a capture this size is measured separately;")
-    print("   it materialises one Python object graph per packet)")
     return n
 
 
 def summarise(name, r):
-    if "scapy" in r and r.get("scapy", 0) > 0:
-        for k in r:
-            if k != "scapy":
-                print(f"  -> {name}: {k} is {r[k] / r['scapy']:,.1f}x scapy")
+    for baseline in ("scapy", "dpkt"):
+        if r.get(baseline, 0) > 0:
+            for k in r:
+                if k not in ("scapy", "dpkt"):
+                    print(f"  -> {name}: {k} is {r[k] / r[baseline]:,.1f}x {baseline}")
 
 
 if __name__ == "__main__":
     pcap = sys.argv[1]
-    limit = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
-    print(f"file: {pcap}  ({os.path.getsize(pcap) / 1e6:,.1f} MB)")
+    total = len(B.rdpcap(pcap))
+    limit = int(sys.argv[2]) if len(sys.argv) > 2 else total
+    print(f"file: {pcap}  ({os.path.getsize(pcap) / 1e6:,.1f} MB, {total:,} packets)")
+    print(f"best of {REPS} runs")
     if not HAVE_SCAPY:
-        print("scapy not installed; showing wiry numbers only")
+        print("scapy not installed")
+    if not HAVE_DPKT:
+        print("dpkt not installed")
+    if limit < total:
+        print(f"WARNING: limit {limit:,} < {total:,}; wiry is charged for the "
+              f"whole file but credited with {limit:,} packets")
 
     r1 = bench_read(pcap, limit)
     summarise("read+fields", r1)
