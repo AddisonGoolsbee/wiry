@@ -1,7 +1,7 @@
 # wiry
 
 Packet dissection and crafting for Python, with scapy's API and a Rust core.
-MIT OR Apache-2.0.
+MIT licensed.
 
 ```python
 from wiry import rdpcap
@@ -226,4 +226,4 @@ Early. Working, measured, and short of parity. Read
 
 ## License
 
-MIT OR Apache-2.0, at your option.
+MIT.

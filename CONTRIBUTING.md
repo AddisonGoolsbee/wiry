@@ -32,4 +32,4 @@ before writing code.
 
 ## License
 
-Contributions are dual-licensed under MIT OR Apache-2.0, matching the project.
+Contributions are licensed under MIT, matching the project.

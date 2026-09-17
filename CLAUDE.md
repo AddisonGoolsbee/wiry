@@ -42,7 +42,7 @@ fail for work relating to the employer's business.
 
 ## 2. Licensing — the biggest risk, and how it is managed
 
-**scapy is GPL-2.0-only. This project is MIT OR Apache-2.0.** Defensible only
+**scapy is GPL-2.0-only. This project is MIT.** Defensible only
 because of a strict separation:
 
 - **Reimplementing an API is settled fair use** (*Google LLC v. Oracle America*,
@@ -64,7 +64,7 @@ Non-negotiable, and repeated in `CONTRIBUTING.md`:
    oracle; it is not shipped and its output is never committed.
 
 Permissive licensing reaches people scapy cannot: vendors shipping proprietary
-products, and crates.io, which runs on MIT/Apache.
+products, and crates.io, whose ecosystem is permissively licensed.
 
 ## 3. Architecture
 

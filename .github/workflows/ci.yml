@@ -132,22 +132,30 @@ jobs:
       - name: Install maturin and pytest
         run: pip install maturin pytest
 
-      # Spelled out rather than using -F alone, so it is correct whether
-      # maturin appends to or replaces the features in pyproject.toml.
-      - name: Build extension module
+      # `pip install .` rather than `maturin develop`, which needs a virtualenv
+      # the runner does not have. Features are spelled out rather than passed
+      # with -F alone, so this is correct whether maturin appends to or replaces
+      # the features in pyproject.toml.
+      - name: Build and install the extension module
         shell: bash
         run: |
           if [ -n "${{ matrix.features }}" ]; then
-            maturin develop --release --features pyo3/extension-module,live
+            MATURIN_PEP517_ARGS="--features pyo3/extension-module,live" pip install .
           else
-            maturin develop --release
+            pip install .
           fi
+
+      # From a directory that is not the repo root, so the import resolves to
+      # the installed wheel rather than the ./python source tree. A broken
+      # wheel otherwise passes by importing sources the wheel never shipped.
+      - name: Check the installed wheel imports
+        shell: bash
+        run: cd "${{ runner.temp }}" && python -c "import wiry; print(wiry.__version__)"
 
       - name: Run Python tests
         shell: bash
-        run: |
-          if [ -d tests ]; then
-            pytest tests/ -q
-          else
-            echo "tests/ not present yet, skipping"
-          fi
+        run: pytest tests/ -q
+
+      - name: Run the README's own examples
+        shell: bash
+        run: python dev/readme_examples.py
