@@ -1,0 +1,18 @@
+[package]
+name = "wiry"
+description = "Fast packet dissection and crafting, with scapy's shape and a Rust core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["packet", "pcap", "network", "dissector", "scapy"]
+categories = ["network-programming", "parser-implementations"]
+readme = "../../README.md"
+rust-version.workspace = true
+
+[dependencies]
+wiry-core = { path = "../wiry-core", version = "0.1.0" }
+wiry-capture = { path = "../wiry-capture", version = "0.1.0", optional = true }
+
+[features]
+live = ["dep:wiry-capture", "wiry-capture/live"]
