@@ -3,6 +3,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod answers;
 pub mod checksum;
 pub mod compute;
 pub mod field;

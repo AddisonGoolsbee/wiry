@@ -6,6 +6,11 @@
 // as useless_conversion at each function's span.
 #![allow(clippy::useless_conversion)]
 
+mod capture;
+mod live;
+mod sniff;
+
+use packetry_capture::Flow;
 use packetry_core::field::{self, FieldDesc, FieldKind, FieldValue};
 use packetry_core::options::OptArg;
 use packetry_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
@@ -91,17 +96,17 @@ struct Cond {
 }
 
 /// A test against a layer the packet does not have is false, never true.
-struct Query {
+pub(crate) struct Query {
     layer: Option<ProtoId>,
     conds: Vec<Cond>,
 }
 
 impl Query {
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.layer.is_none() && self.conds.is_empty()
     }
 
-    fn matches(&self, buf: &[u8], spans: &[LayerSpan]) -> bool {
+    pub(crate) fn matches(&self, buf: &[u8], spans: &[LayerSpan]) -> bool {
         if let Some(l) = self.layer {
             if !spans.iter().any(|s| s.proto == l) {
                 return false;
@@ -159,7 +164,7 @@ fn resolve_spec(layer: &str, name: &str) -> PyResult<ColSpec> {
     Ok(ColSpec::Field(id, f))
 }
 
-fn build_query(
+pub(crate) fn build_query(
     py: Python<'_>,
     layer: Option<&str>,
     conds: Vec<(String, String, String, PyObject)>,
@@ -211,9 +216,9 @@ enum Cell {
 
 #[pyclass(name = "Pkt")]
 pub struct PyPkt {
-    inner: CorePacket,
+    pub(crate) inner: CorePacket,
     #[pyo3(get)]
-    time: f64,
+    pub(crate) time: f64,
 }
 
 #[pymethods]
@@ -464,12 +469,52 @@ pub struct PyPktList {
     buf: Arc<Vec<u8>>,
     index: Vec<Record>,
     link: ProtoId,
+    /// The file's own DLT. Kept beside `link` because a BPF program is compiled
+    /// against the link-layer number, not the dissector it maps to.
+    dlt: u32,
     nanos: bool,
     /// Positions in the original capture, set when this list is a filtered view.
     nums: Option<Vec<u32>>,
 }
 
 impl PyPktList {
+    /// The Rust-side constructor a live driver uses: `CaptureBuf::into_parts`
+    /// yields exactly the first three arguments. Not exposed to Python, because
+    /// handing an arbitrary buffer and index across the boundary is unchecked.
+    pub(crate) fn from_capture(buf: Vec<u8>, index: Vec<Record>, link: u32, nanos: bool) -> Self {
+        Self {
+            buf: Arc::new(buf),
+            index,
+            link: pcap::link_to_proto(link),
+            dlt: link,
+            nanos,
+            nums: None,
+        }
+    }
+
+    /// A view over the kept positions, sharing the capture buffer.
+    fn keeping(&self, keep: &[u32]) -> Self {
+        Self {
+            buf: Arc::clone(&self.buf),
+            index: keep.iter().map(|&i| self.index[i as usize]).collect(),
+            link: self.link,
+            dlt: self.dlt,
+            nanos: self.nanos,
+            nums: Some(keep.iter().map(|&i| self.num_at(i as usize)).collect()),
+        }
+    }
+
+    fn time_at(&self, i: usize) -> f64 {
+        let (_, _, sec, frac) = self.index[i];
+        let div = if self.nanos { 1e9 } else { 1e6 };
+        sec as f64 + frac as f64 / div
+    }
+
+    fn bytes_at(&self, i: usize) -> &[u8] {
+        let (off, len, _, _) = self.index[i];
+        &self.buf[off..off + len as usize]
+    }
+
     fn num_at(&self, i: usize) -> u32 {
         match &self.nums {
             Some(n) => n[i],
@@ -665,13 +710,80 @@ impl PyPktList {
     ) -> PyResult<PyPktList> {
         let q = build_query(py, layer, conds)?;
         let keep = self.matching(py, &q);
-        Ok(PyPktList {
-            buf: Arc::clone(&self.buf),
-            index: keep.iter().map(|&i| self.index[i as usize]).collect(),
-            link: self.link,
-            nanos: self.nanos,
-            nums: Some(keep.iter().map(|&i| self.num_at(i as usize)).collect()),
-        })
+        Ok(self.keeping(&keep))
+    }
+
+    /// The offline sniff driver: the same state machine the live drivers will
+    /// feed, over records already indexed from a file. The result shares this
+    /// capture's buffer, so it is an ordinary list and costs no copy.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        count = 0, store = true, bpf = None, layer = None, conds = Vec::new(),
+        timeout = None, prn = None, lfilter = None, stop_filter = None, wrap = None
+    ))]
+    fn sniff_offline(
+        &self,
+        py: Python<'_>,
+        count: usize,
+        store: bool,
+        bpf: Option<&str>,
+        layer: Option<&str>,
+        conds: Vec<(String, String, String, PyObject)>,
+        timeout: Option<f64>,
+        prn: Option<PyObject>,
+        lfilter: Option<PyObject>,
+        stop_filter: Option<PyObject>,
+        wrap: Option<PyObject>,
+    ) -> PyResult<PyPktList> {
+        // Compiles with no device and no privileges, so a BPF filter works on a
+        // file exactly as it would on a wire.
+        let filter = match bpf {
+            Some(e) => Some(
+                packetry_capture::compile_filter(self.dlt, e, 262_144)
+                    .map_err(capture::to_py_err)?,
+            ),
+            None => None,
+        };
+        let q = build_query(py, layer, conds)?;
+        let mut st = sniff::SniffState::new(
+            count,
+            store,
+            timeout,
+            filter,
+            q,
+            prn,
+            lfilter,
+            stop_filter,
+            wrap,
+        );
+        let link = self.link;
+        let n = self.index.len();
+        let mut keep: Vec<u32> = Vec::new();
+
+        if st.needs_python() {
+            for i in 0..n {
+                let (put, flow) = st.step_py(py, self.bytes_at(i), link, self.time_at(i))?;
+                if put {
+                    keep.push(i as u32);
+                }
+                if flow == Flow::Stop {
+                    break;
+                }
+            }
+        } else {
+            py.allow_threads(|| {
+                for i in 0..n {
+                    let (put, flow) = st.step(self.bytes_at(i), link);
+                    if put {
+                        keep.push(i as u32);
+                    }
+                    if flow == Flow::Stop {
+                        break;
+                    }
+                }
+            });
+        }
+        Ok(self.keeping(&keep))
     }
 
     /// Shares the capture buffer: no copy.
@@ -681,6 +793,7 @@ impl PyPktList {
             buf: Arc::clone(&self.buf),
             index: self.index[..k].to_vec(),
             link: self.link,
+            dlt: self.dlt,
             nanos: self.nanos,
             nums: Some((0..k).map(|i| self.num_at(i)).collect()),
         }
@@ -718,28 +831,28 @@ impl PyPktList {
 #[pyfunction]
 fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
     let data = std::fs::read(path)?;
-    let (index, link, nanos) = py
+    let (index, dlt, nanos) = py
         .allow_threads(|| -> Result<_, String> {
             let base = data.as_ptr() as usize;
             let mut index = Vec::new();
             if packetry_core::pcapng::is_pcapng(&data) {
                 let r = packetry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())?;
-                let link = pcap::link_to_proto(r.header.linktype);
+                let dlt = r.header.linktype;
                 let nanos = r.header.nanos();
                 for rec in packetry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())? {
                     let off = rec.data.as_ptr() as usize - base;
                     index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
                 }
-                Ok((index, link, nanos))
+                Ok((index, dlt, nanos))
             } else {
                 let r = pcap::Reader::new(&data).map_err(|e| e.to_string())?;
-                let link = pcap::link_to_proto(r.header.linktype);
+                let dlt = r.header.linktype;
                 let nanos = r.header.nanos;
                 for rec in pcap::Reader::new(&data).map_err(|e| e.to_string())? {
                     let off = rec.data.as_ptr() as usize - base;
                     index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
                 }
-                Ok((index, link, nanos))
+                Ok((index, dlt, nanos))
             }
         })
         .map_err(PyValueError::new_err)?;
@@ -747,7 +860,8 @@ fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
     Ok(PyPktList {
         buf: Arc::new(data),
         index,
-        link,
+        link: pcap::link_to_proto(dlt),
+        dlt,
         nanos,
         nums: None,
     })
@@ -1161,6 +1275,20 @@ fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
     m.add_function(wrap_pyfunction!(register_layer, m)?)?;
     m.add_function(wrap_pyfunction!(bind_layer, m)?)?;
+    m.add_function(wrap_pyfunction!(capture::capture_available, m)?)?;
+    m.add_function(wrap_pyfunction!(capture::capture_check, m)?)?;
+    m.add_function(wrap_pyfunction!(capture::list_interfaces, m)?)?;
+    m.add_function(wrap_pyfunction!(capture::default_interface, m)?)?;
+    m.add_function(wrap_pyfunction!(capture::interface_mac, m)?)?;
+    m.add_function(wrap_pyfunction!(live::sniff_live, m)?)?;
+    m.add_class::<live::LiveSniffer>()?;
+    m.add_function(wrap_pyfunction!(live::send_frames, m)?)?;
+    m.add_function(wrap_pyfunction!(live::send_datagrams, m)?)?;
+    m.add_function(wrap_pyfunction!(live::sr_live, m)?)?;
+    m.add(
+        "CaptureUnavailable",
+        m.py().get_type_bound::<capture::CaptureUnavailable>(),
+    )?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

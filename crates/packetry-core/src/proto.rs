@@ -24,6 +24,9 @@ impl ProtoId {
     pub const Dns: ProtoId = ProtoId(11);
     pub const Bootp: ProtoId = ProtoId(12);
     pub const Dhcp: ProtoId = ProtoId(13);
+    pub const Null: ProtoId = ProtoId(14);
+    pub const LinuxSll: ProtoId = ProtoId(15);
+    pub const LinuxSll2: ProtoId = ProtoId(16);
 
     pub fn name(self) -> &'static str {
         desc(self).name
@@ -66,7 +69,7 @@ pub struct ProtoDesc {
     pub content_len: Option<fn(&[u8]) -> usize>,
 }
 
-pub const BUILTIN_COUNT: u16 = 14;
+pub const BUILTIN_COUNT: u16 = 17;
 
 const BUILTINS: &[ProtoId] = &[
     ProtoId::Ether,
@@ -81,6 +84,9 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::Dns,
     ProtoId::Bootp,
     ProtoId::Dhcp,
+    ProtoId::Null,
+    ProtoId::LinuxSll,
+    ProtoId::LinuxSll2,
     ProtoId::Raw,
     ProtoId::Padding,
 ];
@@ -110,6 +116,9 @@ fn builtin_desc(id: ProtoId) -> &'static ProtoDesc {
         ProtoId::Dns => &dns::DESC,
         ProtoId::Bootp => &bootp::DESC,
         ProtoId::Dhcp => &bootp::DHCP_DESC,
+        ProtoId::Null => &null::DESC,
+        ProtoId::LinuxSll => &linux_sll::DESC,
+        ProtoId::LinuxSll2 => &linux_sll::DESC_V2,
         _ => &raw::DESC,
     }
 }
@@ -362,7 +371,7 @@ mod tests {
     fn builtin_ids_keep_their_numbering() {
         assert_eq!(ProtoId::Raw.0, 0);
         assert_eq!(ProtoId::Tcp.0, 7);
-        assert_eq!(ProtoId::Dhcp.0, BUILTIN_COUNT - 1);
+        assert_eq!(ProtoId::LinuxSll2.0, BUILTIN_COUNT - 1);
         assert_eq!(desc(ProtoId::Tcp).name, "TCP");
     }
 

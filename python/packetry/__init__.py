@@ -12,15 +12,27 @@ __all__ = [
     "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "PcapReader",
     "raw", "hexdump", "hexdump_str", "ls", "known_layers", "bind_layers",
     "to_arrow", "to_polars", "to_pandas",
+    "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
+    "get_if_list", "get_if_addr", "get_working_if", "interfaces", "conf",
+    "capture_available", "CaptureUnavailable",
 ]
 
 _COLUMNAR = ("to_arrow", "to_polars", "to_pandas")
+
+_CAPTURE = (
+    "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
+    "get_if_list", "get_if_addr", "get_working_if", "interfaces", "conf",
+    "capture_available", "CaptureUnavailable",
+)
 
 
 def __getattr__(name: str) -> Any:
     if name in _COLUMNAR:
         from . import columnar
         return getattr(columnar, name)
+    if name in _CAPTURE:
+        from . import capture
+        return getattr(capture, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

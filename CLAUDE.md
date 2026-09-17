@@ -117,6 +117,13 @@ Concretely:
 - Construction accumulates a layer stack in Python and serialises in **one**
   call (`build_and_serialize`), rather than one call per field.
 
+**The rule governs bulk analytic paths.** Where an API's own contract is a
+per-packet Python callback — `sniff`'s `prn`, `lfilter` and `stop_filter` — the
+crossing is the feature, not a violation. `sniff` keeps the callback-free case
+on the fast path: one `allow_threads` around the whole loop and one crossing at
+the end, with BPF and the Rust-side query rejecting packets before any Python
+object exists. Only a supplied callback reacquires per packet.
+
 **Invariant: the bulk path must never disagree with the per-packet path.** The
 test suite asserts this. If they ever diverge, the bulk path is wrong.
 
@@ -135,8 +142,8 @@ live in `layers/dns.rs`.
 
 | Decision | Rationale |
 |---|---|
-| Protocols: Ether, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP, Raw, Padding | Scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. This set covers the overwhelming majority of real scripts. dpkt does 1.35M downloads/month with ~80 protocols. |
-| **No live capture in v1** (`sniff`, `send`, `sr`) | Needs raw sockets, root, and per-OS backends; untestable in CI. The measured 1,000x is in parse and build. The API shape is reserved so capture is additive, not breaking. |
+| Protocols: Ether, Loopback, CookedLinux, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP, Raw, Padding | Scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. This set covers the overwhelming majority of real scripts. dpkt does 1.35M downloads/month with ~80 protocols. |
+| **Live capture behind the `live` feature, off by default** | Needs raw sockets, root, and per-OS backends; untestable in ordinary CI. `sniff(offline=...)` is complete without it, because the whole state machine is driven by `offline=`, so the live backend is an I/O shim over proven logic rather than a second implementation. |
 | Unknown protocols dissect to `Raw` | Bytes always round-trip, at any depth. |
 | Offline `pcap` first, `pcapng` second | pcap was enough to get a measured number; pcapng is common in modern captures and is being added. |
 
@@ -237,8 +244,16 @@ Beyond parity:
 
 ### What remains
 
-The live-capture surface (`sniff`, `send`, `sr`) is deliberately out of scope
-and its API shape is reserved so adding it stays additive.
+The live-capture surface is wired. `sniff(offline=...)` runs the real state
+machine — counters, deadline, BPF, the Rust-side query and the Python
+callbacks — with no privileges, no network and no `live` feature, so it is
+fully tested; `sniff(iface=...)`, `AsyncSniffer`, `send`, `sendp`, `sr`, `sr1`,
+`srp` and `srp1` put the wire in front of that same machine and need the
+feature, raising `CaptureUnavailable` without it. Nothing in the live driver
+decides when to keep, count or stop: it releases the GIL across every blocking
+read, polls the stop conditions between reads rather than per matched packet,
+and takes its link type from the handle rather than assuming Ethernet.
+Privileged round-trip checks live in `dev/live/`, never in `tests/`.
 
 Known gaps are enumerated in `DEVIATIONS.md`. The notable ones: two default
 values where scapy reads the live interface or ships a sample DNS question;
@@ -254,5 +269,13 @@ sub-options; pcapng writing; and SACK blocks not split into edge pairs.
   mis-decodes silently rather than failing.
 - A timing assertion placed after the call it measures cannot catch a hang. Run
   the suspect work on a worker thread with a deadline.
+- A read timeout from libpcap is the driver's chance to poll its deadline and
+  its stop flag, not an error. Never set that timeout to 0: the pcap README
+  warns it can hang `next_packet` on macOS, and it would also stop the loop
+  ever waking.
+- A Rust thread that calls into Python after the interpreter has finalised
+  segfaults, which bypasses the protection `panic = "abort"` is kept off to
+  provide. Anything owning such a thread stops and joins it on drop, and joins
+  with the GIL released so a `prn` waiting to acquire it is not deadlocked.
 - Benchmarks report lazy and eager modes, compare identical packet sets, and
   measure memory in isolated processes, because `ru_maxrss` is a high-water mark.

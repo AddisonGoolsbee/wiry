@@ -84,6 +84,10 @@ impl FieldDesc {
         Self::new(name, bit_off, bit_len, FieldKind::Uint, default)
     }
 
+    pub const fn le_uint(name: &'static str, bit_off: u16, bit_len: u16, default: u64) -> Self {
+        Self::new(name, bit_off, bit_len, FieldKind::LeUint, default)
+    }
+
     pub const fn computed_uint(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
         let mut f = Self::new(name, bit_off, bit_len, FieldKind::Uint, 0);
         f.computed = true;

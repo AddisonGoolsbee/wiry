@@ -12,7 +12,12 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 packetry-core = { path = "../packetry-core" }
+packetry-capture = { path = "../packetry-capture" }
 # extension-module is NOT enabled here: it disables linking against libpython,
 # which breaks `cargo test`/`cargo build`. maturin enables it at build time via
 # pyproject.toml's [tool.maturin] features, which is the only place it matters.
 pyo3 = { version = "0.22", features = ["abi3-py39"] }
+
+[features]
+# Forwards to the capture crate. Off by default: the offline paths never need it.
+live = ["packetry-capture/live"]
