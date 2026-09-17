@@ -9,7 +9,7 @@
 //! one it would need to be `Uint`, which is the pre-existing gap logged as
 //! DEVIATIONS.md C3 and is not addressed here.
 
-use crate::field::{FieldDesc, FieldKind};
+use crate::field::FieldDesc;
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
 /// `AF_INET` is 2 everywhere. `AF_INET6` is not: 24 on NetBSD and OpenBSD, 28

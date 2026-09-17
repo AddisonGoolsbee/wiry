@@ -69,7 +69,7 @@ fn within<F: FnOnce() + Send + 'static>(limit: Duration, what: &'static str, f: 
     }
 }
 
-const ENTRY_POINTS: [ProtoId; 14] = [
+const ENTRY_POINTS: [ProtoId; 17] = [
     ProtoId::Raw,
     ProtoId::Padding,
     ProtoId::Ether,
@@ -84,6 +84,9 @@ const ENTRY_POINTS: [ProtoId; 14] = [
     ProtoId::Dns,
     ProtoId::Bootp,
     ProtoId::Dhcp,
+    ProtoId::Null,
+    ProtoId::LinuxSll,
+    ProtoId::LinuxSll2,
 ];
 
 /// Spans must stay inside the buffer and must not run backwards.

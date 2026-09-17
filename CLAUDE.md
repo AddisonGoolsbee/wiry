@@ -135,7 +135,7 @@ live in `layers/dns.rs`.
 
 | Decision | Rationale |
 |---|---|
-| Protocols: Ether, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP, Raw, Padding | Scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. This set covers the overwhelming majority of real scripts. dpkt does 1.35M downloads/month with ~80 protocols. |
+| Protocols: Ether, Loopback, CookedLinux, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP, Raw, Padding | Scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. This set covers the overwhelming majority of real scripts. dpkt does 1.35M downloads/month with ~80 protocols. |
 | **No live capture in v1** (`sniff`, `send`, `sr`) | Needs raw sockets, root, and per-OS backends; untestable in CI. The measured 1,000x is in parse and build. The API shape is reserved so capture is additive, not breaking. |
 | Unknown protocols dissect to `Raw` | Bytes always round-trip, at any depth. |
 | Offline `pcap` first, `pcapng` second | pcap was enough to get a measured number; pcapng is common in modern captures and is being added. |

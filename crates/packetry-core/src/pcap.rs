@@ -11,14 +11,20 @@ pub mod linktype {
     pub const NULL: u32 = 0;
     pub const ETHERNET: u32 = 1;
     pub const RAW: u32 = 101;
+    /// DLT_NULL with the address family in network byte order.
+    pub const LOOP: u32 = 108;
     pub const LINUX_SLL: u32 = 113;
     pub const IPV4: u32 = 228;
     pub const IPV6: u32 = 229;
+    pub const LINUX_SLL2: u32 = 276;
 }
 
 pub fn link_to_proto(lt: u32) -> ProtoId {
     match lt {
         linktype::ETHERNET => ProtoId::Ether,
+        linktype::NULL | linktype::LOOP => ProtoId::Null,
+        linktype::LINUX_SLL => ProtoId::LinuxSll,
+        linktype::LINUX_SLL2 => ProtoId::LinuxSll2,
         linktype::IPV4 | linktype::RAW => ProtoId::Ipv4,
         linktype::IPV6 => ProtoId::Ipv6,
         _ => ProtoId::Raw,
@@ -201,6 +207,33 @@ mod tests {
         assert_eq!(recs[0].data.len(), 60);
         assert_eq!(recs[1].ts_sec, 3);
         assert_eq!(recs[1].data[0], 0xbb);
+    }
+
+    #[test]
+    fn a_dlt_null_file_dissects_from_its_link_type() {
+        let mut v = Vec::new();
+        write_header(&mut v, linktype::NULL, 65535);
+        let mut frame = vec![2, 0, 0, 0];
+        frame.extend_from_slice(&[
+            0x45, 0x00, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 127, 0, 0, 1,
+            127, 0, 0, 1,
+        ]);
+        write_record(&mut v, 1, 0, &frame, frame.len() as u32);
+
+        let r = Reader::new(&v).unwrap();
+        let link = link_to_proto(r.header.linktype);
+        assert_eq!(link, ProtoId::Null);
+        let rec = Reader::new(&v).unwrap().next().unwrap();
+        let pkt = crate::packet::Packet::dissect(rec.data.to_vec(), link);
+        assert_eq!(
+            pkt.layers().iter().map(|s| s.proto).collect::<Vec<_>>(),
+            vec![ProtoId::Null, ProtoId::Ipv4]
+        );
+    }
+
+    #[test]
+    fn an_unregistered_link_type_still_falls_back_to_raw() {
+        assert_eq!(link_to_proto(999), ProtoId::Raw);
     }
 
     #[test]

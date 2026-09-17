@@ -12,7 +12,7 @@ Status key: **OPEN** = still a gap · **CLOSED** = resolved, kept for history.
 
 | # | Decision | Rationale | Status |
 |---|---|---|---|
-| S1 | Protocol scope limited to Ether, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, DHCP/BOOTP, VLAN(802.1Q), Raw, Padding | Scapy registers 1,746 layers on import and 4,160 `Packet` subclasses with contrib. Full parity is multi-person-year. This set covers the overwhelming majority of real scripts. | OPEN |
+| S1 | Protocol scope limited to Ether, Loopback (DLT_NULL/DLT_LOOP), CookedLinux (LINUX_SLL, LINUX_SLL2), ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, DHCP/BOOTP, VLAN(802.1Q), Raw, Padding | Scapy registers 1,746 layers on import and 4,160 `Packet` subclasses with contrib. Full parity is multi-person-year. This set covers the overwhelming majority of real scripts. | OPEN |
 | S2 | No live capture or injection in v1 (`sniff`, `send`, `sendp`, `sr`, `sr1`, `srp`) | Requires raw sockets, root, and per-OS backends; untestable in CI. Parse/build is where the measured 1000x lives. API shape is reserved so capture is additive, not breaking. | OPEN |
 | S3 | Standalone, clean-room, no Scapy import at runtime | Scapy is GPL-2.0-only. Importing it would relicense this project and forfeit both commercial adopters and the Rust crates.io audience. | CLOSED |
 | S4 | Unimplemented protocols dissect to `Raw`, exactly as Scapy does for layers it lacks | Preserves correct round-trip bytes for everything, at any depth. | CLOSED |
@@ -50,4 +50,4 @@ running Scapy, because a machine-generated corpus derived from GPL code is a gre
 |---|---|---|
 | C1 | Checksum recomputation implemented for IPv4/TCP/UDP/ICMP/ICMPv6 only | OPEN |
 | C2 | Fuzzing: 7 libFuzzer targets in `fuzz/` (dissection, DNS records, pcap, pcapng, TLV options, serialise round-trip) plus seeded property tests in `crates/packetry-core/tests/robustness.rs` that run on stable | Remaining: no continuous fuzzing, and no coverage-guided corpus beyond the hand-written seeds | PARTIAL |
-| C3 | Endianness assumed little-endian host; big-endian hosts untested | OPEN |
+| C3 | Endianness assumed little-endian host; big-endian hosts untested. DLT_NULL's address-family field (`layers/null.rs`) is declared `LeUint`, the host order of a capture written on a little-endian host; on a big-endian host it would have to be `Uint`. Dissection still reaches the payload either way, since the layer tries both orders before giving up | OPEN |
