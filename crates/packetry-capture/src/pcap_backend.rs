@@ -124,6 +124,6 @@ pub fn compile_filter(
         .map_err(|e| CaptureError::BadFilter(e.to_string()))
 }
 
-pub fn send_l3(frames: &[Vec<u8>]) -> Result<usize, CaptureError> {
-    crate::l3::send_l3(frames)
+pub fn send_l3(frames: &[Vec<u8>], count: usize, inter: f64) -> Result<usize, CaptureError> {
+    crate::l3::send_l3(frames, count, inter)
 }

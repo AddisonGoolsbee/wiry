@@ -1279,8 +1279,11 @@ fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(capture::capture_check, m)?)?;
     m.add_function(wrap_pyfunction!(capture::list_interfaces, m)?)?;
     m.add_function(wrap_pyfunction!(capture::default_interface, m)?)?;
+    m.add_function(wrap_pyfunction!(capture::interface_mac, m)?)?;
     m.add_function(wrap_pyfunction!(live::sniff_live, m)?)?;
     m.add_class::<live::LiveSniffer>()?;
+    m.add_function(wrap_pyfunction!(live::send_frames, m)?)?;
+    m.add_function(wrap_pyfunction!(live::send_datagrams, m)?)?;
     m.add(
         "CaptureUnavailable",
         m.py().get_type_bound::<capture::CaptureUnavailable>(),

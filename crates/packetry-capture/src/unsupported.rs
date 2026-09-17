@@ -56,6 +56,6 @@ pub fn compile_filter(
     Err(CaptureError::Unsupported)
 }
 
-pub fn send_l3(_frames: &[Vec<u8>]) -> Result<usize, CaptureError> {
+pub fn send_l3(_frames: &[Vec<u8>], _count: usize, _inter: f64) -> Result<usize, CaptureError> {
     Err(CaptureError::Unsupported)
 }

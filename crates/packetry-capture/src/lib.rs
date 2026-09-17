@@ -80,8 +80,25 @@ pub fn compile_filter(
     backend::compile_filter(linktype, expr, snaplen)
 }
 
-pub fn send_l3(frames: &[Vec<u8>]) -> Result<usize, CaptureError> {
-    backend::send_l3(frames)
+pub fn send_l3(frames: &[Vec<u8>], count: usize, inter: f64) -> Result<usize, CaptureError> {
+    backend::send_l3(frames, count, inter)
+}
+
+/// The interface's hardware address, for filling an unset `Ether.src` at send
+/// time. `pcap::Device` carries none, and sysfs is the answer only on Linux:
+/// everywhere else this admits it does not know rather than pulling in another
+/// dependency, so `None` is an ordinary outcome that every caller handles.
+pub fn interface_mac(name: &str) -> Option<[u8; 6]> {
+    if !cfg!(target_os = "linux") || name.is_empty() || name.contains(['/', '\\']) {
+        return None;
+    }
+    let text = std::fs::read_to_string(format!("/sys/class/net/{name}/address")).ok()?;
+    let mut parts = text.trim().split(':');
+    let mut out = [0u8; 6];
+    for b in out.iter_mut() {
+        *b = u8::from_str_radix(parts.next()?, 16).ok()?;
+    }
+    parts.next().is_none().then_some(out)
 }
 
 #[cfg(test)]
@@ -97,6 +114,13 @@ mod tests {
             ));
             assert!(list_interfaces().is_err());
         }
+    }
+
+    #[test]
+    fn a_hardware_address_is_never_read_from_outside_the_interface_table() {
+        assert_eq!(interface_mac(""), None);
+        assert_eq!(interface_mac("../../etc/passwd"), None);
+        assert_eq!(interface_mac("packetry-no-such-if0"), None);
     }
 
     #[test]

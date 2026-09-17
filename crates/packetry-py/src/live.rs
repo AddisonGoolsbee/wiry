@@ -460,6 +460,70 @@ impl Drop for LiveSniffer {
     }
 }
 
+/// One pass over `frames`, `count` times, sleeping `inter` between frames.
+/// The repetition lives here so a `sendp` of a thousand frames crosses the
+/// boundary once, not a thousand times.
+fn one_run(h: &mut Handle, frames: &[Vec<u8>], count: usize, gap: Duration) -> PyResult<usize> {
+    let mut sent = 0usize;
+    for _ in 0..count {
+        for f in frames {
+            h.send(f).map_err(to_py_err)?;
+            sent += 1;
+            if !gap.is_zero() {
+                std::thread::sleep(gap);
+            }
+        }
+    }
+    Ok(sent)
+}
+
+/// Layer 2: the frames go out exactly as given, on one interface.
+#[pyfunction]
+#[pyo3(signature = (frames, iface = None, count = 1, inter = 0.0, repeat = false))]
+pub(crate) fn send_frames(
+    py: Python<'_>,
+    frames: Vec<Vec<u8>>,
+    iface: Option<String>,
+    count: usize,
+    inter: f64,
+    repeat: bool,
+) -> PyResult<usize> {
+    let cfg = live_config(iface, None, false, 65_535);
+    let mut h = open_live(&cfg).map_err(to_py_err)?;
+    let gap = Duration::from_secs_f64(inter.max(0.0));
+    let mut sent = 0usize;
+    loop {
+        sent += py.allow_threads(|| one_run(&mut h, &frames, count, gap))?;
+        if !repeat {
+            return Ok(sent);
+        }
+        // The only way out of an endless loop, as it is in scapy.
+        py.check_signals()?;
+    }
+}
+
+/// Layer 3: the kernel routes and frames each datagram.
+#[pyfunction]
+#[pyo3(signature = (frames, count = 1, inter = 0.0, repeat = false))]
+pub(crate) fn send_datagrams(
+    py: Python<'_>,
+    frames: Vec<Vec<u8>>,
+    count: usize,
+    inter: f64,
+    repeat: bool,
+) -> PyResult<usize> {
+    let mut sent = 0usize;
+    loop {
+        sent += py
+            .allow_threads(|| packetry_capture::send_l3(&frames, count, inter))
+            .map_err(to_py_err)?;
+        if !repeat {
+            return Ok(sent);
+        }
+        py.check_signals()?;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

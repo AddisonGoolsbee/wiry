@@ -86,3 +86,67 @@ def test_a_failed_start_leaves_the_sniffer_idle_and_restartable():
     assert s.results is None
     with pytest.raises(OSError):
         s.start()
+
+
+def test_an_unset_ether_src_is_filled_only_at_send_time():
+    from packetry import Ether, IP
+
+    pkt = Ether() / IP()
+    filled = C._with_src(pkt, "aa:bb:cc:dd:ee:ff")
+    assert bytes(filled)[6:12] == b"\xaa\xbb\xcc\xdd\xee\xff"
+    # The build path stays reproducible, and the caller's packet untouched.
+    assert bytes(pkt)[6:12] == b"\x00" * 6
+    assert bytes(Ether())[6:12] == b"\x00" * 6
+
+
+def test_an_explicit_ether_src_is_never_overwritten():
+    from packetry import Ether, IP
+
+    pkt = Ether(src="02:00:00:00:00:09") / IP()
+    assert bytes(C._with_src(pkt, "aa:bb:cc:dd:ee:ff"))[6:12] == bytes.fromhex(
+        "020000000009"
+    )
+
+
+def test_no_interface_address_is_an_ordinary_outcome():
+    from packetry import Ether, IP
+
+    pkt = Ether() / IP()
+    assert C._with_src(pkt, None) is pkt
+    assert C._with_src(b"\x00" * 14, "aa:bb:cc:dd:ee:ff") == b"\x00" * 14
+
+
+def test_the_interface_address_is_unknown_off_linux_and_never_a_path():
+    import sys
+
+    assert P._packetry.interface_mac("../../etc/passwd") is None
+    assert P._packetry.interface_mac("packetry-no-such-if0") is None
+    if sys.platform != "linux":
+        assert P._packetry.interface_mac("lo") is None
+
+
+@live
+def test_send_refuses_ipv6_and_names_sendp():
+    from packetry import IPv6, UDP
+
+    with pytest.raises(NotImplementedError) as exc:
+        P.send(IPv6() / UDP())
+    assert "sendp" in str(exc.value)
+
+
+@live
+def test_send_refuses_the_arguments_it_does_not_implement():
+    from packetry import Ether, IP
+
+    with pytest.raises(NotImplementedError):
+        P.sendp(Ether() / IP(), socket=object(), iface=NO_SUCH_IF)
+    with pytest.raises(NotImplementedError):
+        P.sendp(Ether() / IP(), realtime=True, iface=NO_SUCH_IF)
+
+
+@live
+def test_sendp_on_an_unknown_interface_raises_oserror():
+    from packetry import Ether, IP
+
+    with pytest.raises(OSError):
+        P.sendp(Ether() / IP(), iface=NO_SUCH_IF, verbose=0)

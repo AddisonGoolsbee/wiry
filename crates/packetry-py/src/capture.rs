@@ -69,6 +69,18 @@ pub(crate) fn list_interfaces(py: Python<'_>) -> PyResult<Py<PyList>> {
     Ok(out.unbind())
 }
 
+/// `None` wherever the hardware address cannot be read, which is every
+/// platform but Linux. Callers must treat that as ordinary.
+#[pyfunction]
+pub(crate) fn interface_mac(name: &str) -> Option<String> {
+    packetry_capture::interface_mac(name).map(|m| {
+        m.iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(":")
+    })
+}
+
 #[pyfunction]
 pub(crate) fn default_interface() -> PyResult<String> {
     packetry_capture::default_interface().map_err(to_py_err)

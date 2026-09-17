@@ -287,12 +287,79 @@ class AsyncSniffer:
         return self._results
 
 
+def _as_list(x: Any) -> list:
+    """Whatever was handed in, as a list of packets."""
+    if isinstance(x, (Packet, bytes, bytearray, memoryview, str)):
+        return [x]
+    if isinstance(x, PacketList):
+        return list(x)
+    return list(x)
+
+
+def _refuse_ipv6(pkts: list, what: str) -> None:
+    for p in pkts:
+        if isinstance(p, Packet) and "IPv6" in p.layers():
+            raise NotImplementedError(
+                f"{what}() has no IPv6 layer-3 path: it writes IPv4 datagrams to "
+                "a raw socket. Wrap the packet in Ether() and use sendp()."
+            )
+
+
+def _with_src(pkt: Any, mac: Optional[str]) -> Any:
+    """Fill an unset ``Ether.src`` from the outgoing interface (E9).
+
+    At send time only, and on a copy: ``bytes(Ether())`` stays reproducible and
+    the build path stays free of the host it happens to run on. ``mac`` is
+    ``None`` wherever the address cannot be read, which is every platform but
+    Linux, and that is an ordinary outcome.
+    """
+    if mac is None or not isinstance(pkt, Packet) or not pkt._stack:
+        return pkt
+    name, fields = pkt._stack[0]
+    if name != "Ether" or fields.get("src"):
+        return pkt
+    stack = [(n, dict(f)) for n, f in pkt._stack]
+    stack[0][1]["src"] = mac
+    return Packet(_stack=stack, _payload=pkt._payload)
+
+
+def _report(sent: int, verbose: Optional[int]) -> None:
+    if (conf.verb if verbose is None else verbose):
+        print(f"Sent {sent} packets.")
+
+
+def _passes(count: Optional[int]) -> int:
+    return 1 if count is None else int(count)
+
+
+def _refuse_unsupported(realtime: Any, socket: Any) -> None:
+    if socket is not None:
+        raise NotImplementedError(
+            "socket= is not supported: there is no socket object to hand in"
+        )
+    if realtime:
+        raise NotImplementedError(
+            "realtime= is not supported; inter= paces the send instead"
+        )
+
+
 def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
          verbose: Optional[int] = None, realtime: Optional[bool] = None,
          return_packets: bool = False, socket: Any = None,
          *, iface: Any = None, **kwargs: Any) -> Any:
-    """Send layer-3 packets, letting the kernel route and frame them."""
-    _live_only("send()")
+    """Send layer-3 packets, letting the kernel route and frame them.
+
+    IPv4 only: the raw socket writes datagrams with the header included, and
+    IPv6 needs a second address family. ``loop`` repeats until interrupted.
+    """
+    _b.capture_check()
+    _refuse_unsupported(realtime, socket)
+    pkts = _as_list(x)
+    _refuse_ipv6(pkts, "send")
+    frames = [bytes(p) for p in pkts]
+    sent = _b.send_datagrams(frames, _passes(count), float(inter), bool(loop))
+    _report(sent, verbose)
+    return pkts if return_packets else None
 
 
 def sendp(x: Any, inter: float = 0, loop: int = 0, iface: Any = None,
@@ -300,8 +367,19 @@ def sendp(x: Any, inter: float = 0, loop: int = 0, iface: Any = None,
           verbose: Optional[int] = None, realtime: Optional[bool] = None,
           return_packets: bool = False, socket: Any = None,
           **kwargs: Any) -> Any:
-    """Send layer-2 frames exactly as given, on one interface."""
-    _live_only("sendp()")
+    """Send layer-2 frames exactly as given, on one interface.
+
+    The whole list is serialised here and crosses into Rust once; the repeat
+    and the ``inter`` pacing happen there. ``loop`` repeats until interrupted.
+    """
+    _b.capture_check()
+    _refuse_unsupported(realtime, socket)
+    name = _iface_name(iface)
+    pkts = _as_list(x)
+    frames = [bytes(_with_src(p, _b.interface_mac(name))) for p in pkts]
+    sent = _b.send_frames(frames, name, _passes(count), float(inter), bool(loop))
+    _report(sent, verbose)
+    return pkts if return_packets else None
 
 
 def sr(x: Any, promisc: Optional[bool] = None, filter: Optional[str] = None,
