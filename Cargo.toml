@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/packetry-core", "crates/packetry-py"]
+members = ["crates/packetry-core", "crates/packetry-capture", "crates/packetry-py"]
 
 [workspace.package]
 version = "0.1.0"
