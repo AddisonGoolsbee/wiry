@@ -71,6 +71,16 @@ impl SniffState {
         self.deadline.is_some_and(|d| Instant::now() >= d)
     }
 
+    /// The deadline, polled between reads. A live driver blocks on the wire, so
+    /// the timeout has to be honoured without a packet to hang it on.
+    pub(crate) fn tick(&self) -> Flow {
+        if self.expired() {
+            Flow::Stop
+        } else {
+            Flow::Continue
+        }
+    }
+
     fn passes(&self, data: &[u8], link: ProtoId) -> bool {
         if let Some(f) = &self.bpf {
             if !f.matches(data) {

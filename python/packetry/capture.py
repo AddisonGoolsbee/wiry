@@ -48,6 +48,11 @@ def _live_only(what: str) -> None:
     )
 
 
+def _iface_name(iface: Any) -> str:
+    """The interface to work on: what was asked for, else ``conf.iface``."""
+    return conf.iface if iface is None else str(iface)
+
+
 def _wrap(rust: Any) -> Packet:
     return Packet(_rust=rust, time=rust.time)
 
@@ -73,6 +78,43 @@ def _offline_source(offline: Any) -> Any:
     raise NotImplementedError(
         "offline= takes a capture file path or a PacketList; for a list of "
         "packets, write it with wrpcap() first"
+    )
+
+
+def _live_args(
+    *,
+    iface: Any = None,
+    count: int = 0,
+    store: int = 1,
+    prn: Optional[Callable] = None,
+    filter: Optional[str] = None,
+    lfilter: Optional[Callable] = None,
+    timeout: Optional[float] = None,
+    stop_filter: Optional[Callable] = None,
+    offline: Any = None,
+    quiet: bool = False,
+    promisc: bool = True,
+    snaplen: int = 262144,
+    where: Any = None,
+) -> dict:
+    """``sniff``'s keywords as the live driver takes them. Mirroring the
+    signature is what makes an unknown keyword a ``TypeError`` there too."""
+    if offline is not None:
+        raise ValueError("the live driver takes no offline source")
+    return dict(
+        iface=_iface_name(iface),
+        count=int(count),
+        store=bool(store),
+        filter=filter,
+        layer=None,
+        conds=_normalize_where(where),
+        timeout=None if timeout is None else float(timeout),
+        promisc=bool(promisc),
+        snaplen=int(snaplen),
+        prn=_printing(prn, quiet),
+        lfilter=lfilter,
+        stop_filter=stop_filter,
+        wrap=_wrap,
     )
 
 
@@ -104,7 +146,12 @@ def sniff(
     as scapy ignores them.
     """
     if offline is None:
-        _live_only("sniff() on an interface")
+        _b.capture_check()
+        return PacketList(_b.sniff_live(**_live_args(
+            iface=iface, count=count, store=store, prn=prn, filter=filter,
+            lfilter=lfilter, timeout=timeout, stop_filter=stop_filter,
+            quiet=quiet, promisc=promisc, snaplen=snaplen, where=where,
+        )))
     src = _offline_source(offline)
     return PacketList(
         src.sniff_offline(

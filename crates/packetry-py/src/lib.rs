@@ -7,6 +7,7 @@
 #![allow(clippy::useless_conversion)]
 
 mod capture;
+mod live;
 mod sniff;
 
 use packetry_capture::Flow;
@@ -480,7 +481,6 @@ impl PyPktList {
     /// The Rust-side constructor a live driver uses: `CaptureBuf::into_parts`
     /// yields exactly the first three arguments. Not exposed to Python, because
     /// handing an arbitrary buffer and index across the boundary is unchecked.
-    #[allow(dead_code)]
     pub(crate) fn from_capture(buf: Vec<u8>, index: Vec<Record>, link: u32, nanos: bool) -> Self {
         Self {
             buf: Arc::new(buf),
@@ -1279,6 +1279,7 @@ fn _packetry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(capture::capture_check, m)?)?;
     m.add_function(wrap_pyfunction!(capture::list_interfaces, m)?)?;
     m.add_function(wrap_pyfunction!(capture::default_interface, m)?)?;
+    m.add_function(wrap_pyfunction!(live::sniff_live, m)?)?;
     m.add(
         "CaptureUnavailable",
         m.py().get_type_bound::<capture::CaptureUnavailable>(),
