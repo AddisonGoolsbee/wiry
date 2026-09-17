@@ -180,3 +180,90 @@ def test_every_exchange_reaches_the_backend(fn):
         else Ether() / IP(dst="10.99.0.2") / ICMP()
     with pytest.raises(OSError):
         getattr(P, fn)(pkt, iface=NO_SUCH_IF, timeout=0.1, verbose=0)
+
+
+def test_only_a_packet_or_bytes_can_be_sent():
+    from wiry import Ether, IP
+
+    assert C._octets("AB") == b"AB"
+    assert C._octets(b"AB") == b"AB"
+    assert C._octets(bytearray(b"AB")) == b"AB"
+    assert C._octets(memoryview(b"AB")) == b"AB"
+    assert C._octets(Ether() / IP()) == bytes(Ether() / IP())
+    # bytes(3) is three zero octets, so sendp([1, 2, 3]) used to put three
+    # all-zero frames on the wire instead of complaining.
+    for junk in (1, None, 3.5, object()):
+        with pytest.raises(TypeError):
+            C._octets(junk)
+
+
+def test_an_ipv6_datagram_is_refused_however_it_is_spelt():
+    from wiry import IP, IPv6, TCP
+
+    six = bytes(IPv6() / TCP())
+    for pkts in ([IPv6() / TCP()], [six], [bytearray(six)]):
+        frames = [C._octets(p) for p in pkts]
+        with pytest.raises(NotImplementedError) as exc:
+            C._refuse_ipv6(pkts, frames, "send")
+        assert "sendp" in str(exc.value)
+    four = [IP() / TCP()]
+    C._refuse_ipv6(four, [C._octets(p) for p in four], "send")
+    C._refuse_ipv6([b""], [b""], "send")
+
+
+def test_a_pause_between_packets_must_be_finite():
+    assert C._pause(0) == 0.0
+    assert C._pause(0.25) == 0.25
+    for bad in (float("inf"), float("-inf"), float("nan")):
+        with pytest.raises(ValueError) as exc:
+            C._pause(bad)
+        assert "inter" in str(exc.value)
+
+
+def test_a_timeout_no_float_can_represent_does_not_panic_the_backend():
+    # LiveSniffer builds its whole state before it touches a device, so this
+    # is reachable in a build with no live feature at all.
+    for t in (float("inf"), float("-inf"), float("nan"), 1e300, -5.0):
+        s = P._wiry.LiveSniffer(timeout=t)
+        assert s.running() is False
+        assert s.results() is None
+
+
+@live
+def test_send_refuses_a_buffer_that_is_not_an_ipv4_datagram():
+    from wiry import Ether, IP, TCP
+
+    # An Ethernet frame's destination MAC read as an IP header used to send a
+    # datagram to 0.40.0.1; anything at all of 20 octets was accepted.
+    for buf in (bytes(Ether() / IP() / TCP()), b"this is not a packet at all!!",
+                bytes(20), b"\xff" * 40):
+        with pytest.raises(ValueError):
+            P.send(buf, verbose=0)
+
+
+@live
+def test_send_refuses_raw_ipv6_bytes_and_names_sendp():
+    from wiry import IPv6, TCP
+
+    with pytest.raises(NotImplementedError) as exc:
+        P.send(bytes(IPv6() / TCP()), verbose=0)
+    assert "sendp" in str(exc.value)
+
+
+@live
+def test_a_retry_or_multi_round_needs_a_timeout():
+    from wiry import IP, ICMP
+
+    for kw in ({"retry": 1}, {"multi": True}):
+        with pytest.raises(ValueError) as exc:
+            P.sr(IP(dst="10.99.0.2") / ICMP(), iface=NO_SUCH_IF, verbose=0, **kw)
+        assert "timeout" in str(exc.value)
+
+
+@live
+def test_an_infinite_inter_is_refused_rather_than_slept_on():
+    from wiry import Ether, IP
+
+    with pytest.raises(ValueError) as exc:
+        P.sendp(Ether() / IP(), iface=NO_SUCH_IF, inter=float("inf"), verbose=0)
+    assert "inter" in str(exc.value)

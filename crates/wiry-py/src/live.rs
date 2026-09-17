@@ -20,7 +20,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use wiry_capture::{open_live, CaptureBuf, Flow, Handle, LiveConfig, PacketMeta, Record};
 use wiry_core::answers::{answers, reply_key, ReplyKey};
@@ -29,7 +29,7 @@ use wiry_core::pcap;
 use wiry_core::proto::ProtoId;
 
 use crate::capture::to_py_err;
-use crate::sniff::SniffState;
+use crate::sniff::{deadline_after, SniffState};
 use crate::{build_query, PyPktList};
 
 /// How long the loop runs before handing control back to check for a signal.
@@ -70,6 +70,17 @@ fn stamp(m: &PacketMeta) -> f64 {
     m.ts_sec as f64 + m.ts_frac as f64 / 1e6
 }
 
+/// The pause between two packets. Unlike a deadline there is no clamp that
+/// means anything: `Duration::MAX` between sends is a hang where the panic it
+/// replaced was at least visible, so an unrepresentable `inter` is refused.
+fn gap_of(inter: f64) -> PyResult<Duration> {
+    Duration::try_from_secs_f64(inter.max(0.0)).map_err(|_| {
+        PyValueError::new_err(format!(
+            "inter= must be a finite number of seconds, not {inter}"
+        ))
+    })
+}
+
 pub(crate) fn live_config(
     iface: Option<String>,
     filter: Option<String>,
@@ -95,8 +106,12 @@ pub(crate) struct LiveRun {
 }
 
 impl LiveRun {
-    pub(crate) fn new(handle: Handle, st: SniffState, snaplen: u32) -> Self {
+    /// The timeout runs from here, not from wherever the state was built: a
+    /// `LiveSniffer` constructed and started seconds apart must still capture
+    /// for the whole timeout it was asked for.
+    pub(crate) fn new(handle: Handle, mut st: SniffState, snaplen: u32) -> Self {
         let dlt = handle.linktype();
+        st.arm();
         Self {
             link: pcap::link_to_proto(dlt),
             out: CaptureBuf::new(dlt, snaplen),
@@ -268,30 +283,40 @@ impl Done {
         self.cv.notify_all();
     }
 
-    /// True when the thread has finished; false only when the wait timed out.
-    fn wait(&self, timeout: Option<f64>) -> bool {
-        let mut g = self.over.lock().unwrap_or_else(|e| e.into_inner());
-        match timeout {
-            None => {
-                while !*g {
-                    g = self.cv.wait(g).unwrap_or_else(|e| e.into_inner());
-                }
-                true
+    fn is_over(&self) -> bool {
+        *self.over.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Waits at most `slice`. True when the thread has finished. Bounded on
+    /// purpose: the caller has the GIL released and owes Python a signal check.
+    fn wait_for(&self, slice: Duration) -> bool {
+        let g = self.over.lock().unwrap_or_else(|e| e.into_inner());
+        if *g {
+            return true;
+        }
+        *self
+            .cv
+            .wait_timeout(g, slice)
+            .unwrap_or_else(|e| e.into_inner())
+            .0
+    }
+
+    /// Waits for the thread in slices, checking for a signal between them, so
+    /// Ctrl-C reaches a shutdown the way it already reaches the capture loop.
+    /// `deadline` of `None` waits however long it takes.
+    fn wait_out(&self, py: Python<'_>, deadline: Option<Instant>) -> PyResult<bool> {
+        loop {
+            let slice = match deadline {
+                None => SLICE,
+                Some(d) => match d.checked_duration_since(Instant::now()) {
+                    None => return Ok(self.is_over()),
+                    Some(left) => left.min(SLICE),
+                },
+            };
+            if py.allow_threads(|| self.wait_for(slice)) {
+                return Ok(true);
             }
-            Some(t) => {
-                let deadline = Instant::now() + Duration::from_secs_f64(t.max(0.0));
-                while !*g {
-                    let Some(left) = deadline.checked_duration_since(Instant::now()) else {
-                        break;
-                    };
-                    g = self
-                        .cv
-                        .wait_timeout(g, left)
-                        .unwrap_or_else(|e| e.into_inner())
-                        .0;
-                }
-                *g
-            }
+            py.check_signals()?;
         }
     }
 }
@@ -344,6 +369,24 @@ impl LiveSniffer {
 
     fn stored(&self, py: Python<'_>) -> Option<Py<PyPktList>> {
         self.results.as_ref().map(|r| r.clone_ref(py))
+    }
+
+    /// Whether the caller is the capture thread itself, which is what a `prn`
+    /// calling `stop()` on its own sniffer is. Waiting there would park the one
+    /// thread that can ever signal the wait.
+    fn is_capture_thread(&self) -> bool {
+        self.thread
+            .as_ref()
+            .is_some_and(|t| t.thread().id() == std::thread::current().id())
+    }
+
+    fn refuse_self_join(&self) -> PyResult<()> {
+        if self.is_capture_thread() {
+            // `threading.Thread.join()`'s own words, which is what the offline
+            // driver in the same class already raises.
+            return Err(PyRuntimeError::new_err("cannot join current thread"));
+        }
+        Ok(())
     }
 }
 
@@ -411,6 +454,9 @@ impl LiveSniffer {
             }
         };
         let mut run = LiveRun::new(handle, st, cfg.snaplen);
+        // A stop() before the first start() would otherwise end the run on its
+        // first read, with an empty PacketList and nothing to explain it.
+        self.stop.store(false, Ordering::SeqCst);
         let stop = Arc::clone(&self.stop);
         let done = Arc::clone(&self.done);
         self.thread = Some(std::thread::spawn(move || {
@@ -424,11 +470,22 @@ impl LiveSniffer {
         self.thread.as_ref().is_some_and(|t| !t.is_finished())
     }
 
+    /// True when called from the capture thread, i.e. from inside a `prn`.
+    /// Exposed so the facade can refuse a self-join in its own words rather
+    /// than by catching one.
+    fn on_capture_thread(&self) -> bool {
+        self.is_capture_thread()
+    }
+
     #[pyo3(signature = (timeout = None))]
     fn join(&mut self, py: Python<'_>, timeout: Option<f64>) -> PyResult<Option<Py<PyPktList>>> {
+        self.refuse_self_join()?;
         if self.thread.is_some() {
+            // An unrepresentable timeout is no deadline at all, which is what
+            // `timeout=None` already means here.
+            let deadline = timeout.and_then(deadline_after);
             let done = Arc::clone(&self.done);
-            if py.allow_threads(move || done.wait(timeout)) {
+            if done.wait_out(py, deadline)? {
                 self.reap(py)?;
             }
         }
@@ -437,6 +494,8 @@ impl LiveSniffer {
 
     #[pyo3(signature = (join = true))]
     fn stop(&mut self, py: Python<'_>, join: bool) -> PyResult<Option<Py<PyPktList>>> {
+        // The flag first, so a refused self-join still stops the capture: that
+        // is what `AsyncSniffer.stop()` does on the offline driver.
         self.stop.store(true, Ordering::SeqCst);
         if join {
             return self.join(py, None);
@@ -461,13 +520,33 @@ impl Drop for LiveSniffer {
     /// the thread may be blocked trying to acquire it for a `prn`.
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        if let Some(t) = self.thread.take() {
-            Python::with_gil(|py| {
-                py.allow_threads(|| {
-                    let _ = t.join();
-                })
+        let Some(t) = self.thread.take() else { return };
+        let done = Arc::clone(&self.done);
+        Python::with_gil(|py| {
+            // Sliced, so a signal arriving while a wedged `prn` is being waited
+            // out still runs its Python handler. The wait itself cannot be
+            // abandoned: a capture thread outliving the interpreter is the
+            // segfault this whole impl exists to prevent.
+            let mut signal: Option<PyErr> = None;
+            while !py.allow_threads(|| done.wait_for(SLICE)) {
+                if let Err(e) = py.check_signals() {
+                    if signal.is_none() {
+                        signal = Some(e);
+                    }
+                }
+            }
+            py.allow_threads(|| {
+                let _ = t.join();
             });
-        }
+            // A drop cannot raise, so the interrupt is handed back to whatever
+            // runs next — unless something is already on its way out.
+            if let Some(e) = signal {
+                match PyErr::take(py) {
+                    Some(prior) => prior.restore(py),
+                    None => e.restore(py),
+                }
+            }
+        });
     }
 }
 
@@ -499,8 +578,8 @@ pub(crate) fn send_frames(
     repeat: bool,
 ) -> PyResult<usize> {
     let cfg = live_config(iface, None, false, 65_535);
+    let gap = gap_of(inter)?;
     let mut h = open_live(&cfg).map_err(to_py_err)?;
-    let gap = Duration::from_secs_f64(inter.max(0.0));
     let mut sent = 0usize;
     loop {
         sent += py.allow_threads(|| one_run(&mut h, &frames, count, gap))?;
@@ -631,11 +710,11 @@ pub(crate) fn sr_live(
     snaplen: u32,
 ) -> PyResult<Exchanged> {
     let cfg = live_config(iface, filter, promisc, snaplen);
+    let gap = gap_of(inter)?;
     let mut h = open_live(&cfg).map_err(to_py_err)?;
     let dlt = h.linktype();
     let link = pcap::link_to_proto(dlt);
     let sent_link = if l2 { link } else { ProtoId::Ipv4 };
-    let gap = Duration::from_secs_f64(inter.max(0.0));
 
     let mut ex = Exchange {
         keys: frames
@@ -664,7 +743,7 @@ pub(crate) fn sr_live(
             }
             Ok(())
         })?;
-        let deadline = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t.max(0.0)));
+        let deadline = timeout.and_then(deadline_after);
         loop {
             let until = Instant::now() + SLICE;
             let over = py.allow_threads(|| ex.collect(&mut h, deadline, until))?;

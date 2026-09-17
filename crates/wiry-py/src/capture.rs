@@ -25,11 +25,16 @@ pub(crate) use exc::CaptureUnavailable;
 
 /// A failed library load raises `OSError`, so `except OSError` keeps working;
 /// the subclass exists for callers that want to catch only this.
+///
+/// `CaptureUnavailable` is reserved for what it says: this build or this host
+/// cannot capture. A malformed packet is the caller's mistake, not an
+/// availability problem, and reporting it as one would have
+/// `except CaptureUnavailable: fall back to offline` swallow it.
 pub(crate) fn to_py_err(e: CaptureError) -> PyErr {
     let msg = e.to_string();
     match e {
         CaptureError::Permission(_) => PyPermissionError::new_err(msg),
-        CaptureError::BadFilter(_) => PyValueError::new_err(msg),
+        CaptureError::BadFilter(_) | CaptureError::BadArgument(_) => PyValueError::new_err(msg),
         _ => CaptureUnavailable::new_err(msg),
     }
 }

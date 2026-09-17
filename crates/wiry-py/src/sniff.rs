@@ -18,10 +18,24 @@ use wiry_core::proto::ProtoId;
 
 use crate::{PyPkt, Query};
 
+/// A deadline `secs` from now, and `None` where there is none to keep.
+///
+/// Both failures are `None`: `Duration::from_secs_f64` panics outside its
+/// range and `Instant + Duration` panics on overflow, and a deadline too far
+/// away to represent is one that never arrives, which is exactly what
+/// `timeout=None` already means. A negative or NaN `timeout` still clamps to
+/// zero and expires at once, as it always has.
+pub(crate) fn deadline_after(secs: f64) -> Option<Instant> {
+    Duration::try_from_secs_f64(secs.max(0.0))
+        .ok()
+        .and_then(|d| Instant::now().checked_add(d))
+}
+
 pub(crate) struct SniffState {
     /// 0 means unbounded, as scapy's `count` does.
     count: usize,
     store: bool,
+    timeout: Option<f64>,
     deadline: Option<Instant>,
     bpf: Option<CompiledFilter>,
     query: Query,
@@ -50,7 +64,8 @@ impl SniffState {
         Self {
             count,
             store,
-            deadline: timeout.map(|t| Instant::now() + Duration::from_secs_f64(t.max(0.0))),
+            timeout,
+            deadline: timeout.and_then(deadline_after),
             bpf,
             query,
             prn,
@@ -59,6 +74,13 @@ impl SniffState {
             wrap,
             kept: 0,
         }
+    }
+
+    /// Starts the clock. A driver that opens a handle between construction and
+    /// its first read would otherwise spend part of the timeout before it can
+    /// capture anything, or all of it.
+    pub(crate) fn arm(&mut self) {
+        self.deadline = self.timeout.and_then(deadline_after);
     }
 
     /// True when a Python predicate must run per packet, which forces the
@@ -153,5 +175,34 @@ impl SniffState {
             }
         }
         Ok((store, flow))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_ordinary_timeout_becomes_a_deadline_in_the_future() {
+        let d = deadline_after(60.0).expect("a minute is representable");
+        assert!(d > Instant::now());
+    }
+
+    #[test]
+    fn a_timeout_that_has_already_passed_expires_at_once() {
+        for t in [0.0, -5.0, f64::NAN] {
+            let d = deadline_after(t).expect("a clamped timeout is representable");
+            assert!(Instant::now() >= d, "timeout {t}");
+        }
+    }
+
+    /// The panic this replaced: `sniff(offline=..., timeout=inf)` reached
+    /// `Duration::from_secs_f64` through the public facade with no live
+    /// feature at all.
+    #[test]
+    fn a_timeout_too_far_away_to_represent_is_no_deadline_rather_than_a_panic() {
+        for t in [f64::INFINITY, f64::MAX, 1e300, 1e30] {
+            assert_eq!(deadline_after(t), None, "timeout {t}");
+        }
     }
 }

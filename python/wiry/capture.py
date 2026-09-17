@@ -16,6 +16,7 @@ names still import and raise ``CaptureUnavailable``, which subclasses
 from __future__ import annotations
 
 import atexit
+import math
 import os
 import threading
 import weakref
@@ -189,7 +190,7 @@ class AsyncSniffer:
     """
 
     __slots__ = ("args", "_results", "_thread", "_stop", "_exc", "_live",
-                 "__weakref__")
+                 "_lock", "_started", "__weakref__")
 
     def __init__(self, **kwargs: Any):
         self.args = kwargs
@@ -198,6 +199,10 @@ class AsyncSniffer:
         self._stop = threading.Event()
         self._exc: Optional[BaseException] = None
         self._live: Any = None
+        # Guards the start/stop transitions only. It is never held across a
+        # wait: a join() holding it would block the stop() meant to end it.
+        self._lock = threading.RLock()
+        self._started = False
 
     @property
     def results(self) -> Optional[PacketList]:
@@ -234,39 +239,76 @@ class AsyncSniffer:
             self._exc = exc
 
     def start(self) -> "AsyncSniffer":
-        if self.running:
-            raise RuntimeError("this sniffer is already running")
-        self._results = None
-        self._exc = None
-        if self.args.get("offline") is None:
-            _b.capture_check()
-            self._live = _b.LiveSniffer(**_live_args(**self.args))
-            self._live.start()
-            _RUNNING.add(self)
-            return self
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        """Begin the capture. One run per sniffer: build another for another.
+
+        Under the lock end to end, so two threads calling this cannot both get
+        past the guard and leave one of the two captures orphaned.
+        """
+        with self._lock:
+            if self.running:
+                raise RuntimeError("this sniffer is already running")
+            if self._started:
+                raise RuntimeError(
+                    "this sniffer has already run; its .results would be "
+                    "discarded. Build another AsyncSniffer"
+                )
+            self._results = None
+            self._exc = None
+            if self.args.get("offline") is None:
+                _b.capture_check()
+                live = _b.LiveSniffer(**_live_args(**self.args))
+                live.start()
+                self._live = live
+                self._started = True
+                _RUNNING.add(self)
+                return self
+            self._stop.clear()
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+            self._started = True
         return self
 
+    def _refuse_self_join(self, live: Any) -> None:
+        """A live ``prn`` runs on the capture thread; waiting for that thread
+        from itself would park the only one that can ever end the wait. The
+        offline driver is a ``threading.Thread`` and already says this."""
+        if live.on_capture_thread():
+            raise RuntimeError("cannot join current thread")
+
     def join(self, timeout: Optional[float] = None) -> Optional[PacketList]:
-        if self._live is not None:
+        with self._lock:
+            live, thread = self._live, self._thread
+        if live is not None:
+            self._refuse_self_join(live)
             try:
-                self._keep(self._live.join(timeout))
+                self._keep(live.join(timeout))
             except BaseException as exc:
                 self._exc = exc
             if self._exc is not None:
                 raise self._exc
             return self._results
-        if self._thread is not None:
-            self._thread.join(timeout)
+        if thread is not None:
+            thread.join(timeout)
         if self._exc is not None:
             raise self._exc
         return self._results
 
     def stop(self, join: bool = True) -> Optional[PacketList]:
-        if self._live is not None:
-            self._keep(self._live.stop(bool(join)))
+        with self._lock:
+            live = self._live
+        if live is not None:
+            # The capture stops either way; only the wait is refused, which is
+            # what stop() then join() does on the offline driver.
+            selfjoin = bool(join) and live.on_capture_thread()
+            try:
+                self._keep(live.stop(bool(join) and not selfjoin))
+            except BaseException as exc:
+                # Sticky, as join()'s is: reap() has already taken the thread,
+                # so a second stop() would otherwise return None and explain
+                # nothing.
+                self._exc = exc
+            if selfjoin:
+                raise RuntimeError("cannot join current thread")
             if join and self._exc is not None:
                 raise self._exc
             return self._results
@@ -287,17 +329,48 @@ def _as_list(x: Any) -> list:
 
 def _octets(pkt: Any) -> bytes:
     """A packet as the bytes that go on the wire. Strings encode as latin-1,
-    as they do everywhere else here."""
-    return pkt.encode("latin-1") if isinstance(pkt, str) else bytes(pkt)
+    as they do everywhere else here.
+
+    Anything else is a ``TypeError``: ``bytes(3)`` is three zero octets, so an
+    unchecked coercion turns ``sendp([1, 2, 3])`` into three all-zero frames on
+    the wire instead of a complaint.
+    """
+    if isinstance(pkt, str):
+        return pkt.encode("latin-1")
+    if isinstance(pkt, (Packet, bytes, bytearray, memoryview)):
+        return bytes(pkt)
+    raise TypeError(
+        f"expected a Packet, bytes or str to send, not {type(pkt).__name__}"
+    )
 
 
-def _refuse_ipv6(pkts: list, what: str) -> None:
-    for p in pkts:
-        if isinstance(p, Packet) and "IPv6" in p.layers():
+def _refuse_ipv6(pkts: list, frames: list, what: str) -> None:
+    """Refuse an IPv6 datagram on the layer-3 path, however it was spelt.
+
+    The serialised frame is checked as well as the packet object: raw bytes are
+    just as sendable, and past this point the only thing between them and the
+    ``AF_INET`` raw socket is a version nibble.
+    """
+    for p, f in zip(pkts, frames):
+        six = isinstance(p, Packet) and "IPv6" in p.layers()
+        if not six:
+            six = len(f) > 0 and f[0] >> 4 == 6
+        if six:
             raise NotImplementedError(
                 f"{what}() has no IPv6 layer-3 path: it writes IPv4 datagrams to "
                 "a raw socket. Wrap the packet in Ether() and use sendp()."
             )
+
+
+def _pause(inter: Any) -> float:
+    """``inter`` as seconds. Infinity is refused rather than clamped: a pause of
+    ``Duration::MAX`` between two packets is a hang, not a long wait."""
+    v = float(inter)
+    if not math.isfinite(v):
+        raise ValueError(
+            f"inter= must be a finite number of seconds, not {inter!r}"
+        )
+    return v
 
 
 def _with_src(pkt: Any, mac: Optional[str]) -> Any:
@@ -349,10 +422,11 @@ def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
     """
     _b.capture_check()
     _refuse_unsupported(realtime, socket)
+    gap = _pause(inter)
     pkts = _as_list(x)
-    _refuse_ipv6(pkts, "send")
     frames = [_octets(p) for p in pkts]
-    sent = _b.send_datagrams(frames, _passes(count), float(inter), bool(loop))
+    _refuse_ipv6(pkts, frames, "send")
+    sent = _b.send_datagrams(frames, _passes(count), gap, bool(loop))
     _report(sent, verbose)
     return pkts if return_packets else None
 
@@ -369,11 +443,12 @@ def sendp(x: Any, inter: float = 0, loop: int = 0, iface: Any = None,
     """
     _b.capture_check()
     _refuse_unsupported(realtime, socket)
+    gap = _pause(inter)
     name = _iface_name(iface)
     pkts = _as_list(x)
     mac = _b.interface_mac(name)
     frames = [_octets(_with_src(p, mac)) for p in pkts]
-    sent = _b.send_frames(frames, name, _passes(count), float(inter), bool(loop))
+    sent = _b.send_frames(frames, name, _passes(count), gap, bool(loop))
     _report(sent, verbose)
     return pkts if return_packets else None
 
@@ -389,19 +464,27 @@ def _exchange(x: Any, l2: bool, iface: Any, filter: Optional[str],
             "a negative retry= means scapy's 'resend only while nothing at all "
             "has answered'; pass a count of resends instead"
         )
+    if timeout is None and (retry or multi):
+        # The first round would wait until every probe is answered, so a retry
+        # round is reachable only when some probe never is, which is the one
+        # case the wait never ends in. multi= never settles at all.
+        raise ValueError(
+            f"{what}(retry=) and {what}(multi=) need a timeout=: without one "
+            "the first round never ends"
+        )
+    gap = _pause(inter)
     pkts = _as_list(x)
-    if not l2:
-        _refuse_ipv6(pkts, what)
     name = _iface_name(iface)
     if l2:
         mac = _b.interface_mac(name)
         frames = [_octets(_with_src(p, mac)) for p in pkts]
     else:
         frames = [_octets(p) for p in pkts]
+        _refuse_ipv6(pkts, frames, what)
     recv, pairs, unans = _b.sr_live(
         frames, name, l2, filter,
         None if timeout is None else float(timeout),
-        int(retry), bool(multi), float(inter),
+        int(retry), bool(multi), gap,
         True if promisc is None else bool(promisc),
     )
     got = PacketList(recv)

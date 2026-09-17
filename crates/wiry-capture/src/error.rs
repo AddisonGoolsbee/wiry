@@ -6,6 +6,9 @@ pub enum CaptureError {
     Unsupported,
     /// The operation cannot work on this platform at all.
     UnsupportedOn(&'static str),
+    /// What the caller handed in is not something this can send. A packet
+    /// shape is not an availability problem, so it must not be reported as one.
+    BadArgument(String),
     Permission(String),
     NoSuchDevice(String),
     BadFilter(String),
@@ -23,6 +26,7 @@ impl fmt::Display for CaptureError {
                  does not need it."
             ),
             CaptureError::UnsupportedOn(why) => write!(f, "{why}"),
+            CaptureError::BadArgument(m) => write!(f, "{m}"),
             CaptureError::Permission(d) => write!(
                 f,
                 "permission denied opening {d}. Live capture needs elevated \

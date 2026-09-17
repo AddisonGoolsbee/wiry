@@ -327,3 +327,62 @@ def test_async_sniffer_refuses_to_start_twice(cap):
             s.start()
     finally:
         s.stop()
+
+
+def test_async_sniffer_refuses_to_restart_a_finished_run(cap):
+    # Restarting used to succeed and set .results back to None on the way,
+    # which loses a completed capture with no error anywhere.
+    s = P.AsyncSniffer(offline=cap, count=3)
+    s.start()
+    s.join()
+    assert len(s.results) == 3
+    with pytest.raises(RuntimeError):
+        s.start()
+    assert len(s.results) == 3
+
+
+def test_only_one_of_two_concurrent_starts_wins(cap):
+    import threading
+
+    s = P.AsyncSniffer(offline=cap, prn=lambda p: time.sleep(0.02))
+    errors = []
+    started = []
+    gate = threading.Barrier(2)
+
+    def go():
+        gate.wait()
+        try:
+            s.start()
+            started.append(1)
+        except RuntimeError as exc:
+            errors.append(exc)
+
+    racers = [threading.Thread(target=go) for _ in range(2)]
+    for t in racers:
+        t.start()
+    for t in racers:
+        t.join()
+    try:
+        assert len(started) == 1, "two captures ran for one AsyncSniffer"
+        assert len(errors) == 1
+    finally:
+        s.stop()
+
+
+def test_stopping_from_inside_a_callback_refuses_to_join_itself(cap):
+    s = P.AsyncSniffer(offline=cap, prn=lambda p: s.stop())
+    s.start()
+    s._thread.join(5)
+    assert not s.running
+    with pytest.raises(RuntimeError) as exc:
+        s.join()
+    assert "current thread" in str(exc.value)
+
+
+def test_a_timeout_no_float_can_represent_never_expires(cap):
+    # Duration::from_secs_f64 panics outside its range, and this reaches it
+    # through the public facade with no live feature at all.
+    assert len(P.sniff(offline=cap, timeout=float("inf"))) == TOTAL
+    assert len(P.sniff(offline=cap, timeout=1e300)) == TOTAL
+    assert len(P.sniff(offline=cap, timeout=float("-inf"))) == 0
+    assert len(P.sniff(offline=cap, timeout=-5)) == 0

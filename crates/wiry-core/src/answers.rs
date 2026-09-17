@@ -5,18 +5,21 @@
 //!
 //! | Sent | Recognised reply |
 //! |---|---|
-//! | ICMP echo request (RFC 792 type 8) | type 0, same id and seq, source equal to the address written to |
-//! | ICMPv6 echo request (RFC 4443 type 128) | type 129, same id and seq |
-//! | any IPv4 datagram | an ICMP error (RFC 792 types 3, 4, 5, 11, 12) quoting it: same IP id and same first 8 transport octets |
+//! | ICMP echo request (RFC 792 type 8) | type 0, same id and seq, swapped address pair |
+//! | ICMPv6 echo request (RFC 4443 type 128) | type 129, same id and seq, swapped address pair |
+//! | any IPv4 datagram | an ICMP error (RFC 792 types 3, 4, 5, 11, 12) quoting it: same quoted addresses, protocol, IP id and first 8 transport octets |
 //! | TCP | swapped address pair and swapped port pair |
 //! | UDP | swapped address pair and swapped port pair |
-//! | DNS over UDP | that, and an equal DNS id |
+//! | DNS query over UDP | that, and a response (QR set) carrying an equal DNS id |
 //! | ARP request (RFC 826 op 1) | op 2 whose psrc is the pdst asked about |
 //!
 //! Nothing else matches, and in particular a shared address pair alone never
 //! does. The two failure modes are not symmetric: a wrong match silently
 //! corrupts the user's results, while a missed one shows up in `unanswered`
-//! where it can be seen and investigated.
+//! where it can be seen and investigated. Every rule therefore pins the
+//! addresses down, on the quoted header as well as the outer one: `sr` opens
+//! the handle promiscuously, so an error or a reply meant for a third party is
+//! on the wire to be mismatched.
 
 use crate::layers::icmp::types;
 use crate::packet::{dissect_spans, LayerSpan};
@@ -52,7 +55,7 @@ pub enum ReplyKind {
     Udp {
         sport: u16,
         dport: u16,
-        dns_id: Option<u16>,
+        dns: Option<DnsAsk>,
     },
     Arp {
         pdst: [u8; 4],
@@ -60,6 +63,14 @@ pub enum ReplyKind {
     /// An IP datagram with no reply rule of its own; only an ICMP error
     /// quoting it counts as an answer.
     Ip,
+}
+
+/// RFC 1035 §4.1.1: the id a response has to echo, and whether what was sent
+/// was a query at all. Only a query can be answered by a response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DnsAsk {
+    pub id: u16,
+    pub query: bool,
 }
 
 /// Addresses are held widest-first: an IPv4 address occupies the low 4 octets.
@@ -72,10 +83,17 @@ pub struct ReplyKey {
     quote: Option<Quote>,
 }
 
-/// What an ICMP error would echo back: RFC 792 quotes the IP header plus at
-/// least the first 64 bits of what followed it.
+/// What an ICMP error would echo back: RFC 792 quotes the internet header plus
+/// at least the first 64 bits of what followed it. The addresses and the
+/// protocol are inside that guaranteed header, so they are as available as the
+/// id, and they are what tells two probes of one `sr` batch apart: wiry builds
+/// every datagram with `id = 1`, and a default `ICMP()` payload is the same
+/// eight octets every time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Quote {
+    src: [u8; 4],
+    dst: [u8; 4],
+    proto: u8,
     ip_id: u16,
     head: [u8; 8],
     len: u8,
@@ -145,14 +163,23 @@ fn ip_pair(buf: &[u8], spans: &[LayerSpan]) -> Option<Pair> {
     })
 }
 
+fn four(b: &[u8], off: usize) -> Option<[u8; 4]> {
+    let x = b.get(off..off + 4)?;
+    Some([x[0], x[1], x[2], x[3]])
+}
+
 fn ipv4_quote(buf: &[u8], spans: &[LayerSpan]) -> Option<Quote> {
     let s = find(spans, ProtoId::Ipv4)?;
-    let ip_id = be16(hdr(buf, s), 4)?;
+    let h = hdr(buf, s);
+    let ip_id = be16(h, 4)?;
     let after = payload(buf, s);
     let len = after.len().min(8);
     let mut head = [0u8; 8];
     head[..len].copy_from_slice(&after[..len]);
     Some(Quote {
+        src: four(h, 12)?,
+        dst: four(h, 16)?,
+        proto: *h.get(9)?,
         ip_id,
         head,
         len: len as u8,
@@ -193,6 +220,14 @@ pub fn reply_key(buf: &[u8], spans: &[LayerSpan]) -> Option<ReplyKey> {
         dst: pair.dst,
         v6: pair.v6,
         quote,
+    })
+}
+
+/// RFC 1035 §4.1.1 puts QR in the top bit of the octet after the id.
+fn dns_ask(h: &[u8]) -> Option<DnsAsk> {
+    Some(DnsAsk {
+        id: be16(h, 0)?,
+        query: h.get(2)? & 0x80 == 0,
     })
 }
 
@@ -237,12 +272,8 @@ fn sent_kind(buf: &[u8], spans: &[LayerSpan]) -> ReplyKind {
         let (Some(sport), Some(dport)) = (be16(h, 0), be16(h, 2)) else {
             return ReplyKind::Ip;
         };
-        let dns_id = find(spans, ProtoId::Dns).and_then(|d| be16(hdr(buf, d), 0));
-        return ReplyKind::Udp {
-            sport,
-            dport,
-            dns_id,
-        };
+        let dns = find(spans, ProtoId::Dns).and_then(|d| dns_ask(hdr(buf, d)));
+        return ReplyKind::Udp { sport, dport, dns };
     }
     ReplyKind::Ip
 }
@@ -287,16 +318,19 @@ fn direct_answer(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan]) -> bool {
             h.first() == Some(&types::ECHO_REPLY)
                 && be16(h, 4) == Some(id)
                 && be16(h, 6) == Some(seq)
-                && !pair.v6
                 && !sent.v6
-                && pair.src == sent.dst
+                && swapped(sent, &pair)
         }
         ReplyKind::Icmpv6Echo { id, seq } => {
             let Some(s) = find(spans, ProtoId::Icmpv6) else {
                 return false;
             };
             let b = body(buf, s);
-            b.first() == Some(&ECHO_REPLY_V6) && be16(b, 4) == Some(id) && be16(b, 6) == Some(seq)
+            b.first() == Some(&ECHO_REPLY_V6)
+                && be16(b, 4) == Some(id)
+                && be16(b, 6) == Some(seq)
+                && sent.v6
+                && swapped(sent, &pair)
         }
         ReplyKind::Tcp { sport, dport, .. } => {
             let Some(s) = find(spans, ProtoId::Tcp) else {
@@ -305,11 +339,7 @@ fn direct_answer(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan]) -> bool {
             let h = hdr(buf, s);
             swapped(sent, &pair) && be16(h, 0) == Some(dport) && be16(h, 2) == Some(sport)
         }
-        ReplyKind::Udp {
-            sport,
-            dport,
-            dns_id,
-        } => {
+        ReplyKind::Udp { sport, dport, dns } => {
             let Some(s) = find(spans, ProtoId::Udp) else {
                 return false;
             };
@@ -317,10 +347,19 @@ fn direct_answer(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan]) -> bool {
             if !(swapped(sent, &pair) && be16(h, 0) == Some(dport) && be16(h, 2) == Some(sport)) {
                 return false;
             }
-            match dns_id {
+            match dns {
                 None => true,
-                Some(id) => {
-                    find(spans, ProtoId::Dns).is_some_and(|d| be16(hdr(buf, d), 0) == Some(id))
+                // A query answers nothing, and a response is an answer only to
+                // a query: scapy's `self.qr == 1 and other.qr == 0`.
+                Some(ask) => {
+                    ask.query
+                        && find(spans, ProtoId::Dns).is_some_and(|d| {
+                            dns_ask(hdr(buf, d))
+                                == Some(DnsAsk {
+                                    id: ask.id,
+                                    query: false,
+                                })
+                        })
                 }
             }
         }
@@ -349,7 +388,14 @@ fn quoted_back(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan]) -> bool {
     let Some(ip) = inner_spans.first().filter(|s| s.proto == ProtoId::Ipv4) else {
         return false;
     };
-    if be16(hdr(inner, ip), 4) != Some(q.ip_id) {
+    let h = hdr(inner, ip);
+    // The addresses first: the id and the eight octets are both constant
+    // across a batch of wiry's own probes, so on their own they pair a reply
+    // with whichever probe happens to come first.
+    if four(h, 12) != Some(q.src) || four(h, 16) != Some(q.dst) {
+        return false;
+    }
+    if h.get(9) != Some(&q.proto) || be16(h, 4) != Some(q.ip_id) {
         return false;
     }
     let n = q.len as usize;
@@ -443,6 +489,14 @@ mod tests {
     fn dns(id: u16) -> Vec<u8> {
         let mut v = id.to_be_bytes().to_vec();
         v.extend_from_slice(&[0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        v
+    }
+
+    /// The same header with QR and RA set, which is what a resolver sends back.
+    fn dns_response(id: u16) -> Vec<u8> {
+        let mut v = dns(id);
+        v[2] = 0x81;
+        v[3] = 0x80;
         v
     }
 
@@ -679,13 +733,60 @@ mod tests {
             ReplyKind::Udp {
                 sport: 5300,
                 dport: 53,
-                dns_id: Some(0x1a2b)
+                dns: Some(DnsAsk {
+                    id: 0x1a2b,
+                    query: true
+                })
             }
         );
-        let good = ip4(17, 2, B, A, &udp(53, 5300, &dns(0x1a2b)));
+        let good = ip4(17, 2, B, A, &udp(53, 5300, &dns_response(0x1a2b)));
         assert!(replies(&sent, good, ProtoId::Ipv4));
-        let wrong_id = ip4(17, 2, B, A, &udp(53, 5300, &dns(0x1a2c)));
+        let wrong_id = ip4(17, 2, B, A, &udp(53, 5300, &dns_response(0x1a2c)));
         assert!(!replies(&sent, wrong_id, ProtoId::Ipv4));
+        // A second query with the same id is not the response to the first.
+        let another_query = ip4(17, 2, B, A, &udp(53, 5300, &dns(0x1a2b)));
+        assert!(!replies(&sent, another_query, ProtoId::Ipv4));
+    }
+
+    #[test]
+    fn a_dns_response_is_answered_by_nothing() {
+        // The mirror image, and the one that put wrong pairs in a capture of
+        // ordinary traffic: a query flowing the other way looks like a reply
+        // on addresses, ports and id alone.
+        let sent = key(
+            ip4(17, 1, A, B, &udp(53, 5300, &dns_response(0x1a2b))),
+            ProtoId::Ipv4,
+        );
+        assert_eq!(
+            sent.kind,
+            ReplyKind::Udp {
+                sport: 53,
+                dport: 5300,
+                dns: Some(DnsAsk {
+                    id: 0x1a2b,
+                    query: false
+                })
+            }
+        );
+        for wrong in [
+            ip4(17, 2, B, A, &udp(5300, 53, &dns(0x1a2b))),
+            ip4(17, 2, B, A, &udp(5300, 53, &dns_response(0x1a2b))),
+        ] {
+            assert!(!replies(&sent, wrong, ProtoId::Ipv4));
+        }
+    }
+
+    #[test]
+    fn udp_that_is_not_dns_still_needs_only_the_swapped_pair() {
+        let sent = ip4_key(17, 1, &udp(4000, 9999, b"ping"));
+        assert_eq!(
+            sent.kind,
+            ReplyKind::Udp {
+                sport: 4000,
+                dport: 9999,
+                dns: None
+            }
+        );
     }
 
     #[test]
@@ -715,6 +816,100 @@ mod tests {
         // IPv6 carrying neither a transport this knows nor an echo request.
         let six = Packet::dissect(ip6(47, A6, B6, &[0x30, 0x00, 0x88, 0xbe]), ProtoId::Ipv6);
         assert!(reply_key(six.raw_bytes(), six.layers()).is_none());
+    }
+
+    #[test]
+    fn an_error_quoting_a_probe_to_another_host_does_not_answer_ours() {
+        // The multi-target sr() case. Every probe wiry builds carries id 1 and
+        // the same eight ICMP octets, so the quoted addresses are the only
+        // thing that tells them apart.
+        let probe = echo(types::ECHO_REQUEST, 0, 0);
+        let sent = key(ip4(1, 1, A, B, &probe), ProtoId::Ipv4);
+        let theirs = ip4(1, 1, A, C, &probe);
+        let err = ip4(1, 55, C, A, &icmp_error(types::TIME_EXCEEDED, &theirs));
+        assert!(!replies(&sent, err, ProtoId::Ipv4));
+        // The one quoting our own probe still answers it.
+        let ours = ip4(1, 1, A, B, &probe);
+        let good = ip4(1, 55, C, A, &icmp_error(types::TIME_EXCEEDED, &ours));
+        assert!(replies(&sent, good, ProtoId::Ipv4));
+    }
+
+    #[test]
+    fn an_error_quoting_someone_elses_datagram_does_not_answer_ours() {
+        // sr opens the handle promiscuously, so an error for a conversation
+        // that is nothing to do with us is on the wire to be mismatched.
+        let probe = udp(33434, 33435, b"hop");
+        let sent = ip4_key(17, 0xabcd, &probe);
+        let strangers = ip4(17, 0xabcd, C, B, &probe);
+        let err = ip4(1, 1, C, A, &icmp_error(types::TIME_EXCEEDED, &strangers));
+        assert!(!replies(&sent, err, ProtoId::Ipv4));
+    }
+
+    #[test]
+    fn an_error_quoting_an_empty_datagram_still_needs_the_right_addresses() {
+        // With no transport octets to compare, `head` is empty and matches
+        // anything; the addresses are then the whole of the discrimination.
+        let sent = key(ip4(1, 1, A, B, &[]), ProtoId::Ipv4);
+        let ours = ip4(1, 1, A, B, &[]);
+        let theirs = ip4(1, 1, A, C, &[]);
+        assert!(replies(
+            &sent,
+            ip4(1, 9, C, A, &icmp_error(types::DEST_UNREACH, &ours)),
+            ProtoId::Ipv4
+        ));
+        assert!(!replies(
+            &sent,
+            ip4(1, 9, C, A, &icmp_error(types::DEST_UNREACH, &theirs)),
+            ProtoId::Ipv4
+        ));
+    }
+
+    #[test]
+    fn an_error_quoting_another_protocol_does_not_answer() {
+        let probe = udp(33434, 33435, b"hop");
+        let sent = ip4_key(17, 0xabcd, &probe);
+        // Same addresses, same id, same first eight octets, other protocol.
+        let mut quoted = ip4(6, 0xabcd, A, B, &probe);
+        quoted[9] = 6;
+        let err = ip4(1, 1, C, A, &icmp_error(types::TIME_EXCEEDED, &quoted));
+        assert!(!replies(&sent, err, ProtoId::Ipv4));
+    }
+
+    #[test]
+    fn an_echo_reply_addressed_to_a_third_party_does_not_answer_ours() {
+        let sent = ip4_key(1, 0x1234, &echo(types::ECHO_REQUEST, 0, 0));
+        let overheard = ip4(1, 9, B, C, &echo(types::ECHO_REPLY, 0, 0));
+        assert!(!replies(&sent, overheard, ProtoId::Ipv4));
+    }
+
+    #[test]
+    fn an_icmpv6_echo_reply_addressed_elsewhere_does_not_answer_ours() {
+        const C6: [u8; 16] = [0x20, 1, 0xd, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3];
+        let sent = key(ip6(58, A6, B6, &echo(128, 0x4242, 3)), ProtoId::Ipv6);
+        for wrong in [
+            // Addressed to a third party, overheard promiscuously.
+            ip6(58, B6, C6, &echo(129, 0x4242, 3)),
+            // From a host we never asked.
+            ip6(58, C6, A6, &echo(129, 0x4242, 3)),
+        ] {
+            assert!(!replies(&sent, wrong, ProtoId::Ipv6));
+        }
+    }
+
+    #[test]
+    fn an_ipv4_echo_reply_never_answers_an_ipv6_request_or_the_other_way() {
+        let four = ip4_key(1, 1, &echo(types::ECHO_REQUEST, 1, 1));
+        assert!(!replies(
+            &four,
+            ip6(58, B6, A6, &echo(129, 1, 1)),
+            ProtoId::Ipv6
+        ));
+        let six = key(ip6(58, A6, B6, &echo(128, 1, 1)), ProtoId::Ipv6);
+        assert!(!replies(
+            &six,
+            ip4(1, 9, B, A, &echo(0, 1, 1)),
+            ProtoId::Ipv4
+        ));
     }
 
     #[test]
