@@ -38,14 +38,73 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+
+  rust-live:
+    name: rust (live) / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install libpcap
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-live-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-live-
+
+      # Package-qualified: the workspace root is virtual, so a bare --features
+      # cannot name a member's feature.
+      - name: cargo clippy (live)
+        run: cargo clippy --workspace --all-targets --features packetry-py/live -- -D warnings
+
+      - name: cargo test (live)
+        run: cargo test --workspace --features packetry-py/live
+
+  msrv:
+    name: msrv 1.75
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.75
+
+      - name: Install libpcap
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
+      # The pcap crate is pinned exactly because its master branch already
+      # declares a much newer MSRV; this job is what catches a bump.
+      - name: cargo check (live)
+        run: cargo check --workspace --features packetry-py/live
+
   python:
-    name: python ${{ matrix.python-version }} / ${{ matrix.os }}
+    name: python ${{ matrix.python-version }} / ${{ matrix.os }} ${{ matrix.features && '(live)' || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.9", "3.13"]
+        features: ["", "live"]
+        exclude:
+          # Windows has no libpcap; the stub is what ships there.
+          - os: windows-latest
+            features: "live"
     steps:
       - uses: actions/checkout@v4
 
@@ -66,11 +125,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-py-
 
+      - name: Install libpcap
+        if: matrix.os == 'ubuntu-latest' && matrix.features == 'live'
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
       - name: Install maturin and pytest
         run: pip install maturin pytest
 
+      # Spelled out rather than using -F alone, so it is correct whether
+      # maturin appends to or replaces the features in pyproject.toml.
       - name: Build extension module
-        run: maturin develop --release
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.features }}" ]; then
+            maturin develop --release --features pyo3/extension-module,live
+          else
+            maturin develop --release
+          fi
 
       - name: Run Python tests
         shell: bash
