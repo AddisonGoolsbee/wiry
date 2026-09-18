@@ -17,6 +17,7 @@ pub mod pcap;
 pub mod pcapng;
 pub mod proto;
 pub mod show;
+pub mod stream;
 
 pub use field::{FieldDesc, FieldKind, FieldValue};
 pub use packet::{LayerSpan, Packet};
