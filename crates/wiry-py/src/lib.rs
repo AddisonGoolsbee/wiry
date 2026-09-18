@@ -25,6 +25,7 @@ use wiry_core::packet::{self, dissect_spans, LayerSpan, Packet as CorePacket, Sp
 use wiry_core::pcap;
 use wiry_core::proto::{self, ProtoId};
 use wiry_core::show;
+use wiry_core::stream;
 
 pub(crate) fn proto_by_name(name: &str) -> PyResult<ProtoId> {
     proto::by_name(name).ok_or_else(|| PyValueError::new_err(format!("unknown layer {name:?}")))
@@ -1129,6 +1130,91 @@ impl PyPktList {
         })
     }
 
+    /// One crossing for the whole capture: the streams are reassembled with the
+    /// GIL released and a view over the shared buffer is minted per stream only
+    /// when the caller asks for one.
+    fn streams(slf: PyRef<'_, Self>, py: Python<'_>) -> PyStreams {
+        let link = slf.link;
+        let buf = &slf.buf;
+        let idx = &slf.index;
+        let out = py.allow_threads(|| {
+            let mut r = stream::Reassembler::default();
+            for (i, (off, len, ..)) in idx.iter().enumerate() {
+                r.push(i as u32, &buf[*off..*off + *len as usize], link);
+            }
+            r.finish()
+        });
+        PyStreams {
+            keys: out.iter().map(|s| s.key()).collect(),
+            inner: out,
+            owner: slf.into(),
+        }
+    }
+
+    /// A new capture in which every complete application message a stream
+    /// reassembled to stands in for the segments that carried it, and every
+    /// other packet passes through in place. Alongside it comes one tag per
+    /// record: 0 passed through, 1 is a reassembled message. The result is a
+    /// new capture rather than a view, because a message that crossed a segment
+    /// boundary is bytes no record in this one holds.
+    fn reassembled(&self, py: Python<'_>) -> (PyPktList, Vec<u8>) {
+        let link = self.link;
+        let (buf, index, kinds) = py.allow_threads(|| {
+            let n = self.index.len();
+            let mut r = stream::Reassembler::default();
+            for i in 0..n {
+                r.push(i as u32, self.bytes_at(i), link);
+            }
+            let streams = r.finish();
+            let mut eaten = vec![false; n];
+            let mut rows: Vec<(u32, Vec<u8>, u8)> = Vec::new();
+            for m in stream::app_messages(&streams) {
+                let half = &streams[m.stream as usize].halves[m.dir as usize];
+                let body = &half.data[m.at as usize..(m.at + m.len) as usize];
+                let src = self.bytes_at(m.pkt as usize);
+                let Some(s) = stream::splice(src, link) else {
+                    continue;
+                };
+                let room = stream::room(&s).max(1);
+                for (k, part) in body.chunks(room).enumerate() {
+                    if let Some(f) = stream::reframe(src, link, m.skip + (k * room) as u32, part) {
+                        rows.push((m.pkt, f, 1));
+                    }
+                }
+                for seg in &half.segs {
+                    if seg.at < m.at + m.len && m.at < seg.at + seg.len {
+                        eaten[seg.pkt as usize] = true;
+                    }
+                }
+            }
+            for (i, e) in eaten.iter().enumerate() {
+                if !e {
+                    rows.push((i as u32, self.bytes_at(i).to_vec(), 0));
+                }
+            }
+            rows.sort_by_key(|(at, _, kind)| (*at, *kind));
+            let mut buf: Vec<u8> = Vec::new();
+            let mut index: Vec<Record> = Vec::with_capacity(rows.len());
+            let mut kinds: Vec<u8> = Vec::with_capacity(rows.len());
+            for (at, bytes, kind) in rows {
+                let (_, _, sec, frac, wirelen) = self.index[at as usize];
+                let wirelen = if kind == 1 {
+                    bytes.len() as u32
+                } else {
+                    wirelen.max(bytes.len() as u32)
+                };
+                index.push((buf.len(), bytes.len() as u32, sec, frac, wirelen));
+                buf.extend_from_slice(&bytes);
+                kinds.push(kind);
+            }
+            (buf, index, kinds)
+        });
+        (
+            PyPktList::from_capture(buf, index, self.dlt, self.nanos),
+            kinds,
+        )
+    }
+
     /// Keys and membership stay in Rust; a view is minted per flow on demand.
     fn sessions(slf: PyRef<'_, Self>, py: Python<'_>) -> PySessions {
         let buf = &slf.buf;
@@ -1233,6 +1319,125 @@ impl PyPktList {
     #[getter]
     fn nanos(&self) -> bool {
         self.nanos
+    }
+}
+
+/// Reassembled streams, ordered by the position of each one's first packet.
+/// Everything a caller asks for is per stream or per direction, never per
+/// packet, so a whole capture crosses the boundary once.
+#[pyclass(name = "Streams")]
+pub struct PyStreams {
+    owner: Py<PyPktList>,
+    inner: Vec<stream::Stream>,
+    keys: Vec<String>,
+}
+
+impl PyStreams {
+    fn half(&self, i: usize, dir: usize) -> PyResult<&stream::Half> {
+        self.inner
+            .get(i)
+            .and_then(|s| s.halves.get(dir))
+            .ok_or_else(|| PyIndexError::new_err("stream index out of range"))
+    }
+}
+
+#[pymethods]
+impl PyStreams {
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.keys.iter().map(|k| &**k).collect()
+    }
+
+    /// `(src, sport, dst, dport, ipv6, evicted)` for direction zero.
+    fn endpoints(&self, i: usize) -> PyResult<(String, u16, String, u16, bool, bool)> {
+        let s = self
+            .inner
+            .get(i)
+            .ok_or_else(|| PyIndexError::new_err("stream index out of range"))?;
+        let key = s.key();
+        let (a, b) = key[4..].split_once(" > ").unwrap_or(("", ""));
+        Ok((
+            a.rsplit_once(':').map_or(a, |(h, _)| h).to_string(),
+            s.sport,
+            b.rsplit_once(':').map_or(b, |(h, _)| h).to_string(),
+            s.dport,
+            s.v6,
+            s.evicted,
+        ))
+    }
+
+    fn data<'py>(&self, py: Python<'py>, i: usize, dir: usize) -> PyResult<Bound<'py, PyBytes>> {
+        Ok(PyBytes::new_bound(py, &self.half(i, dir)?.data))
+    }
+
+    /// `(offset, length, packet)` per contributing packet, sorted by offset.
+    fn segments(&self, i: usize, dir: usize) -> PyResult<Vec<(u32, u32, u32)>> {
+        Ok(self
+            .half(i, dir)?
+            .segs
+            .iter()
+            .map(|s| (s.at, s.len, s.pkt))
+            .collect())
+    }
+
+    /// `(offset, missing octets)` per hole. Nothing stands in for the missing
+    /// octets, so the offsets either side of a hole are adjacent in `data`.
+    fn gaps(&self, i: usize, dir: usize) -> PyResult<Vec<(u32, u64)>> {
+        Ok(self
+            .half(i, dir)?
+            .gaps
+            .iter()
+            .map(|g| (g.at, g.len))
+            .collect())
+    }
+
+    /// `(flags, octets a bound refused)`.
+    fn state(&self, i: usize, dir: usize) -> PyResult<(u8, u64)> {
+        let h = self.half(i, dir)?;
+        Ok((h.flags, h.dropped))
+    }
+
+    fn packet_at(&self, i: usize, dir: usize, off: u32) -> PyResult<Option<u32>> {
+        Ok(self.half(i, dir)?.packet_at(off))
+    }
+
+    /// The application protocol the direction speaks, by the same port table
+    /// and content guards one segment goes through.
+    fn app(&self, i: usize, dir: usize) -> PyResult<Option<&'static str>> {
+        let s = self
+            .inner
+            .get(i)
+            .ok_or_else(|| PyIndexError::new_err("stream index out of range"))?;
+        let (sp, dp) = if dir == 0 {
+            (s.sport, s.dport)
+        } else {
+            (s.dport, s.sport)
+        };
+        Ok(stream::app_of(sp, dp, &self.half(i, dir)?.data).map(|p| proto::desc(p).name))
+    }
+
+    /// `(offset, length)` per complete application message.
+    fn messages(&self, i: usize, dir: usize) -> PyResult<Vec<(u32, u32)>> {
+        let Some(app) = self.app(i, dir)? else {
+            return Ok(Vec::new());
+        };
+        let p = proto_by_name(app)?;
+        Ok(stream::messages(p, &self.half(i, dir)?.data)
+            .into_iter()
+            .map(|(a, n)| (a as u32, n as u32))
+            .collect())
+    }
+
+    /// A view over the packets that contributed octets: no copy.
+    fn packets(&self, py: Python<'_>, i: usize) -> PyResult<PyPktList> {
+        let s = self
+            .inner
+            .get(i)
+            .ok_or_else(|| PyIndexError::new_err("stream index out of range"))?;
+        Ok(self.owner.borrow(py).keeping(&s.packets()))
     }
 }
 
@@ -1818,6 +2023,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPkt>()?;
     m.add_class::<PyPktList>()?;
     m.add_class::<PySessions>()?;
+    m.add_class::<PyStreams>()?;
     m.add_function(wrap_pyfunction!(read_pcap, m)?)?;
     m.add_class::<writer::PyCaptureWriter>()?;
     m.add_function(wrap_pyfunction!(dissect, m)?)?;

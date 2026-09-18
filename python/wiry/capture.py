@@ -126,6 +126,7 @@ def sniff(
     promisc: Any = None,
     snaplen: int = 262144,
     where: Any = None,
+    session: Any = None,
 ) -> PacketList:
     """Capture packets, or replay a capture file through the same machine.
 
@@ -137,8 +138,20 @@ def sniff(
 
     ``iface``, ``promisc`` and ``snaplen`` are ignored when ``offline`` is given,
     as scapy ignores them. ``promisc=None`` reads ``conf.sniff_promisc``.
+
+    ``session=`` takes a session class or instance — ``TCPSession``,
+    ``IPSession``, ``DefaultSession`` — and runs it between the capture filter
+    and the callbacks, where scapy runs one. Reassembly over a capture is a
+    bulk path, so it happens in Rust in one crossing rather than a Python loop;
+    that needs the whole capture in hand, so ``session=`` is offline only.
     """
     if offline is None:
+        name = getattr(session, "__name__", type(session).__name__)
+        if session is not None and name != "DefaultSession":
+            raise NotImplementedError(
+                "session= needs the whole capture at once and so works with "
+                "offline= only; sniff to a PacketList, then pass it back in"
+            )
         _b.capture_check()
         return PacketList(_b.sniff_live(**_live_args(
             iface=iface, count=count, store=store, prn=prn, filter=filter,
@@ -146,6 +159,19 @@ def sniff(
             quiet=quiet, promisc=promisc, snaplen=snaplen, where=where,
         )))
     src = _offline_source(offline)
+    if session is not None:
+        from .stream import apply_session
+
+        # The capture filter runs first, as libpcap's would, so a session never
+        # reassembles a stream the caller filtered out.
+        if filter is not None or where is not None:
+            src = src.sniff_offline(
+                count=0, store=True, bpf=filter, layer=None,
+                conds=_normalize_where(where), timeout=None, prn=None,
+                lfilter=None, stop_filter=None, wrap=None,
+            )
+            filter, where = None, None
+        src = apply_session(session, PacketList(src))._list
     return PacketList(
         src.sniff_offline(
             count=int(count),

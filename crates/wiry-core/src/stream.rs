@@ -123,11 +123,16 @@ pub struct Half {
 }
 
 impl Half {
-    /// The packet the octet at `off` came from.
-    pub fn packet_at(&self, off: u32) -> Option<u32> {
+    /// The segment the octet at `off` came from.
+    pub fn seg_at(&self, off: u32) -> Option<Seg> {
         let i = self.segs.partition_point(|s| s.at <= off).checked_sub(1)?;
         let s = self.segs[i];
-        (off < s.at + s.len).then_some(s.pkt)
+        (off < s.at + s.len).then_some(s)
+    }
+
+    /// The packet the octet at `off` came from.
+    pub fn packet_at(&self, off: u32) -> Option<u32> {
+        self.seg_at(off).map(|s| s.pkt)
     }
 }
 
@@ -613,6 +618,74 @@ where
     r.finish()
 }
 
+/// Where a frame's own headers end and its TCP payload begins.
+pub struct Splice {
+    pub ip: usize,
+    pub tcp: usize,
+    pub payload: usize,
+    pub v6: bool,
+}
+
+pub fn splice(buf: &[u8], link: ProtoId) -> Option<Splice> {
+    let spans = dissect_spans(buf, link);
+    let tcp = spans.iter().find(|s| s.proto == ProtoId::Tcp)?;
+    let ip = spans
+        .iter()
+        .find(|s| s.proto == ProtoId::Ipv4 || s.proto == ProtoId::Ipv6)?;
+    let payload = (tcp.off + tcp.hlen) as usize;
+    (payload <= buf.len()).then(|| Splice {
+        ip: ip.off as usize,
+        tcp: tcp.off as usize,
+        payload,
+        v6: ip.proto == ProtoId::Ipv6,
+    })
+}
+
+/// Octets of reassembled payload one frame's headers can describe. RFC 791
+/// §3.1's Total Length and RFC 8200 §3's Payload Length are both 16 bits, so a
+/// longer message has to be handed back in more than one frame.
+pub fn room(s: &Splice) -> usize {
+    let hdrs = s.payload - s.ip;
+    if s.v6 {
+        0xffff - (hdrs - 40).min(0xffff)
+    } else {
+        0xffff_usize.saturating_sub(hdrs)
+    }
+}
+
+/// `src`'s own headers carrying `data` as their TCP payload, with `skip` octets
+/// of that frame's payload ahead of where `data` starts. Lengths are
+/// recomputed and so is the IPv4 header checksum; the TCP checksum is not,
+/// because a reassembled message was never one segment and no checksum covers
+/// it.
+pub fn reframe(src: &[u8], link: ProtoId, skip: u32, data: &[u8]) -> Option<Vec<u8>> {
+    let s = splice(src, link)?;
+    if data.len() > room(&s) {
+        return None;
+    }
+    let mut f = Vec::with_capacity(s.payload + data.len());
+    f.extend_from_slice(&src[..s.payload]);
+    let seq = u32::from_be_bytes([f[s.tcp + 4], f[s.tcp + 5], f[s.tcp + 6], f[s.tcp + 7]])
+        .wrapping_add(skip);
+    f[s.tcp + 4..s.tcp + 8].copy_from_slice(&seq.to_be_bytes());
+    f.extend_from_slice(data);
+    if s.v6 {
+        let plen = (f.len() - s.ip - 40) as u16;
+        f[s.ip + 4..s.ip + 6].copy_from_slice(&plen.to_be_bytes());
+    } else {
+        let total = (f.len() - s.ip) as u16;
+        f[s.ip + 2..s.ip + 4].copy_from_slice(&total.to_be_bytes());
+        let ihl = (f[s.ip] & 0x0f) as usize * 4;
+        if s.ip + ihl <= f.len() {
+            f[s.ip + 10] = 0;
+            f[s.ip + 11] = 0;
+            let ck = crate::checksum::ones_complement(&f[s.ip..s.ip + ihl]);
+            f[s.ip + 10..s.ip + 12].copy_from_slice(&ck.to_be_bytes());
+        }
+    }
+    Some(f)
+}
+
 /// Which application protocol a reassembled direction speaks, decided by the
 /// same port table and the same content guards a single segment goes through,
 /// so a stream and a segment cannot disagree about what they are.
@@ -629,6 +702,56 @@ pub fn message_len(app: ProtoId, data: &[u8]) -> Option<usize> {
         ProtoId::Tls => tls_len(data),
         _ => None,
     }
+}
+
+/// One complete application message found in a reassembled direction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Message {
+    pub stream: u32,
+    pub dir: u8,
+    pub app: ProtoId,
+    /// Extent in the direction's `data`.
+    pub at: u32,
+    pub len: u32,
+    /// The packet the message starts in, and how much of that packet's payload
+    /// runs ahead of it.
+    pub pkt: u32,
+    pub skip: u32,
+}
+
+/// Every complete application message in every stream, in capture order. A
+/// message that crossed a segment boundary appears once here and in no single
+/// packet, which is the whole point of reassembling.
+pub fn app_messages(streams: &[Stream]) -> Vec<Message> {
+    let mut out = Vec::new();
+    for (i, s) in streams.iter().enumerate() {
+        for (d, h) in s.halves.iter().enumerate() {
+            let (sp, dp) = if d == 0 {
+                (s.sport, s.dport)
+            } else {
+                (s.dport, s.sport)
+            };
+            let Some(app) = app_of(sp, dp, &h.data) else {
+                continue;
+            };
+            for (at, len) in messages(app, &h.data) {
+                let Some(seg) = h.seg_at(at as u32) else {
+                    continue;
+                };
+                out.push(Message {
+                    stream: i as u32,
+                    dir: d as u8,
+                    app,
+                    at: at as u32,
+                    len: len as u32,
+                    pkt: seg.pkt,
+                    skip: at as u32 - seg.at,
+                });
+            }
+        }
+    }
+    out.sort_by_key(|m| (m.pkt, m.skip));
+    out
 }
 
 /// Every complete message in `data`, as `(offset, length)`.

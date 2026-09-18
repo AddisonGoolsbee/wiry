@@ -20,6 +20,11 @@ _COLUMNAR = ("to_arrow", "to_polars", "to_pandas")
 
 _FRAG = ("fragment", "fragment6", "defragment", "defrag", "defragment6")
 
+_STREAM = (
+    "streams", "TCPStream", "Streams", "TCPSession", "IPSession",
+    "DefaultSession",
+)
+
 _DESCRIBE = ("hexdiff", "hexdiff_str")
 
 _CAPTURE = (
@@ -45,7 +50,9 @@ _EAGER = (
 
 # Derived, because __dir__ answers from it: a lazy name missing here would be
 # invisible to dir(wiry) and to anything probing it for capability.
-__all__ = list(_EAGER + _COLUMNAR + _FRAG + _DESCRIBE + _CAPTURE + _TOOLS)
+__all__ = list(
+    _EAGER + _COLUMNAR + _FRAG + _STREAM + _DESCRIBE + _CAPTURE + _TOOLS
+)
 
 
 def __getattr__(name: str) -> Any:
@@ -58,6 +65,9 @@ def __getattr__(name: str) -> Any:
     if name in _FRAG:
         from . import frag
         return getattr(frag, name)
+    if name in _STREAM:
+        from . import stream
+        return getattr(stream, name)
     if name in _DESCRIBE:
         from . import describe
         return getattr(describe, name)
@@ -948,9 +958,17 @@ class PacketList:
         self.nsummary(prn, lfilter)
 
     def sessions(self, session_extractor: Any = None) -> Any:
-        """Flows, not streams: wiry does not reassemble TCP."""
+        """Which packets belong to a flow. `streams()` is what the flow said."""
         from .report import sessions
         return sessions(self, session_extractor)
+
+    def streams(self) -> Any:
+        """Reassembled TCP streams, keyed as `sessions()` keys its flows.
+
+        One crossing for the whole capture. See `wiry.stream`.
+        """
+        from .stream import streams
+        return streams(self)
 
     def conversations(self, getsrcdst: Any = None, **kw: Any) -> Any:
         """DOT source for the conversations. See `wiry.report`."""
