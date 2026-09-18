@@ -3,7 +3,7 @@
 use libfuzzer_sys::fuzz_target;
 use wiry_core::packet::Packet;
 use wiry_core::stream;
-use wiry_fuzz::ALL_PROTOS;
+use wiry_fuzz::all_protos;
 
 // Stream reassembly buffers what a sender chooses to send, in an order the
 // sender chooses, so an unbounded allocation, a panic on a length field or a
@@ -16,7 +16,8 @@ fuzz_target!(|data: &[u8]| {
     let Some((sel, body)) = data.split_first() else {
         return;
     };
-    let link = ALL_PROTOS[*sel as usize % ALL_PROTOS.len()];
+    let protos = all_protos();
+    let link = protos[*sel as usize % protos.len()];
     let frames: Vec<&[u8]> = body.split(|b| *b == 0xfe).take(128).collect();
     let n = frames.len();
     let input: usize = frames.iter().map(|f| f.len()).sum();

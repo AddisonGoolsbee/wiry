@@ -367,3 +367,47 @@ def test_an_ipv6_stream_reassembles_too():
     s = only(capture(pkts))
     assert s.client.data == REQUEST
     assert s.key == "TCP 2001:db8::1:1234 > 2001:db8::2:80"
+
+
+def _model(segments, origin):
+    """The rule spelled out longhand: the first segment to claim a stream
+    offset owns it, whatever order and overlap the claims arrive in, and the
+    result is every claimed octet in ascending order with nothing invented for
+    the ones that were never claimed."""
+    owned: dict[int, int] = {}
+    for seq, data in segments:
+        for i, b in enumerate(data):
+            owned.setdefault(seq - origin + i, b)
+    return bytes(owned[k] for k in sorted(owned))
+
+
+def test_reassembly_matches_the_overlap_rule_spelled_out():
+    import random
+
+    rng = random.Random(0x2545F491)
+    for round_ in range(150):
+        base = 1_000_000 + rng.randrange(1 << 20)
+        # Every claim is at or after `base`, so the opening window cannot fix
+        # the origin above a segment that arrives later.
+        claims = [(base, bytes([rng.randrange(256)]) * rng.randrange(1, 40))]
+        for _ in range(rng.randrange(2, 8)):
+            at = base + rng.randrange(0, 200)
+            claims.append((at, bytes([rng.randrange(256)]) * rng.randrange(1, 40)))
+        rng.shuffle(claims)
+        claims.insert(0, (base, claims[0][1] if claims else b"x"))
+        got = only(capture([seg(at, data) for at, data in claims]))
+        assert got.client.data == _model(claims, base), f"round {round_}"
+
+
+def test_provenance_names_the_packet_that_actually_carried_the_octet():
+    """Every octet in a reassembled direction is the octet the packet its
+    provenance names had at that position."""
+    pl = capture(
+        [seg(20, b"ccc"), seg(14, b"aaa"), seg(17, b"bbb"), seg(14, b"ZZZ")]
+    )
+    s = only(pl)
+    data = s.client.data
+    for at, n, pkt in s.client.segments:
+        payload = _payload(pl[pkt])
+        assert payload.find(data[at : at + n]) >= 0
+        assert s.client.packet_at(at) == pkt

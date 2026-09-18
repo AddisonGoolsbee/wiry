@@ -645,9 +645,9 @@ pub fn splice(buf: &[u8], link: ProtoId) -> Option<Splice> {
 /// §3.1's Total Length and RFC 8200 §3's Payload Length are both 16 bits, so a
 /// longer message has to be handed back in more than one frame.
 pub fn room(s: &Splice) -> usize {
-    let hdrs = s.payload - s.ip;
+    let hdrs = s.payload.saturating_sub(s.ip);
     if s.v6 {
-        0xffff - (hdrs - 40).min(0xffff)
+        0xffff_usize.saturating_sub(hdrs.saturating_sub(40))
     } else {
         0xffff_usize.saturating_sub(hdrs)
     }
@@ -660,7 +660,10 @@ pub fn room(s: &Splice) -> usize {
 /// it.
 pub fn reframe(src: &[u8], link: ProtoId, skip: u32, data: &[u8]) -> Option<Vec<u8>> {
     let s = splice(src, link)?;
-    if data.len() > room(&s) {
+    // A snaplen-clipped frame can end inside the headers this rewrites, and a
+    // frame that cannot describe its own headers cannot be given new ones.
+    let ip_min = if s.v6 { 40 } else { 20 };
+    if s.payload < s.tcp + 20 || s.tcp < s.ip + ip_min || data.len() > room(&s) {
         return None;
     }
     let mut f = Vec::with_capacity(s.payload + data.len());
@@ -1077,6 +1080,31 @@ mod tests {
         let s = run(&frames);
         assert_eq!(s.len(), frames.len());
         assert!(s.iter().all(|s| s.halves[0].data == b"hello"));
+    }
+
+    /// A snaplen-clipped frame can end inside the headers `reframe` rewrites.
+    #[test]
+    fn reframing_a_truncated_frame_is_not_a_panic() {
+        let full = c2s(7, &body(120));
+        for cut in 0..full.len() {
+            let src = &full[..cut];
+            if let Some(sp) = splice(src, ProtoId::Ether) {
+                let n = room(&sp).min(64);
+                if let Some(f) = reframe(src, ProtoId::Ether, 3, &body(n)) {
+                    assert_eq!(f.len(), sp.payload + n);
+                }
+            }
+        }
+        // A message too wide for the length fields comes back as None, so a
+        // caller has to chunk rather than get a frame that lies about itself.
+        let sp = splice(&full, ProtoId::Ether).expect("a whole frame splices");
+        assert!(reframe(&full, ProtoId::Ether, 0, &body(room(&sp) + 1)).is_none());
+        let f = reframe(&full, ProtoId::Ether, 0, &body(room(&sp))).expect("fits");
+        assert_eq!(
+            u16::from_be_bytes([f[14 + 2], f[14 + 3]]) as usize,
+            f.len() - 14
+        );
+        assert_eq!(crate::checksum::ones_complement(&f[14..14 + 20]), 0);
     }
 
     #[test]

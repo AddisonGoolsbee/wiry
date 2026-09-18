@@ -3,7 +3,7 @@
 use libfuzzer_sys::fuzz_target;
 use wiry_core::frag::{self, Piece};
 use wiry_core::packet::Packet;
-use wiry_fuzz::ALL_PROTOS;
+use wiry_fuzz::all_protos;
 
 // Reassembly buffers what it is handed: an unbounded allocation or a panic on a
 // length field is a denial of service on untrusted captures.
@@ -11,7 +11,8 @@ fuzz_target!(|data: &[u8]| {
     let Some((sel, body)) = data.split_first() else {
         return;
     };
-    let link = ALL_PROTOS[*sel as usize % ALL_PROTOS.len()];
+    let protos = all_protos();
+    let link = protos[*sel as usize % protos.len()];
 
     // One buffer, cut into frames at a marker, so the fuzzer can build a whole
     // fragment set out of flat input.
