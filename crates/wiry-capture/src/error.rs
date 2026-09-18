@@ -21,9 +21,10 @@ impl fmt::Display for CaptureError {
             CaptureError::Unsupported => write!(
                 f,
                 "this build of wiry has no live capture support. Rebuild with \
-                 the `live` feature: maturin develop --release --features \
-                 pyo3/extension-module,live. Reading and writing capture files \
-                 does not need it."
+                 the `live` feature: MATURIN_PEP517_ARGS=\"--features \
+                 pyo3/extension-module,live\" pip install . -- from a checkout, \
+                 and it needs libpcap. Reading and writing capture files does \
+                 not need it."
             ),
             CaptureError::UnsupportedOn(why) => write!(f, "{why}"),
             CaptureError::BadArgument(m) => write!(f, "{m}"),

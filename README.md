@@ -276,7 +276,7 @@ generator differences [DEVIATIONS.md](DEVIATIONS.md) E21 states outright. Every
 gap is enumerated there.
 
 632 Rust and 1,158 Python tests pass, 638 Rust with live capture built in. All
-three crates set `#![forbid(unsafe_code)]`, which constrains this code and says
+four crates set `#![forbid(unsafe_code)]`, which constrains this code and says
 nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
 compiled in. The dissector carries nine fuzz targets plus seeded property tests
 that run on stable.

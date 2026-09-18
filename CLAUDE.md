@@ -249,7 +249,7 @@ Beyond parity:
   `sr`/`srp`. Their arithmetic is plain functions over plain data so it is
   testable with no interface and no privileges; only the exchange needs `live`.
 - **Fuzzing.** Nine libFuzzer targets plus seeded property tests on stable. All
-  three crates forbid unsafe.
+  four crates forbid unsafe.
 - **Two parity harnesses.** `dev/parity_check.py` covers dissection over real
   captures; `dev/build_matrix.py` enumerates construction. The second exists
   because the first alone let a dropped payload survive a green suite.

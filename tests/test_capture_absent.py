@@ -58,7 +58,7 @@ def test_sniffing_an_interface_names_the_build_command():
     with pytest.raises(P.CaptureUnavailable) as exc:
         P.sniff(iface="lo0")
     msg = str(exc.value)
-    assert "maturin develop" in msg
+    assert "pip install" in msg
     assert "live" in msg
 
 
@@ -100,7 +100,7 @@ def test_the_active_tools_raise_and_name_the_build_command():
     for fn, args, kw in calls:
         with pytest.raises(P.CaptureUnavailable) as exc:
             fn(*args, **kw)
-        assert "maturin develop" in str(exc.value)
+        assert "pip install" in str(exc.value)
 
 
 @absent
