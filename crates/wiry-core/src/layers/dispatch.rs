@@ -7,6 +7,18 @@
 
 use crate::proto::ProtoId;
 
+/// Every port lookup is on the dissection path of traffic that claims
+/// no layer here, so the match is reached only through this bitmap.
+const fn port_bits<const N: usize>(ports: &[u16]) -> [u64; N] {
+    let mut bits = [0u64; N];
+    let mut i = 0;
+    while i < ports.len() {
+        bits[(ports[i] >> 6) as usize] |= 1u64 << (ports[i] & 63);
+        i += 1;
+    }
+    bits
+}
+
 #[inline]
 pub fn by_ethertype(v: u16) -> Option<ProtoId> {
     match v {
@@ -49,7 +61,18 @@ pub fn by_ipproto_of(p: ProtoId) -> Option<u8> {
     }
 }
 
+static UDP_PORT_CLAIMED: [u64; 810] = port_bits(&[
+    69, 80, 123, 137, 161, 162, 443, 514, 520, 546, 547, 1645, 1646, 1812, 1813, 1985, 2055, 3784,
+    3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
+]);
+
 #[inline]
+fn by_udp_port_claimed(v: u16) -> bool {
+    let i = (v >> 6) as usize;
+    i < UDP_PORT_CLAIMED.len() && UDP_PORT_CLAIMED[i] & (1u64 << (v & 63)) != 0
+}
+
+#[inline(never)]
 fn by_udp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
     match v {
         69 => Some(ProtoId::Tftp),
@@ -86,7 +109,15 @@ fn by_udp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
 /// The destination port names the service, so it is asked first.
 #[inline]
 pub fn by_udp_port(sport: u16, dport: u16, payload: &[u8]) -> Option<ProtoId> {
-    by_udp_port_one(dport, payload).or_else(|| by_udp_port_one(sport, payload))
+    if by_udp_port_claimed(dport) {
+        if let Some(p) = by_udp_port_one(dport, payload) {
+            return Some(p);
+        }
+    }
+    if by_udp_port_claimed(sport) {
+        return by_udp_port_one(sport, payload);
+    }
+    None
 }
 
 #[inline]
@@ -113,7 +144,18 @@ pub fn by_udp_port_of(p: ProtoId) -> Option<u16> {
     }
 }
 
+static TCP_PORT_CLAIMED: [u64; 139] = port_bits(&[
+    21, 22, 23, 25, 80, 139, 143, 179, 389, 443, 445, 465, 502, 563, 587, 636, 989, 990, 992, 993,
+    995, 1883, 3128, 3268, 5060, 5061, 8000, 8008, 8080, 8443, 8883, 8888,
+]);
+
 #[inline]
+fn by_tcp_port_claimed(v: u16) -> bool {
+    let i = (v >> 6) as usize;
+    i < TCP_PORT_CLAIMED.len() && TCP_PORT_CLAIMED[i] & (1u64 << (v & 63)) != 0
+}
+
+#[inline(never)]
 fn by_tcp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
     match v {
         21 => crate::layers::ftp::looks_like(payload).then_some(ProtoId::Ftp),
@@ -141,7 +183,15 @@ fn by_tcp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
 /// The destination port names the service, so it is asked first.
 #[inline]
 pub fn by_tcp_port(sport: u16, dport: u16, payload: &[u8]) -> Option<ProtoId> {
-    by_tcp_port_one(dport, payload).or_else(|| by_tcp_port_one(sport, payload))
+    if by_tcp_port_claimed(dport) {
+        if let Some(p) = by_tcp_port_one(dport, payload) {
+            return Some(p);
+        }
+    }
+    if by_tcp_port_claimed(sport) {
+        return by_tcp_port_one(sport, payload);
+    }
+    None
 }
 
 #[inline]
@@ -212,5 +262,85 @@ pub fn by_icmpv6_type_of(p: ProtoId) -> Option<u8> {
         ProtoId::Icmpv6MlReport => Some(131),
         ProtoId::Icmpv6MlReport2 => Some(143),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn udp_port_bitmap_covers_every_arm() {
+        for v in 0..=u16::MAX {
+            let want = matches!(
+                v,
+                69 | 80
+                    | 123
+                    | 137
+                    | 161
+                    | 162
+                    | 443
+                    | 514
+                    | 520
+                    | 546
+                    | 547
+                    | 1645
+                    | 1646
+                    | 1812
+                    | 1813
+                    | 1985
+                    | 2055
+                    | 3784
+                    | 3785
+                    | 4739
+                    | 4784
+                    | 5060
+                    | 5061
+                    | 6343
+                    | 9995
+                    | 9996
+                    | 51820
+            );
+            assert_eq!(super::by_udp_port_claimed(v), want, "udp_port {v}");
+        }
+    }
+
+    #[test]
+    fn tcp_port_bitmap_covers_every_arm() {
+        for v in 0..=u16::MAX {
+            let want = matches!(
+                v,
+                21 | 22
+                    | 23
+                    | 25
+                    | 80
+                    | 139
+                    | 143
+                    | 179
+                    | 389
+                    | 443
+                    | 445
+                    | 465
+                    | 502
+                    | 563
+                    | 587
+                    | 636
+                    | 989
+                    | 990
+                    | 992
+                    | 993
+                    | 995
+                    | 1883
+                    | 3128
+                    | 3268
+                    | 5060
+                    | 5061
+                    | 8000
+                    | 8008
+                    | 8080
+                    | 8443
+                    | 8883
+                    | 8888
+            );
+            assert_eq!(super::by_tcp_port_claimed(v), want, "tcp_port {v}");
+        }
     }
 }

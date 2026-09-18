@@ -456,6 +456,22 @@ def render_dispatch(specs: list[dict]) -> str:
         "",
     ]
 
+    if any(by_kind[k] for k in PARENT_KINDS if k.endswith("_port")):
+        out += [
+            "/// Every port lookup is on the dissection path of traffic that claims",
+            "/// no layer here, so the match is reached only through this bitmap.",
+            "const fn port_bits<const N: usize>(ports: &[u16]) -> [u64; N] {",
+            "    let mut bits = [0u64; N];",
+            "    let mut i = 0;",
+            "    while i < ports.len() {",
+            "        bits[(ports[i] >> 6) as usize] |= 1u64 << (ports[i] & 63);",
+            "        i += 1;",
+            "    }",
+            "    bits",
+            "}",
+            "",
+        ]
+
     def arms_for(entries, guarded: bool) -> list[str]:
         """Two protocols may share a selector — NetFlow v5, v9 and IPFIX all
         arrive on UDP 2055 — so candidates are grouped by value and each one's
@@ -495,6 +511,8 @@ def render_dispatch(specs: list[dict]) -> str:
                 arms.append("        }")
         return arms
 
+    tests: list[str] = []
+
     for kind, (fname, ty) in PARENT_KINDS.items():
         entries = by_kind[kind]
         is_port = kind.endswith("_port")
@@ -516,9 +534,23 @@ def render_dispatch(specs: list[dict]) -> str:
 
         if is_port:
             inner = f"{fname}_one"
+            claimed = f"{fname}_claimed"
+            bits = f"{kind.upper()}_CLAIMED"
             arms = arms_for(entries, True)
             used = any("payload" in a for a in arms)
+            ports = sorted({v for _, p in entries for v in p["values"]})
+            words = (ports[-1] >> 6) + 1
+            out.append(f"static {bits}: [u64; {words}] = port_bits(&[")
+            out.append("    " + ", ".join(str(v) for v in ports) + ",")
+            out.append("]);")
+            out.append("")
             out.append("#[inline]")
+            out.append(f"fn {claimed}(v: {ty}) -> bool {{")
+            out.append("    let i = (v >> 6) as usize;")
+            out.append(f"    i < {bits}.len() && {bits}[i] & (1u64 << (v & 63)) != 0")
+            out.append("}")
+            out.append("")
+            out.append("#[inline(never)]")
             out.append(
                 f"fn {inner}(v: {ty}, {'payload' if used else '_payload'}: &[u8])"
                 " -> Option<ProtoId> {"
@@ -535,9 +567,29 @@ def render_dispatch(specs: list[dict]) -> str:
                 f"pub fn {fname}(sport: {ty}, dport: {ty}, payload: &[u8])"
                 " -> Option<ProtoId> {"
             )
-            out.append(f"    {inner}(dport, payload).or_else(|| {inner}(sport, payload))")
+            out.append(f"    if {claimed}(dport) {{")
+            out.append(f"        if let Some(p) = {inner}(dport, payload) {{")
+            out.append("            return Some(p);")
+            out.append("        }")
+            out.append("    }")
+            out.append(f"    if {claimed}(sport) {{")
+            out.append(f"        return {inner}(sport, payload);")
+            out.append("    }")
+            out.append("    None")
             out.append("}")
             out.append("")
+            tests += [
+                "    #[test]",
+                f"    fn {kind}_bitmap_covers_every_arm() {{",
+                f"        for v in 0..={ty}::MAX {{",
+                "            let want = matches!(v, "
+                + " | ".join(str(v) for v in ports)
+                + ");",
+                f"            assert_eq!(super::{claimed}(v), want, \"{kind} {{v}}\");",
+                "        }",
+                "    }",
+                "",
+            ]
         else:
             out.append("#[inline]")
             out.append(f"pub fn {fname}(v: {ty}) -> Option<ProtoId> {{")
@@ -569,6 +621,11 @@ def render_dispatch(specs: list[dict]) -> str:
             out.append("    }")
             out.append("}")
             out.append("")
+    if tests:
+        out.append("#[cfg(test)]")
+        out.append("mod tests {")
+        out += tests
+        out.append("}")
     return "\n".join(out).rstrip() + "\n"
 
 
