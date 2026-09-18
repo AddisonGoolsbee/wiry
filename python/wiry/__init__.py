@@ -16,26 +16,6 @@ from . import _wiry as _b
 
 __version__ = _b.__version__
 
-__all__ = [
-    "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
-    "PcapReader", "PcapWriter", "PcapNgWriter", "raw", "hexdump",
-    "hexdump_str", "ls", "known_layers", "bind_layers", "hexdiff",
-    "hexdiff_str", "fragment", "fragment6", "defragment", "defrag",
-    "defragment6",
-    "to_arrow", "to_polars", "to_pandas",
-    "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
-    "get_if_list", "get_if_addr", "get_working_if", "interfaces", "conf",
-    "capture_available", "CaptureUnavailable",
-    "VolatileValue", "RandNum", "RandByte", "RandShort", "RandInt", "RandLong",
-    "RandIP", "RandIP6", "RandMAC", "RandString", "RandBin", "RandChoice",
-    "RandEnumKeys", "Net", "Net6", "fuzz", "corrupt_bytes", "corrupt_bits",
-    "set_rand_seed", "expand",
-    "get_if_list", "get_if_addr", "get_if_hwaddr", "get_working_if",
-    "interfaces", "conf", "capture_available", "CaptureUnavailable",
-    "traceroute", "TracerouteResult", "arping", "srloop", "srploop",
-    "getmacbyip",
-]
-
 _COLUMNAR = ("to_arrow", "to_polars", "to_pandas")
 
 _FRAG = ("fragment", "fragment6", "defragment", "defrag", "defragment6")
@@ -52,6 +32,20 @@ _TOOLS = (
     "traceroute", "TracerouteResult", "arping", "srloop", "srploop",
     "getmacbyip",
 )
+
+_EAGER = (
+    "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
+    "PcapReader", "PcapWriter", "PcapNgWriter", "raw", "hexdump",
+    "hexdump_str", "ls", "known_layers", "bind_layers",
+    "VolatileValue", "RandNum", "RandByte", "RandShort", "RandInt", "RandLong",
+    "RandIP", "RandIP6", "RandMAC", "RandString", "RandBin", "RandChoice",
+    "RandEnumKeys", "Net", "Net6", "fuzz", "corrupt_bytes", "corrupt_bits",
+    "set_rand_seed", "expand",
+)
+
+# Derived, because __dir__ answers from it: a lazy name missing here would be
+# invisible to dir(wiry) and to anything probing it for capability.
+__all__ = list(_EAGER + _COLUMNAR + _FRAG + _DESCRIBE + _CAPTURE + _TOOLS)
 
 
 def __getattr__(name: str) -> Any:
@@ -74,8 +68,8 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
-    """Lazily exported names never enter the module globals, so without this
-    they are absent from `dir(wiry)` and invisible to capability probes."""
+    """Lazily exported names never enter the module globals, so dir() omits
+    them without this."""
     return sorted(set(globals()) | set(__all__))
 
 

@@ -81,14 +81,17 @@ def bench_read(path, limit):
     results["wiry"] = row("wiry      per-packet loop", dt, n, f"({tcp} tcp)")
 
     def wiry_bulk():
+        # Both fields the loops above read. A one-field column is a smaller job
+        # and cannot share their row (CLAUDE.md section 6, rule 2).
         pl = B.rdpcap(path)
-        col = pl.field_column("TCP", "dport")
-        tcp = sum(1 for x in col if x is not None)
-        return len(col), tcp
+        cols = pl.columns([("IP", "src"), ("TCP", "dport")])
+        dports = cols["TCP.dport"]
+        tcp = sum(1 for x in dports if x is not None)
+        return len(dports), tcp
 
     dt, (n2, c) = best(wiry_bulk)
     results["wiry_bulk"] = row(
-        f"wiry      bulk column API ({n2:,} pkts)", dt, n2, f"({c} tcp)"
+        f"wiry      columns() ({n2:,} pkts)", dt, n2, f"({c} tcp)"
     )
 
     if HAVE_DPKT:
@@ -196,7 +199,7 @@ def bench_build(n=20000):
         dt, _ = best(scapy_b)
         results["scapy"] = row("scapy     Ether/IP/TCP", dt, n)
 
-    print("  dpkt      cannot build a packet from field defaults")
+    print("  dpkt      builds, but stacks layers by hand: see the README")
     return results
 
 

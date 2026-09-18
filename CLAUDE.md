@@ -171,6 +171,13 @@ This audience will pull a benchmark apart, and should.
    and 791,615 packets. A reader following our own instructions got a different
    corpus and different numbers. Every published table states the byte size, the
    packet count, the SHA-256 and the date measured.
+9. **Compare identical work, not merely identical packet sets.** Rule 2 caught a
+   bulk call over a different number of packets; the same error returned on
+   another axis. Under a header reading "Read 2 fields from every packet", the
+   scapy, dpkt and wiry per-packet rows each read two fields and the bulk row
+   called `field_column()`, which reads one — so the most impressive ratio in
+   the table was measured on half the job, and one `grep` of the published
+   script showed it. Every row under one header must do the same work.
 
 ## 7. Naming
 
@@ -269,6 +276,11 @@ Beyond parity:
 - A Rust thread that calls into Python after finalisation segfaults, bypassing
   the protection `panic = "abort"` is kept off to provide. Anything owning such a
   thread stops and joins it on drop, with the GIL released.
+- A tally nobody can recount is worth less than the list it summarises. Each
+  branch bumped the README's running bug count by its own review, the merge
+  picked one of those as the base and then added all eight again, and no reading
+  of `git log` could confirm the published figure. Name the defects, let the
+  commits be the ledger, and publish no total that cannot be recounted.
 - `#![forbid(unsafe_code)]` is per-crate and says nothing about dependencies.
   Claiming otherwise to a Python audience is indefensible, since PyO3 itself
   contains hundreds of unsafe blocks.

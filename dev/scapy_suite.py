@@ -98,15 +98,15 @@ def wanted_names(code):
     return set(IDENT.findall(code))
 
 
-def classify_error(exc, code, supported):
+def classify_error(exc, supported):
     """Decide whether a failure is a scope boundary or a real defect."""
     text = f"{type(exc).__name__}: {exc}"
     if type(exc).__name__ == "CaptureUnavailable":
         return "skip", "needs the live feature"
-    # wiry raises NotImplementedError only where DEVIATIONS.md records a
-    # deliberate refusal, so it marks a scope boundary, not a wrong answer.
+    # NotImplementedError is wiry's shape for a refusal. Counting it a scope
+    # boundary is generous wherever DEVIATIONS.md does not record that refusal.
     if isinstance(exc, NotImplementedError):
-        return "skip", f"refused by design: {str(exc)[:60] or type(exc).__name__}"
+        return "skip", "refused by design"
     if isinstance(exc, (PermissionError, OSError)) and any(
         w in str(exc).lower() for w in ("permission", "/dev/bpf", "operation not permitted")
     ):
@@ -162,7 +162,7 @@ def run(path, verbose=False, limit=None):
                 line = (tb[-1].line or "").strip()
             failures.append((campaign, name, f"assertion failed: {line}"))
         except Exception as exc:  # noqa: BLE001
-            kind, why = classify_error(exc, code, supported)
+            kind, why = classify_error(exc, supported)
             results[kind] += 1
             if kind == "fail":
                 failures.append((campaign, name, why))

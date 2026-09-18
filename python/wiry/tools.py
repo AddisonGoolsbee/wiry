@@ -229,12 +229,8 @@ def traceroute(target: Any, dport: int = 80, minttl: int = 1, maxttl: int = 30,
 
 
 def _hosts(net: Any) -> list:
-    """The addresses an ARP sweep should ask about.
-
-    A CIDR is expanded here, with the standard library, rather than by the
-    generators of E21: a sweep pairs each address with its own reply, which is
-    this function's arithmetic and not a template's product.
-    """
+    """The addresses an ARP sweep should ask about: network and broadcast
+    dropped, and the count refused before the range is walked."""
     def refuse(n: int) -> None:
         if n > MAX_SWEEP:
             raise ValueError(
