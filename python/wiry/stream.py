@@ -39,6 +39,12 @@ LOSSY = 8
 #: The direction reached its size bound and stopped accepting.
 TRUNCATED = 16
 
+#: Octets of framing `TCPSession` may add to the capture it was given. Every
+#: message it frames costs one frame of headers, so the splice is the one part
+#: of reassembly that can outgrow its input; past this, messages are left
+#: unframed and their packets pass through as captured.
+MAX_REFRAME_GROWTH = 64 << 20
+
 
 class Half:
     """One direction of a reassembled stream."""

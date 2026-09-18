@@ -411,3 +411,40 @@ def test_provenance_names_the_packet_that_actually_carried_the_octet():
         payload = _payload(pl[pkt])
         assert payload.find(data[at : at + n]) >= 0
         assert s.client.packet_at(at) == pkt
+
+
+def test_a_packet_carrying_two_messages_worth_of_octets_loses_neither():
+    """A segment can end one message and begin another that never completes.
+    Standing the first in for the whole packet used to take the second's
+    octets out of the capture with nothing said about it."""
+    head, tail = REQUEST[:10], b"GET /b HTTP/1.1\r\nCon"
+    pl = capture([seg(1, head), seg(1 + len(head), REQUEST[10:] + tail)])
+    out, kinds = pl._list.reassembled()
+    blob = b"".join(bytes(p) for p in PacketList(out))
+    assert REQUEST in blob
+    assert tail in blob
+
+
+def test_the_message_splice_cannot_outgrow_the_capture_without_a_bound():
+    """One frame of headers per message, and a TLS record can be five octets,
+    so the splice is the one part of reassembly that can outgrow its input.
+    Past the bound the rest passes through as captured, losing nothing."""
+    from wiry.stream import MAX_REFRAME_GROWTH
+
+    empty = bytes([0x16, 0x03, 0x01, 0x00, 0x00])
+    payload = empty * 280
+    frames = [
+        seg(1 + i * len(payload), payload, dport=443) for i in range(9000)
+    ]
+    pl = capture(frames)
+    given = sum(len(bytes(p)) for p in frames)
+    out, kinds = pl._list.reassembled()
+    got = PacketList(out)
+    built = sum(len(bytes(p)) for p, k in zip(got, kinds) if k == 1)
+    # Unbounded, this capture frames to about 11x its own size; the ceiling is
+    # the named growth plus the framing that keeps a part-consumed packet
+    # whole, which is bounded by the packets themselves.
+    assert built <= 2 * given + MAX_REFRAME_GROWTH
+    assert kinds.count(0) > 0, "the bound never engaged, so it is untested"
+    # Every octet of payload is still somewhere in the result.
+    assert sum(len(bytes(p)) - 54 for p in got) == len(payload) * len(frames)

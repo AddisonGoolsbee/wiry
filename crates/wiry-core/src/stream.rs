@@ -134,6 +134,17 @@ impl Half {
     pub fn packet_at(&self, off: u32) -> Option<u32> {
         self.seg_at(off).map(|s| s.pkt)
     }
+
+    /// The segments overlapping `[at, at + len)`. `segs` is sorted and
+    /// disjoint, so this is two searches and not a scan: asking once per
+    /// message with a scan costs the whole direction per message, which is
+    /// quadratic on a direction carrying many small records.
+    pub fn segs_in(&self, at: u32, len: u32) -> &[Seg] {
+        let end = at.saturating_add(len);
+        let lo = self.segs.partition_point(|s| s.at + s.len <= at);
+        let hi = self.segs.partition_point(|s| s.at < end);
+        &self.segs[lo..hi]
+    }
 }
 
 #[derive(Default)]
@@ -623,6 +634,15 @@ where
     r.finish()
 }
 
+/// Octets of framing the message splice may add to the capture it was given.
+/// Each message costs one frame of headers, and a message can be as short as a
+/// five-octet TLS record, so without a ceiling a crafted capture comes back
+/// about twelve times its own size. Past it, messages are left unframed and
+/// their packets pass through as captured. The framing that keeps a partly
+/// consumed packet whole is outside this bound and inside the input's: it is
+/// at most two frames per contributing segment.
+pub const MAX_REFRAME_GROWTH: usize = 64 << 20;
+
 /// Where a frame's own headers end and its TCP payload begins.
 pub struct Splice {
     pub ip: usize,
@@ -664,11 +684,16 @@ pub fn room(s: &Splice) -> usize {
 /// because a reassembled message was never one segment and no checksum covers
 /// it.
 pub fn reframe(src: &[u8], link: ProtoId, skip: u32, data: &[u8]) -> Option<Vec<u8>> {
-    let s = splice(src, link)?;
+    reframe_with(src, &splice(src, link)?, skip, data)
+}
+
+/// `reframe` for a caller that already holds the frame's `Splice`, so a frame
+/// carrying many messages is dissected once rather than once per message.
+pub fn reframe_with(src: &[u8], s: &Splice, skip: u32, data: &[u8]) -> Option<Vec<u8>> {
     // A snaplen-clipped frame can end inside the headers this rewrites, and a
     // frame that cannot describe its own headers cannot be given new ones.
     let ip_min = if s.v6 { 40 } else { 20 };
-    if s.payload < s.tcp + 20 || s.tcp < s.ip + ip_min || data.len() > room(&s) {
+    if s.payload < s.tcp + 20 || s.tcp < s.ip + ip_min || data.len() > room(s) {
         return None;
     }
     let mut f = Vec::with_capacity(s.payload + data.len());

@@ -719,6 +719,14 @@ impl PyPkt {
 /// to keep or a copy of the file would claim the clipped bytes were all of it.
 pub(crate) type Record = (usize, u32, u32, u32, u32);
 
+/// A row of a reassembled capture. A packet that passes through is named by
+/// its position, so it is copied into the output once rather than into a row
+/// and then the output.
+enum Body {
+    Src(usize),
+    Built(Vec<u8>),
+}
+
 /// One buffer plus a record index; indexing mints one Python object.
 #[pyclass(name = "PktList")]
 pub struct PyPktList {
@@ -1153,11 +1161,11 @@ impl PyPktList {
 
     /// A new capture in which every complete application message a stream
     /// reassembled to stands in for the segments that carried it, and every
-    /// other packet passes through in place. Alongside it comes one tag per
-    /// record: 0 passed through, 1 is a reassembled message. The result is a
-    /// new capture rather than a view, because a message that crossed a segment
+    /// other packet passes through in place. Alongside it comes one tag octet
+    /// per record: 0 passed through, 1 was framed here. The result is a new
+    /// capture rather than a view, because a message that crossed a segment
     /// boundary is bytes no record in this one holds.
-    fn reassembled(&self, py: Python<'_>) -> (PyPktList, Vec<u8>) {
+    fn reassembled<'py>(&self, py: Python<'py>) -> (PyPktList, Bound<'py, PyBytes>) {
         let link = self.link;
         let (buf, index, kinds) = py.allow_threads(|| {
             let n = self.index.len();
@@ -1166,8 +1174,13 @@ impl PyPktList {
                 r.push(i as u32, self.bytes_at(i), link);
             }
             let streams = r.finish();
+            let input: usize = self.index.iter().map(|(_, len, ..)| *len as usize).sum();
             let mut eaten = vec![false; n];
-            let mut rows: Vec<(u32, Vec<u8>, u8)> = Vec::new();
+            let mut rows: Vec<(u32, Body, u8)> = Vec::new();
+            // Message extents per half, so the octets a message did not claim
+            // can be told from the ones it did.
+            let mut claimed: Vec<Vec<(u32, u32)>> = vec![Vec::new(); streams.len() * 2];
+            let mut built = 0usize;
             for m in stream::app_messages(&streams) {
                 let half = &streams[m.stream as usize].halves[m.dir as usize];
                 let body = &half.data[m.at as usize..(m.at + m.len) as usize];
@@ -1176,27 +1189,87 @@ impl PyPktList {
                     continue;
                 };
                 let room = stream::room(&s).max(1);
+                // Each message costs one frame of headers and a message can be
+                // five octets long, so the splice is the one part of reassembly
+                // that can outgrow its input. Past the bound the rest of the
+                // capture passes through as captured rather than being framed.
+                let cost = body.len() + body.len().div_ceil(room) * s.payload;
+                if built + cost > input + stream::MAX_REFRAME_GROWTH {
+                    break;
+                }
                 for (k, part) in body.chunks(room).enumerate() {
-                    if let Some(f) = stream::reframe(src, link, m.skip + (k * room) as u32, part) {
-                        rows.push((m.pkt, f, 1));
+                    let skip = m.skip + (k * room) as u32;
+                    if let Some(f) = stream::reframe_with(src, &s, skip, part) {
+                        built += f.len();
+                        rows.push((m.pkt, Body::Built(f), 1));
                     }
                 }
-                for seg in &half.segs {
-                    if seg.at < m.at + m.len && m.at < seg.at + seg.len {
-                        eaten[seg.pkt as usize] = true;
+                claimed[m.stream as usize * 2 + m.dir as usize].push((m.at, m.len));
+                for seg in half.segs_in(m.at, m.len) {
+                    eaten[seg.pkt as usize] = true;
+                }
+            }
+            // A packet can carry the end of one message and the start of a
+            // message that never completed. Standing the first in for the whole
+            // packet would take the second's octets out of the capture with
+            // nothing said, so what no message claimed is framed on its own.
+            // Both lists run in offset order, so this is one merged walk and
+            // not a scan of the messages per segment.
+            for (si, s) in streams.iter().enumerate() {
+                for (d, half) in s.halves.iter().enumerate() {
+                    let ext = &mut claimed[si * 2 + d];
+                    if ext.is_empty() {
+                        continue;
+                    }
+                    ext.sort_unstable();
+                    let mut first = 0usize;
+                    for seg in &half.segs {
+                        if !eaten[seg.pkt as usize] {
+                            continue;
+                        }
+                        let end = seg.at + seg.len;
+                        while first < ext.len() && ext[first].0 + ext[first].1 <= seg.at {
+                            first += 1;
+                        }
+                        let src = self.bytes_at(seg.pkt as usize);
+                        let Some(sp) = stream::splice(src, link) else {
+                            continue;
+                        };
+                        let mut at = seg.at;
+                        let mut j = first;
+                        let emit = |at: u32, to: u32, rows: &mut Vec<(u32, Body, u8)>| {
+                            let part = &half.data[at as usize..to as usize];
+                            if let Some(f) = stream::reframe_with(src, &sp, at - seg.at, part) {
+                                rows.push((seg.pkt, Body::Built(f), 1));
+                            }
+                        };
+                        while j < ext.len() && ext[j].0 < end {
+                            if ext[j].0 > at {
+                                emit(at, ext[j].0.min(end), &mut rows);
+                            }
+                            at = at.max(ext[j].0 + ext[j].1);
+                            j += 1;
+                        }
+                        if at < end {
+                            emit(at, end, &mut rows);
+                        }
                     }
                 }
             }
             for (i, e) in eaten.iter().enumerate() {
                 if !e {
-                    rows.push((i as u32, self.bytes_at(i).to_vec(), 0));
+                    rows.push((i as u32, Body::Src(i), 0));
                 }
             }
             rows.sort_by_key(|(at, _, kind)| (*at, *kind));
             let mut buf: Vec<u8> = Vec::new();
             let mut index: Vec<Record> = Vec::with_capacity(rows.len());
             let mut kinds: Vec<u8> = Vec::with_capacity(rows.len());
-            for (at, bytes, kind) in rows {
+            for (at, body, kind) in rows {
+                let bytes = match &body {
+                    Body::Src(i) => self.bytes_at(*i),
+                    Body::Built(v) => v,
+                };
                 let (_, _, sec, frac, wirelen) = self.index[at as usize];
                 let wirelen = if kind == 1 {
                     bytes.len() as u32
@@ -1204,14 +1277,14 @@ impl PyPktList {
                     wirelen.max(bytes.len() as u32)
                 };
                 index.push((buf.len(), bytes.len() as u32, sec, frac, wirelen));
-                buf.extend_from_slice(&bytes);
+                buf.extend_from_slice(bytes);
                 kinds.push(kind);
             }
             (buf, index, kinds)
         });
         (
             PyPktList::from_capture(buf, index, self.dlt, self.nanos),
-            kinds,
+            PyBytes::new_bound(py, &kinds),
         )
     }
 
