@@ -1,0 +1,29 @@
+name = "Telnet"
+id = "Telnet"
+num = 92
+parsed_field = "lines"
+citation = """
+RFC 854: the data stream is NVT ASCII with in-band commands introduced by IAC
+(octet 255). IAC WILL / WONT / DO / DONT (251-254) take one option octet;
+IAC SB (250) opens a subnegotiation that runs to IAC SE (240); every other
+command is two octets. Option codes come from the IANA "Telnet Options"
+registry. The stream is neither a field table nor a TLV region, so commands and
+runs of text alike become items (DEVIATIONS T1).
+"""
+min_len = 1
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "lines"
+off = 0
+kind = "var_bytes_to_end"
+
+[[parents]]
+from = "tcp_port"
+values = [23]
+
+[vector]
+source = "RFC 854 and RFC 858: IAC DO SUPPRESS-GO-AHEAD, IAC WILL ECHO, then \"hi\"."
+bytes = [0xff, 0xfd, 0x03, 0xff, 0xfb, 0x01, 0x68, 0x69]

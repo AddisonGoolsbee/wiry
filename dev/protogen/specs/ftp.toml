@@ -1,0 +1,31 @@
+name = "FTP"
+id = "Ftp"
+num = 89
+parsed_field = "lines"
+citation = """
+RFC 959 §4: FTP commands are a case-insensitive verb, optionally a space and an
+argument, terminated by CR LF; §4.2 replies are a three-digit code followed by a
+space, or by a hyphen when more lines follow, and then text. Line-oriented, so
+each line becomes items in one list (DEVIATIONS T1).
+"""
+min_len = 3
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "lines"
+off = 0
+kind = "var_bytes_to_end"
+
+[[parents]]
+from = "tcp_port"
+values = [21]
+guard = "crate::layers::ftp::looks_like"
+
+[vector]
+source = "RFC 959 §4.2 greeting followed by a USER command."
+bytes = [
+  0x32, 0x32, 0x30, 0x20, 0x72, 0x65, 0x61, 0x64,
+  0x79, 0x0d, 0x0a,
+]

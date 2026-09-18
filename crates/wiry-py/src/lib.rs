@@ -141,7 +141,7 @@ fn decode_span(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<FieldValue> {
 /// the same field has to answer with this and not the raw region, which the
 /// facade already exposes separately as `raw_options()`.
 fn parsed_options(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<Vec<Item>> {
-    if f.name != "options" {
+    if f.name != proto::parsed_field_name(s.proto) {
         return None;
     }
     let parse = proto::desc(s.proto).parse_options?;
@@ -633,7 +633,8 @@ impl PyPktList {
         let idx = self.index.clone();
         let link = self.link;
         let fname = field.to_string();
-        let parses_options = field == "options" && proto::desc(id).parse_options.is_some();
+        let parses_options =
+            field == proto::parsed_field_name(id) && proto::desc(id).parse_options.is_some();
 
         let collected: Vec<Cell> = py.allow_threads(move || {
             idx.iter()
@@ -1198,6 +1199,12 @@ fn write_pcap(path: &str, packets: Vec<Vec<u8>>, linktype: u32) -> PyResult<()> 
     Ok(())
 }
 
+/// The field name whose read returns this layer's parsed item list.
+#[pyfunction]
+fn parsed_field(name: &str) -> PyResult<&'static str> {
+    Ok(proto::parsed_field_name(proto_by_name(name)?))
+}
+
 #[pyfunction]
 fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
     let id = proto_by_name(name)?;
@@ -1360,6 +1367,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_packet, m)?)?;
     m.add_function(wrap_pyfunction!(build_and_serialize, m)?)?;
     m.add_function(wrap_pyfunction!(layer_fields, m)?)?;
+    m.add_function(wrap_pyfunction!(parsed_field, m)?)?;
     m.add_function(wrap_pyfunction!(flag_names, m)?)?;
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
     m.add_function(wrap_pyfunction!(register_layer, m)?)?;

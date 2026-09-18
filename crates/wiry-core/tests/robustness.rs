@@ -71,25 +71,16 @@ fn within<F: FnOnce() + Send + 'static>(limit: Duration, what: &'static str, f: 
     }
 }
 
-const ENTRY_POINTS: [ProtoId; 17] = [
-    ProtoId::Raw,
-    ProtoId::Padding,
-    ProtoId::Ether,
-    ProtoId::Dot1Q,
-    ProtoId::Arp,
-    ProtoId::Ipv4,
-    ProtoId::Ipv6,
-    ProtoId::Tcp,
-    ProtoId::Udp,
-    ProtoId::Icmp,
-    ProtoId::Icmpv6,
-    ProtoId::Dns,
-    ProtoId::Bootp,
-    ProtoId::Dhcp,
-    ProtoId::Null,
-    ProtoId::LinuxSll,
-    ProtoId::LinuxSll2,
-];
+/// Every layer this build can dissect, so a layer added to the engine is fuzzed
+/// from its own entry point without anyone remembering to list it here.
+fn entry_points() -> Vec<ProtoId> {
+    let v: Vec<ProtoId> = proto::known_layers()
+        .into_iter()
+        .filter_map(proto::by_name)
+        .collect();
+    assert!(v.len() >= 17, "entry points lost layers");
+    v
+}
 
 /// Spans must stay inside the buffer and must not run backwards.
 fn check_spans(pkt: &Packet, what: &str) {
@@ -335,6 +326,7 @@ fn a_layer_index_past_the_stack_is_empty_not_a_panic() {
 #[test]
 fn random_bytes_dissect_at_every_entry_point() {
     let mut rng = Rng::new(SEED);
+    let points = entry_points();
     let start = Instant::now();
     for i in 0..8000 {
         let len = match i % 4 {
@@ -344,7 +336,7 @@ fn random_bytes_dissect_at_every_entry_point() {
             _ => rng.below(1600),
         };
         let data = rng.bytes(len);
-        let link = ENTRY_POINTS[rng.below(ENTRY_POINTS.len())];
+        let link = points[rng.below(points.len())];
         let mut pkt = Packet::dissect(data, link);
         exercise(&mut pkt, &format!("random #{i} at {link:?}"));
     }
@@ -440,6 +432,7 @@ fn extreme_length_and_offset_fields() {
 fn truncated_and_mutated_input_round_trips_to_a_fixed_point() {
     let mut rng = Rng::new(SEED ^ 0x5eed);
     let frames = valid_frames();
+    let points = entry_points();
     for i in 0..4000 {
         let (name, base) = &frames[rng.below(frames.len())];
         let mut data = base[..rng.below(base.len() + 1)].to_vec();
@@ -450,7 +443,7 @@ fn truncated_and_mutated_input_round_trips_to_a_fixed_point() {
             let at = rng.below(data.len());
             data[at] = rng.byte();
         }
-        let link = ENTRY_POINTS[rng.below(ENTRY_POINTS.len())];
+        let link = points[rng.below(points.len())];
 
         let mut first = Packet::dissect(data, link);
         first.mark_all_dirty();
@@ -475,9 +468,10 @@ fn truncated_and_mutated_input_round_trips_to_a_fixed_point() {
 #[test]
 fn random_input_round_trips_to_a_fixed_point() {
     let mut rng = Rng::new(SEED ^ 0xfeed);
+    let points = entry_points();
     for i in 0..4000 {
         let data = rng.bytes_below(400);
-        let link = ENTRY_POINTS[rng.below(ENTRY_POINTS.len())];
+        let link = points[rng.below(points.len())];
         let mut first = Packet::dissect(data, link);
         first.mark_all_dirty();
         let bytes = first.to_bytes().to_vec();

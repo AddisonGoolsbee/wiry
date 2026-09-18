@@ -14,6 +14,9 @@ pub mod linktype {
     /// DLT_NULL with the address family in network byte order.
     pub const LOOP: u32 = 108;
     pub const LINUX_SLL: u32 = 113;
+    pub const IEEE802_11: u32 = 105;
+    /// 802.11 frames behind a radiotap header.
+    pub const IEEE802_11_RADIO: u32 = 127;
     pub const IPV4: u32 = 228;
     pub const IPV6: u32 = 229;
     pub const LINUX_SLL2: u32 = 276;
@@ -27,6 +30,8 @@ pub fn link_to_proto(lt: u32) -> ProtoId {
         linktype::LINUX_SLL2 => ProtoId::LinuxSll2,
         linktype::IPV4 | linktype::RAW => ProtoId::Ipv4,
         linktype::IPV6 => ProtoId::Ipv6,
+        linktype::IEEE802_11 => ProtoId::Dot11,
+        linktype::IEEE802_11_RADIO => ProtoId::RadioTap,
         _ => ProtoId::Raw,
     }
 }

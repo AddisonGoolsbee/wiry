@@ -1,0 +1,33 @@
+name = "SSH"
+id = "Ssh"
+num = 83
+citation = """
+RFC 4253 §4.2: a connection opens with an identification string
+"SSH-protoversion-softwareversion" terminated by CR LF. §6: after that every
+message is a binary packet — a 32-bit packet length, a one-octet padding
+length, the payload and the padding — and once a key exchange completes the
+whole packet after the length is encrypted. Both forms are decoded into the
+item list, since a banner has no fixed offsets at all.
+"""
+min_len = 4
+header_len = "hand"
+build_len = 0
+next = "raw"
+parse_options = "hand"
+
+[[fields]]
+name = "options"
+off = 0
+kind = "var_bytes"
+
+[[parents]]
+from = "tcp_port"
+values = [22]
+guard = "crate::layers::ssh::looks_like"
+
+[vector]
+source = "RFC 4253 §4.2 identification string."
+bytes = [
+  0x53, 0x53, 0x48, 0x2d, 0x32, 0x2e, 0x30, 0x2d,
+  0x77, 0x69, 0x72, 0x79, 0x0d, 0x0a,
+]

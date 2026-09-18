@@ -31,6 +31,10 @@ OUT_OF_SCOPE = {
     "Automaton", "answering_machine", "load_contrib", "load_layer",
     "TCPSession", "IPSession", "wireshark", "tcpdump", "hexdiff",
     "sprintf", "pdfdump", "psdump", "voip_play", "traceroute", "arping",
+    # A dissector here never raises on malformed input (CLAUDE.md §5): a
+    # crafted BER message is bounded and returns what it managed, so the
+    # exception scapy raises on one has no equivalent to import.
+    "BER_Exception",
 }
 
 

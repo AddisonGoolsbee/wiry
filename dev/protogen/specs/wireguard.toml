@@ -1,0 +1,69 @@
+name = "WireGuard"
+id = "WireGuard"
+num = 80
+module = "wireguard"
+citation = """
+J. A. Donenfeld, "WireGuard: Next Generation Kernel Network Tunnel" (2017)
+§5.4: every message is a one-octet type and three reserved octets. Type 1
+(handshake initiation) carries a little-endian sender index, a 32-octet
+ephemeral public key, a 48-octet encrypted static key, a 28-octet encrypted
+timestamp and two 16-octet MACs. Type 2 (handshake response) carries sender and
+receiver indices, an ephemeral key, a 16-octet encrypted empty field and the
+two MACs. Type 3 is a cookie reply and type 4 a transport data message with a
+receiver index and a 64-bit little-endian counter. The encrypted parts stay
+opaque.
+"""
+min_len = 4
+header_len = "hand"
+build_len = 4
+next = "raw"
+
+[[fields]]
+name = "message_type"
+off = 0
+len = 8
+default = 1
+
+[[fields]]
+name = "reserved_zero"
+off = 8
+len = 24
+
+[[fields]]
+name = "sender_index"
+off = 32
+len = 32
+kind = "le_uint"
+when = "has_sender"
+
+[[fields]]
+name = "receiver_index"
+off = 32
+len = 32
+kind = "le_uint"
+when = "has_receiver_first"
+
+[[fields]]
+name = "counter"
+off = 64
+len = 64
+kind = "le_uint"
+when = "is_transport"
+
+[[parents]]
+from = "udp_port"
+values = [51820]
+
+[vector]
+source = "WireGuard whitepaper §5.4.6 transport data message: type 4, receiver index 1, counter 0."
+bytes = [
+  0x04, 0x00, 0x00, 0x00,
+  0x01, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0xaa, 0xbb,
+]
+[vector.fields]
+message_type = 4
+reserved_zero = 0
+receiver_index = 1
+counter = 0

@@ -1,0 +1,48 @@
+name = "Dot11ProbeResp"
+id = "Dot11ProbeResp"
+num = 41
+citation = """
+IEEE Std 802.11-2020 §9.3.3.10: the Probe Response frame body carries the same
+Timestamp, Beacon Interval and Capability Information as a Beacon (§9.3.3.3),
+followed by information elements.
+"""
+min_len = 12
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "timestamp"
+off = 0
+len = 64
+kind = "le_uint"
+
+[[fields]]
+name = "beacon_interval"
+off = 64
+len = 16
+kind = "le_uint"
+default = 100
+
+[[fields]]
+name = "cap"
+off = 80
+len = 16
+kind = "le_uint"
+
+[[fields]]
+name = "options"
+off = 96
+kind = "var_bytes"
+
+[vector]
+source = "IEEE 802.11-2020 §9.3.3.10 probe response body, hand-built: SSID element \"wiry\"."
+bytes = [
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x64, 0x00,
+  0x01, 0x00,
+  0x00, 0x04, 0x77, 0x69, 0x72, 0x79,
+]
+[vector.fields]
+beacon_interval = 100
+cap = 1

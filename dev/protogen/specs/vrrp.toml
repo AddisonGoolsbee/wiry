@@ -1,0 +1,80 @@
+name = "VRRP"
+id = "Vrrp"
+num = 62
+citation = """
+RFC 3768 §5.1: a four-bit version, a four-bit type, a one-octet virtual router
+id, a one-octet priority, a one-octet count of IP addresses, a one-octet
+authentication type, a one-octet advertisement interval in seconds and a 16-bit
+checksum, followed by that many addresses. RFC 5798 §5.1 keeps the layout for
+version 3 but reads the two authentication octets as a reserved field and a
+12-bit advertisement interval in centiseconds.
+"""
+min_len = 8
+header_len = 8
+
+[[fields]]
+name = "version"
+off = 0
+len = 4
+default = 2
+
+[[fields]]
+name = "type"
+off = 4
+len = 4
+default = 1
+
+[[fields]]
+name = "vrid"
+off = 8
+len = 8
+default = 1
+
+[[fields]]
+name = "priority"
+off = 16
+len = 8
+default = 100
+
+[[fields]]
+name = "ipcount"
+off = 24
+len = 8
+default = 1
+
+[[fields]]
+name = "authtype"
+off = 32
+len = 8
+
+[[fields]]
+name = "adv"
+off = 40
+len = 8
+default = 1
+
+[[fields]]
+name = "chksum"
+off = 48
+len = 16
+
+[[parents]]
+from = "ipproto"
+values = [112]
+
+[vector]
+source = "RFC 3768 §5.1 advertisement: VRID 1, priority 100, one address 10.0.0.1."
+bytes = [
+  0x21, 0x01, 0x64, 0x01,
+  0x00, 0x01, 0xba, 0x52,
+  0x0a, 0x00, 0x00, 0x01,
+]
+[vector.fields]
+version = 2
+type = 1
+vrid = 1
+priority = 100
+ipcount = 1
+authtype = 0
+adv = 1
+chksum = 0xba52

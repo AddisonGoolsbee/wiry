@@ -164,7 +164,7 @@ def test_header_longer_than_the_buffer_claims_is_not_over_read():
 
 
 @pytest.mark.parametrize(
-    "ethertype", [0x8847, 0x88CC, 0x0001, 0xFFFF],
+    "ethertype", [0x8847, 0x880B, 0x9100, 0xFFFF],
 )
 def test_unimplemented_ethertypes_dissect_to_raw(ethertype):
     data = bytearray(ETHER_IP_TCP)
@@ -172,7 +172,7 @@ def test_unimplemented_ethertypes_dissect_to_raw(ethertype):
     assert Ether(bytes(data)).layers() == ["Ether", "Raw"]
 
 
-@pytest.mark.parametrize("proto", [47, 50, 89, 132])
+@pytest.mark.parametrize("proto", [47, 103, 121, 254])
 def test_unimplemented_ip_protocols_dissect_to_raw(proto):
     data = bytearray(ETHER_IP_TCP)
     data[23] = proto

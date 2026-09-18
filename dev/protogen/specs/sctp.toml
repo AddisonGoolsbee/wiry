@@ -1,0 +1,59 @@
+name = "SCTP"
+id = "Sctp"
+num = 45
+citation = """
+RFC 9260 §3.1: the common header is a 16-bit source port, a 16-bit destination
+port, a 32-bit verification tag and a 32-bit checksum. §3.2 gives the chunk
+format that follows it: a one-octet type, a one-octet flags field, a 16-bit
+length counting the type, flags and length octets themselves, and a value
+padded out to a four-octet boundary. Chunk types from the IANA "Stream Control
+Transmission Protocol (SCTP) Parameters" registry.
+"""
+min_len = 12
+header_len = "rest"
+build_len = 12
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "sport"
+off = 0
+len = 16
+
+[[fields]]
+name = "dport"
+off = 16
+len = 16
+
+[[fields]]
+name = "tag"
+off = 32
+len = 32
+
+[[fields]]
+name = "chksum"
+off = 64
+len = 32
+
+[[fields]]
+name = "options"
+off = 96
+kind = "var_bytes"
+
+[[parents]]
+from = "ipproto"
+values = [132]
+
+[vector]
+source = "RFC 9260 §3.3.7 heartbeat chunk (type 4) on ports 1234 -> 5678, tag 0x11223344."
+bytes = [
+  0x04, 0xd2, 0x16, 0x2e,
+  0x11, 0x22, 0x33, 0x44,
+  0x00, 0x00, 0x00, 0x00,
+  0x04, 0x00, 0x00, 0x08, 0x00, 0x01, 0x00, 0x04,
+]
+[vector.fields]
+sport = 1234
+dport = 5678
+tag = 0x11223344
+chksum = 0

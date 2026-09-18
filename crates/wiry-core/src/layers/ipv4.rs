@@ -55,7 +55,10 @@ fn next(hdr: &[u8]) -> Next {
         ipproto::TCP => Next::Proto(ProtoId::Tcp),
         ipproto::UDP => Next::Proto(ProtoId::Udp),
         ipproto::ICMP => Next::Proto(ProtoId::Icmp),
-        _ => Next::Raw,
+        n => match crate::layers::dispatch::by_ipproto(n) {
+            Some(p) => Next::Proto(p),
+            None => Next::Raw,
+        },
     }
 }
 
@@ -64,7 +67,10 @@ fn bind_next(hdr: &mut [u8], p: ProtoId) {
         ProtoId::Tcp => ipproto::TCP,
         ProtoId::Udp => ipproto::UDP,
         ProtoId::Icmp => ipproto::ICMP,
-        _ => return,
+        _ => match crate::layers::dispatch::by_ipproto_of(p) {
+            Some(v) => v,
+            None => return,
+        },
     };
     if hdr.len() >= 20 {
         hdr[9] = v;

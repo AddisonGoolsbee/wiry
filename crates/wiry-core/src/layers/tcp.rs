@@ -31,10 +31,36 @@ fn header_len(hdr: &[u8]) -> usize {
     (((hdr[12] >> 4) & 0x0f) as usize * 4).max(20)
 }
 
-/// Always opaque: DNS over TCP is length-prefixed, which the DNS layer does not
-/// handle, and nothing else dispatches on a TCP port.
-fn next(_: &[u8]) -> Next {
-    Next::Raw
+/// DNS over TCP is length-prefixed, which the DNS layer does not handle, so
+/// port 53 is deliberately not among the ports dispatched on. Every other
+/// application layer is reached through the generated table, which sees the
+/// payload as well as the ports: a segment from the middle of a stream is not
+/// the start of a message, and its guard says so.
+fn next(hdr: &[u8]) -> Next {
+    if hdr.len() < 4 {
+        return Next::Raw;
+    }
+    let payload = hdr.get(header_len(hdr)..).unwrap_or(&[]);
+    // A bare ACK carries no message to dissect, and the dissection walk would
+    // discard the answer anyway; skipping the lookup keeps the common segment
+    // as cheap as it was before this table existed.
+    if payload.is_empty() {
+        return Next::Raw;
+    }
+    let sport = u16::from_be_bytes([hdr[0], hdr[1]]);
+    let dport = u16::from_be_bytes([hdr[2], hdr[3]]);
+    match crate::layers::dispatch::by_tcp_port(sport, dport, payload) {
+        Some(p) => Next::Proto(p),
+        None => Next::Raw,
+    }
+}
+
+fn bind_next(hdr: &mut [u8], p: ProtoId) {
+    if hdr.len() >= 4 {
+        if let Some(port) = crate::layers::dispatch::by_tcp_port_of(p) {
+            hdr[2..4].copy_from_slice(&port.to_be_bytes());
+        }
+    }
 }
 
 /// IANA "TCP Option Kind Numbers" registry.
@@ -97,7 +123,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     parse_options: Some(parse_options),
     opt_table: Some(&OPTIONS),
     set_hlen: Some(set_hlen),
-    bind_next: None,
+    bind_next: Some(bind_next),
     bind_next_bytes: None,
     content_len: None,
 };

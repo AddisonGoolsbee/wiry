@@ -1,0 +1,62 @@
+name = "Radius"
+id = "Radius"
+num = 72
+citation = """
+RFC 2865 §3: a one-octet code, a one-octet identifier, a 16-bit length covering
+the whole packet and a 16-octet authenticator, followed by attributes. §5: an
+attribute is a one-octet type and a one-octet length that counts the type and
+length octets themselves. Codes and attribute types from the IANA "RADIUS
+Types" registry.
+"""
+min_len = 20
+header_len = "hand"
+build_len = 20
+next = "end"
+content_len = "hand"
+parse_options = "hand"
+
+[[fields]]
+name = "code"
+off = 0
+len = 8
+default = 1
+
+[[fields]]
+name = "id"
+off = 8
+len = 8
+
+[[fields]]
+name = "len"
+off = 16
+len = 16
+default = 20
+
+[[fields]]
+name = "authenticator"
+off = 32
+len = 128
+kind = "bytes"
+
+[[fields]]
+name = "options"
+off = 160
+kind = "var_bytes"
+
+[[parents]]
+from = "udp_port"
+values = [1812, 1813, 1645, 1646]
+bind = 1812
+
+[vector]
+source = "RFC 2865 §7.1 Access-Request: code 1, id 0, length 26, one User-Name attribute \"bob\"."
+bytes = [
+  0x01, 0x00, 0x00, 0x1a,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x01, 0x05, 0x62, 0x6f, 0x62, 0x00,
+]
+[vector.fields]
+code = 1
+id = 0
+len = 26

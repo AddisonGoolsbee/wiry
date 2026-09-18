@@ -2,6 +2,7 @@
 //! "Protocol Numbers" registry.
 
 use crate::field::FieldDesc;
+use crate::layers::dispatch;
 use crate::proto::{ipproto, Next, ProtoDesc, ProtoId};
 
 /// RFC 8200 §4.7: the payload ends here.
@@ -39,9 +40,18 @@ fn next(hdr: &[u8]) -> Next {
     match hdr[6] {
         ipproto::TCP => Next::Proto(ProtoId::Tcp),
         ipproto::UDP => Next::Proto(ProtoId::Udp),
-        ipproto::IPV6_ICMP => Next::Proto(ProtoId::Icmpv6),
+        // The Neighbor Discovery and MLD messages are whole ICMPv6 messages,
+        // type octet included, so they replace the generic layer rather than
+        // nesting under it.
+        ipproto::IPV6_ICMP => match hdr.get(40).and_then(|t| dispatch::by_icmpv6_type(*t)) {
+            Some(p) => Next::Proto(p),
+            None => Next::Proto(ProtoId::Icmpv6),
+        },
         EXT_HOP_BY_HOP | EXT_ROUTING | EXT_FRAGMENT | EXT_DEST_OPTS => Next::Raw,
-        _ => Next::Raw,
+        n => match dispatch::by_ipproto(n) {
+            Some(p) => Next::Proto(p),
+            None => Next::Raw,
+        },
     }
 }
 
@@ -58,7 +68,11 @@ fn bind_next(hdr: &mut [u8], p: ProtoId) {
         ProtoId::Tcp => ipproto::TCP,
         ProtoId::Udp => ipproto::UDP,
         ProtoId::Icmpv6 => ipproto::IPV6_ICMP,
-        _ => return,
+        p if dispatch::by_icmpv6_type_of(p).is_some() => ipproto::IPV6_ICMP,
+        _ => match dispatch::by_ipproto_of(p) {
+            Some(v) => v,
+            None => return,
+        },
     };
     if hdr.len() >= 40 {
         hdr[6] = v;
@@ -171,7 +185,7 @@ mod tests {
             (EXT_ROUTING, Next::Raw),
             (EXT_FRAGMENT, Next::Raw),
             (EXT_DEST_OPTS, Next::Raw),
-            (132, Next::Raw),
+            (132, Next::Proto(ProtoId::Sctp)),
         ];
         for &(nh, want) in cases {
             h[6] = nh;

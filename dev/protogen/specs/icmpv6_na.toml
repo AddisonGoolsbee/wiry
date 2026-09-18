@@ -1,0 +1,79 @@
+name = "ICMPv6ND_NA"
+id = "Icmpv6NdNa"
+num = 51
+citation = """
+RFC 4861 §4.4, Neighbor Advertisement: ICMPv6 type 136, code 0, checksum, the
+Router, Solicited and Override flags followed by 29 reserved bits, the 128-bit
+target address, then options (§4.6).
+"""
+min_len = 24
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "type"
+off = 0
+len = 8
+default = 136
+
+[[fields]]
+name = "code"
+off = 8
+len = 8
+
+[[fields]]
+name = "cksum"
+off = 16
+len = 16
+
+[[fields]]
+name = "R"
+off = 32
+len = 1
+
+[[fields]]
+name = "S"
+off = 33
+len = 1
+
+[[fields]]
+name = "O"
+off = 34
+len = 1
+
+[[fields]]
+name = "res"
+off = 35
+len = 29
+
+[[fields]]
+name = "tgt"
+off = 64
+kind = "ipv6"
+
+[[fields]]
+name = "options"
+off = 192
+kind = "var_bytes"
+
+[[parents]]
+from = "icmpv6_type"
+values = [136]
+
+[vector]
+source = "RFC 4861 §4.4 neighbor advertisement for 2001:db8::2, solicited and override set, with a target link-layer address option."
+bytes = [
+  0x88, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00,
+  0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+  0x02, 0x01, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+]
+[vector.fields]
+type = 136
+code = 0
+cksum = 0
+R = 0
+S = 1
+O = 1
+res = 0

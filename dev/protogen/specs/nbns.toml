@@ -1,0 +1,58 @@
+name = "NBNS"
+id = "Nbns"
+num = 70
+citation = """
+RFC 1002 §4.2.1: a NetBIOS name service packet uses the RFC 1035 §4.1.1 header
+shape — a transaction id, a flags word carrying the response, opcode, NM flags
+and reply code, and the four section counts — over UDP port 137.
+"""
+min_len = 12
+header_len = 12
+
+[[fields]]
+name = "NAME_TRN_ID"
+off = 0
+len = 16
+
+[[fields]]
+name = "FLAGS"
+off = 16
+len = 16
+
+[[fields]]
+name = "QDCOUNT"
+off = 32
+len = 16
+
+[[fields]]
+name = "ANCOUNT"
+off = 48
+len = 16
+
+[[fields]]
+name = "NSCOUNT"
+off = 64
+len = 16
+
+[[fields]]
+name = "ARCOUNT"
+off = 80
+len = 16
+
+[[parents]]
+from = "udp_port"
+values = [137]
+
+[vector]
+source = "RFC 1002 §4.2.12 name query request: transaction id 0x1234, broadcast flag set, one question."
+bytes = [
+  0x12, 0x34, 0x01, 0x10,
+  0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]
+[vector.fields]
+NAME_TRN_ID = 0x1234
+FLAGS = 0x0110
+QDCOUNT = 1
+ANCOUNT = 0
+NSCOUNT = 0
+ARCOUNT = 0

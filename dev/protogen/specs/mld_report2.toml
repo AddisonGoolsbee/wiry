@@ -1,0 +1,58 @@
+name = "ICMPv6MLReport2"
+id = "Icmpv6MlReport2"
+num = 56
+module = "mld_report2"
+citation = """
+RFC 3810 §5.2, Version 2 Multicast Listener Report: ICMPv6 type 143, code 0,
+checksum, a 16-bit reserved field and a 16-bit count of multicast address
+records. The records themselves (§5.2.4) are a variable-length array and stay
+in the payload — see DEVIATIONS P3.
+"""
+min_len = 8
+header_len = 8
+next = "end"
+
+[[fields]]
+name = "type"
+off = 0
+len = 8
+default = 143
+
+[[fields]]
+name = "code"
+off = 8
+len = 8
+
+[[fields]]
+name = "cksum"
+off = 16
+len = 16
+
+[[fields]]
+name = "res"
+off = 32
+len = 16
+
+[[fields]]
+name = "records_number"
+off = 48
+len = 16
+
+[[parents]]
+from = "icmpv6_type"
+values = [143]
+
+[vector]
+source = "RFC 3810 §5.2 report carrying one multicast address record."
+bytes = [
+  0x8f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+  0x04, 0x00, 0x00, 0x00,
+  0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00, 0x02,
+]
+[vector.fields]
+type = 143
+code = 0
+cksum = 0
+res = 0
+records_number = 1

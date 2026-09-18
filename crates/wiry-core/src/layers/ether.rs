@@ -16,17 +16,32 @@ fn header_len(_: &[u8]) -> usize {
     14
 }
 
-fn next(hdr: &[u8]) -> Next {
-    if hdr.len() < 14 {
-        return Next::Raw;
-    }
-    match u16::from_be_bytes([hdr[12], hdr[13]]) {
+/// Shared with SNAP (RFC 1042), whose protocol id under OUI 0x000000 is an
+/// EtherType.
+pub fn ethertype_next(t: u16) -> Next {
+    match t {
         ethertype::IPV4 => Next::Proto(ProtoId::Ipv4),
         ethertype::IPV6 => Next::Proto(ProtoId::Ipv6),
         ethertype::ARP => Next::Proto(ProtoId::Arp),
         ethertype::DOT1Q => Next::Proto(ProtoId::Dot1Q),
-        _ => Next::Raw,
+        _ => match crate::layers::dispatch::by_ethertype(t) {
+            Some(p) => Next::Proto(p),
+            None => Next::Raw,
+        },
     }
+}
+
+fn next(hdr: &[u8]) -> Next {
+    if hdr.len() < 14 {
+        return Next::Raw;
+    }
+    let t = u16::from_be_bytes([hdr[12], hdr[13]]);
+    // IEEE 802.3 clause 3.2.6: at or below 1500 the field is a length and an
+    // 802.2 LLC header follows.
+    if t <= 1500 {
+        return Next::Proto(ProtoId::Llc);
+    }
+    ethertype_next(t)
 }
 
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
@@ -35,7 +50,12 @@ fn bind_next(hdr: &mut [u8], p: ProtoId) {
         ProtoId::Ipv6 => ethertype::IPV6,
         ProtoId::Arp => ethertype::ARP,
         ProtoId::Dot1Q => ethertype::DOT1Q,
-        _ => return,
+        // An 802.3 length cannot be written here: it is the payload's size,
+        // which nothing knows while the header is being bound.
+        _ => match crate::layers::dispatch::by_ethertype_of(p) {
+            Some(t) => t,
+            None => return,
+        },
     };
     if hdr.len() >= 14 {
         hdr[12..14].copy_from_slice(&t.to_be_bytes());

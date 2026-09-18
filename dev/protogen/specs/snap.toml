@@ -1,0 +1,34 @@
+name = "SNAP"
+id = "Snap"
+num = 33
+citation = """
+RFC 1042 §"Frame Format" and IEEE Std 802-2014 §9.2: the SNAP header is a
+three-octet organizationally unique identifier followed by a two-octet protocol
+identifier. With OUI 0x000000 the identifier is an EtherType (RFC 1042);
+Cisco's OUI 0x00000C with PID 0x2000 carries CDP.
+"""
+min_len = 5
+header_len = 5
+next = "hand"
+
+[[fields]]
+name = "OUI"
+off = 0
+len = 24
+
+[[fields]]
+name = "code"
+off = 24
+len = 16
+default = 0x0800
+
+[[parents]]
+from = "llc_sap"
+values = [0xaa]
+
+[vector]
+source = "RFC 1042: IPv4 over 802 networks, OUI 0x000000, EtherType 0x0800."
+bytes = [0x00, 0x00, 0x00, 0x08, 0x00]
+[vector.fields]
+OUI = 0
+code = 0x0800

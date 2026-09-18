@@ -1,0 +1,20 @@
+name = "Dot11ProbeReq"
+id = "Dot11ProbeReq"
+num = 40
+citation = """
+IEEE Std 802.11-2020 §9.3.3.9: the Probe Request frame body is information
+elements only, in the §9.4.2.1 element format.
+"""
+min_len = 2
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "options"
+off = 0
+kind = "var_bytes"
+
+[vector]
+source = "IEEE 802.11-2020 §9.3.3.9 probe request body, hand-built: SSID element \"wiry\"."
+bytes = [0x00, 0x04, 0x77, 0x69, 0x72, 0x79]

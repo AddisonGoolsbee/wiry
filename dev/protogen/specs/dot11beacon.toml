@@ -1,0 +1,50 @@
+name = "Dot11Beacon"
+id = "Dot11Beacon"
+num = 39
+citation = """
+IEEE Std 802.11-2020 §9.3.3.3: the Beacon frame body opens with a 64-bit
+Timestamp, a 16-bit Beacon Interval in time units and a 16-bit Capability
+Information field, all little-endian, followed by information elements in the
+§9.4.2.1 element format (a one-octet element id and a one-octet length).
+"""
+min_len = 12
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "timestamp"
+off = 0
+len = 64
+kind = "le_uint"
+
+[[fields]]
+name = "beacon_interval"
+off = 64
+len = 16
+kind = "le_uint"
+default = 100
+
+[[fields]]
+name = "cap"
+off = 80
+len = 16
+kind = "le_uint"
+
+[[fields]]
+name = "options"
+off = 96
+kind = "var_bytes"
+
+[vector]
+source = "IEEE 802.11-2020 §9.3.3.3 beacon body, hand-built: beacon interval 100 TU, SSID element \"wiry\"."
+bytes = [
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x64, 0x00,
+  0x01, 0x00,
+  0x00, 0x04, 0x77, 0x69, 0x72, 0x79,
+]
+[vector.fields]
+timestamp = 0
+beacon_interval = 100
+cap = 1

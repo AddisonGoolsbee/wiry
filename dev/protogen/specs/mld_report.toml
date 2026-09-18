@@ -1,0 +1,61 @@
+name = "ICMPv6MLReport"
+id = "Icmpv6MlReport"
+num = 54
+module = "mld_report"
+citation = """
+RFC 2710 §4, Multicast Listener Report: ICMPv6 type 131, code 0, checksum, a
+16-bit Maximum Response Delay that must be zero, a 16-bit reserved field and
+the 128-bit multicast address being reported.
+"""
+min_len = 24
+header_len = 24
+next = "end"
+
+[[fields]]
+name = "type"
+off = 0
+len = 8
+default = 131
+
+[[fields]]
+name = "code"
+off = 8
+len = 8
+
+[[fields]]
+name = "cksum"
+off = 16
+len = 16
+
+[[fields]]
+name = "mrd"
+off = 32
+len = 16
+
+[[fields]]
+name = "reserved"
+off = 48
+len = 16
+
+[[fields]]
+name = "mladdr"
+off = 64
+kind = "ipv6"
+
+[[parents]]
+from = "icmpv6_type"
+values = [131]
+
+[vector]
+source = "RFC 2710 §4 report for ff02::1:ff00:2."
+bytes = [
+  0x83, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00, 0x02,
+]
+[vector.fields]
+type = 131
+code = 0
+cksum = 0
+mrd = 0
+reserved = 0

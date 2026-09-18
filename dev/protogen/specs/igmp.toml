@@ -1,0 +1,80 @@
+name = "IGMP"
+id = "Igmp"
+num = 46
+citation = """
+RFC 2236 §2 (IGMPv2) and RFC 1112 Appendix I (IGMPv1) give the same eight
+octets: a one-octet type, a one-octet max response time, a 16-bit checksum and
+a group address. RFC 3376 §4.1 keeps that prefix for a version 3 Membership
+Query and appends a suppress/QRV octet, a QQIC octet and a source count; §4.2
+replaces the group address with a reserved word and a group record count. The
+three versions share one layer because they share one prefix and differ only in
+what follows it, which is what a conditional field is for.
+"""
+min_len = 8
+header_len = "hand"
+build_len = 8
+next = "end"
+
+[[fields]]
+name = "type"
+off = 0
+len = 8
+default = 0x11
+
+[[fields]]
+name = "mrcode"
+off = 8
+len = 8
+
+[[fields]]
+name = "chksum"
+off = 16
+len = 16
+
+[[fields]]
+name = "gaddr"
+off = 32
+kind = "ipv4"
+when = "has_group_address"
+
+[[fields]]
+name = "res2"
+off = 32
+len = 16
+when = "is_v3_report"
+
+[[fields]]
+name = "numgrp"
+off = 48
+len = 16
+when = "is_v3_report"
+
+[[fields]]
+name = "s_qrv"
+off = 64
+len = 8
+when = "is_v3_query"
+
+[[fields]]
+name = "qqic"
+off = 72
+len = 8
+when = "is_v3_query"
+
+[[fields]]
+name = "numsrc"
+off = 80
+len = 16
+when = "is_v3_query"
+
+[[parents]]
+from = "ipproto"
+values = [2]
+
+[vector]
+source = "RFC 2236 §2 membership report for 224.0.0.251, max response time 0."
+bytes = [0x16, 0x00, 0x09, 0x04, 0xe0, 0x00, 0x00, 0xfb]
+[vector.fields]
+type = 0x16
+mrcode = 0
+chksum = 0x0904

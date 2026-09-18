@@ -1,0 +1,47 @@
+name = "TFTP"
+id = "Tftp"
+num = 68
+citation = """
+RFC 1350 §5: every TFTP packet opens with a two-octet opcode. A Read or Write
+Request (1, 2) is followed by NUL-terminated filename and mode strings; DATA
+(3) and ACK (4) carry a two-octet block number; ERROR (5) carries a two-octet
+code and a NUL-terminated message. The strings are not at a fixed offset, so
+they are decoded into the item list rather than placed in the field table.
+"""
+min_len = 2
+header_len = "hand"
+build_len = 2
+parse_options = "hand"
+
+[[fields]]
+name = "op"
+off = 0
+len = 16
+default = 1
+
+[[fields]]
+name = "block"
+off = 16
+len = 16
+when = "has_block"
+
+[[fields]]
+name = "errorcode"
+off = 16
+len = 16
+when = "is_error"
+
+[[fields]]
+name = "options"
+off = 32
+kind = "var_bytes"
+
+[[parents]]
+from = "udp_port"
+values = [69]
+
+[vector]
+source = "RFC 1350 §5 read request for \"a\" in octet mode."
+bytes = [0x00, 0x01, 0x61, 0x00, 0x6f, 0x63, 0x74, 0x65, 0x74, 0x00]
+[vector.fields]
+op = 1

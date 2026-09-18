@@ -1,0 +1,113 @@
+name = "STP"
+id = "Stp"
+num = 34
+citation = """
+IEEE Std 802.1D-2004 §9.3.1, Configuration BPDU: protocol identifier (0x0000),
+version, BPDU type, flags, root identifier (a two-octet priority and a
+six-octet address), root path cost, bridge identifier, port identifier, and the
+four timer values in 1/256-second units. §9.3.2 gives the four-octet
+Topology Change Notification BPDU, which is why the minimum length is 4.
+RSTP is version 2 of the same frame (IEEE 802.1D-2004 §17.2).
+"""
+min_len = 4
+header_len = 35
+build_len = 35
+
+[[fields]]
+name = "proto"
+off = 0
+len = 16
+
+[[fields]]
+name = "version"
+off = 16
+len = 8
+
+[[fields]]
+name = "bpdutype"
+off = 24
+len = 8
+
+[[fields]]
+name = "bpduflags"
+off = 32
+len = 8
+
+[[fields]]
+name = "rootid"
+off = 40
+len = 16
+
+[[fields]]
+name = "rootmac"
+off = 56
+kind = "mac"
+
+[[fields]]
+name = "pathcost"
+off = 104
+len = 32
+
+[[fields]]
+name = "bridgeid"
+off = 136
+len = 16
+
+[[fields]]
+name = "bridgemac"
+off = 152
+kind = "mac"
+
+[[fields]]
+name = "portid"
+off = 200
+len = 16
+
+[[fields]]
+name = "age"
+off = 216
+len = 16
+
+[[fields]]
+name = "maxage"
+off = 232
+len = 16
+default = 0x1400
+
+[[fields]]
+name = "hellotime"
+off = 248
+len = 16
+default = 0x0200
+
+[[fields]]
+name = "fwddelay"
+off = 264
+len = 16
+default = 0x0f00
+
+[[parents]]
+from = "llc_sap"
+values = [0x42]
+
+[vector]
+source = "IEEE 802.1D §9.3.1 configuration BPDU, hand-built: priority 0x8000, bridge 00:11:22:33:44:55, path cost 0."
+bytes = [
+  0x00, 0x00, 0x00, 0x00, 0x00,
+  0x80, 0x00, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+  0x00, 0x00, 0x00, 0x00,
+  0x80, 0x00, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+  0x80, 0x01,
+  0x00, 0x00, 0x14, 0x00, 0x02, 0x00, 0x0f, 0x00,
+]
+[vector.fields]
+proto = 0
+version = 0
+bpdutype = 0
+rootid = 0x8000
+pathcost = 0
+portid = 0x8001
+age = 0
+maxage = 0x1400
+hellotime = 0x0200
+fwddelay = 0x0f00

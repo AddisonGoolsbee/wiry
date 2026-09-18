@@ -28,7 +28,15 @@ fn next(hdr: &[u8]) -> Next {
     {
         return Next::Proto(ProtoId::Bootp);
     }
-    Next::Raw
+    // RFC 6762 §18 and RFC 4795 §2: mDNS and LLMNR carry RFC 1035 messages, so
+    // they are the DNS layer reached on another port, not a layer of their own.
+    if matches!(sport, ports::MDNS | ports::LLMNR) || matches!(dport, ports::MDNS | ports::LLMNR) {
+        return Next::Proto(ProtoId::Dns);
+    }
+    match crate::layers::dispatch::by_udp_port(sport, dport, hdr.get(8..).unwrap_or(&[])) {
+        Some(p) => Next::Proto(p),
+        None => Next::Raw,
+    }
 }
 
 /// RFC 768: Length covers the header and its data.
@@ -41,9 +49,18 @@ fn content_len(hdr: &[u8]) -> usize {
 
 /// RFC 951 §3 ports: the default 53/53 would otherwise dissect back as DNS.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
-    if p == ProtoId::Bootp && hdr.len() >= 4 {
+    if hdr.len() < 4 {
+        return;
+    }
+    if p == ProtoId::Bootp {
         hdr[0..2].copy_from_slice(&ports::BOOTPS.to_be_bytes());
         hdr[2..4].copy_from_slice(&ports::BOOTPC.to_be_bytes());
+        return;
+    }
+    if let Some(port) = crate::layers::dispatch::by_udp_port_of(p) {
+        // Both halves: the default 53/53 would otherwise still read back as DNS.
+        hdr[0..2].copy_from_slice(&port.to_be_bytes());
+        hdr[2..4].copy_from_slice(&port.to_be_bytes());
     }
 }
 

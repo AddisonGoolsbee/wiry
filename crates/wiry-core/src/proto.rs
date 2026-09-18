@@ -27,6 +27,68 @@ impl ProtoId {
     pub const Null: ProtoId = ProtoId(14);
     pub const LinuxSll: ProtoId = ProtoId(15);
     pub const LinuxSll2: ProtoId = ProtoId(16);
+    // protogen:ids begin
+    pub const Llc: ProtoId = ProtoId(32);
+    pub const Snap: ProtoId = ProtoId(33);
+    pub const Stp: ProtoId = ProtoId(34);
+    pub const Lldp: ProtoId = ProtoId(35);
+    pub const Cdp: ProtoId = ProtoId(36);
+    pub const RadioTap: ProtoId = ProtoId(37);
+    pub const Dot11: ProtoId = ProtoId(38);
+    pub const Dot11Beacon: ProtoId = ProtoId(39);
+    pub const Dot11ProbeReq: ProtoId = ProtoId(40);
+    pub const Dot11ProbeResp: ProtoId = ProtoId(41);
+    pub const Dot11Auth: ProtoId = ProtoId(42);
+    pub const Dot11AssoReq: ProtoId = ProtoId(43);
+    pub const Dot11AssoResp: ProtoId = ProtoId(44);
+    pub const Sctp: ProtoId = ProtoId(45);
+    pub const Igmp: ProtoId = ProtoId(46);
+    pub const Icmpv6NdRs: ProtoId = ProtoId(48);
+    pub const Icmpv6NdRa: ProtoId = ProtoId(49);
+    pub const Icmpv6NdNs: ProtoId = ProtoId(50);
+    pub const Icmpv6NdNa: ProtoId = ProtoId(51);
+    pub const Icmpv6NdRedirect: ProtoId = ProtoId(52);
+    pub const Icmpv6MlQuery: ProtoId = ProtoId(53);
+    pub const Icmpv6MlReport: ProtoId = ProtoId(54);
+    pub const Icmpv6MlDone: ProtoId = ProtoId(55);
+    pub const Icmpv6MlReport2: ProtoId = ProtoId(56);
+    pub const Esp: ProtoId = ProtoId(57);
+    pub const Ah: ProtoId = ProtoId(58);
+    pub const Ospf: ProtoId = ProtoId(59);
+    pub const Rip: ProtoId = ProtoId(60);
+    pub const Bgp: ProtoId = ProtoId(61);
+    pub const Vrrp: ProtoId = ProtoId(62);
+    pub const Hsrp: ProtoId = ProtoId(63);
+    pub const Bfd: ProtoId = ProtoId(64);
+    pub const Ntp: ProtoId = ProtoId(65);
+    pub const Dhcp6: ProtoId = ProtoId(66);
+    pub const Snmp: ProtoId = ProtoId(67);
+    pub const Tftp: ProtoId = ProtoId(68);
+    pub const Syslog: ProtoId = ProtoId(69);
+    pub const Nbns: ProtoId = ProtoId(70);
+    pub const NbtSession: ProtoId = ProtoId(71);
+    pub const Radius: ProtoId = ProtoId(72);
+    pub const Rtp: ProtoId = ProtoId(73);
+    pub const Rtcp: ProtoId = ProtoId(74);
+    pub const NetflowV5: ProtoId = ProtoId(75);
+    pub const NetflowV9: ProtoId = ProtoId(76);
+    pub const Ipfix: ProtoId = ProtoId(77);
+    pub const SFlow: ProtoId = ProtoId(78);
+    pub const Quic: ProtoId = ProtoId(79);
+    pub const WireGuard: ProtoId = ProtoId(80);
+    pub const Tls: ProtoId = ProtoId(81);
+    pub const Http: ProtoId = ProtoId(82);
+    pub const Ssh: ProtoId = ProtoId(83);
+    pub const Mqtt: ProtoId = ProtoId(84);
+    pub const Modbus: ProtoId = ProtoId(85);
+    pub const Smb2: ProtoId = ProtoId(86);
+    pub const Ldap: ProtoId = ProtoId(87);
+    pub const Sip: ProtoId = ProtoId(88);
+    pub const Ftp: ProtoId = ProtoId(89);
+    pub const Smtp: ProtoId = ProtoId(90);
+    pub const Imap: ProtoId = ProtoId(91);
+    pub const Telnet: ProtoId = ProtoId(92);
+    // protogen:ids end
 
     pub fn name(self) -> &'static str {
         desc(self).name
@@ -42,6 +104,21 @@ pub enum Next {
     Proto(ProtoId),
     Raw,
     End,
+}
+
+/// Shared rather than redefined per module: sixty generated layers want one of
+/// these three, and sixty copies of a one-line hook bury the field table that
+/// is the only part of a generated file worth reading.
+pub fn next_raw(_: &[u8]) -> Next {
+    Next::Raw
+}
+
+pub fn next_end(_: &[u8]) -> Next {
+    Next::End
+}
+
+pub fn header_len_rest(hdr: &[u8]) -> usize {
+    hdr.len()
 }
 
 pub type OptionParser = fn(&[u8]) -> Vec<crate::options::Item>;
@@ -69,7 +146,7 @@ pub struct ProtoDesc {
     pub content_len: Option<fn(&[u8]) -> usize>,
 }
 
-pub const BUILTIN_COUNT: u16 = 17;
+pub const BUILTIN_COUNT: u16 = 112;
 
 const BUILTINS: &[ProtoId] = &[
     ProtoId::Ether,
@@ -89,6 +166,68 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::LinuxSll2,
     ProtoId::Raw,
     ProtoId::Padding,
+    // protogen:builtins begin
+    ProtoId::Llc,
+    ProtoId::Snap,
+    ProtoId::Stp,
+    ProtoId::Lldp,
+    ProtoId::Cdp,
+    ProtoId::RadioTap,
+    ProtoId::Dot11,
+    ProtoId::Dot11Beacon,
+    ProtoId::Dot11ProbeReq,
+    ProtoId::Dot11ProbeResp,
+    ProtoId::Dot11Auth,
+    ProtoId::Dot11AssoReq,
+    ProtoId::Dot11AssoResp,
+    ProtoId::Sctp,
+    ProtoId::Igmp,
+    ProtoId::Icmpv6NdRs,
+    ProtoId::Icmpv6NdRa,
+    ProtoId::Icmpv6NdNs,
+    ProtoId::Icmpv6NdNa,
+    ProtoId::Icmpv6NdRedirect,
+    ProtoId::Icmpv6MlQuery,
+    ProtoId::Icmpv6MlReport,
+    ProtoId::Icmpv6MlDone,
+    ProtoId::Icmpv6MlReport2,
+    ProtoId::Esp,
+    ProtoId::Ah,
+    ProtoId::Ospf,
+    ProtoId::Rip,
+    ProtoId::Bgp,
+    ProtoId::Vrrp,
+    ProtoId::Hsrp,
+    ProtoId::Bfd,
+    ProtoId::Ntp,
+    ProtoId::Dhcp6,
+    ProtoId::Snmp,
+    ProtoId::Tftp,
+    ProtoId::Syslog,
+    ProtoId::Nbns,
+    ProtoId::NbtSession,
+    ProtoId::Radius,
+    ProtoId::Rtp,
+    ProtoId::Rtcp,
+    ProtoId::NetflowV5,
+    ProtoId::NetflowV9,
+    ProtoId::Ipfix,
+    ProtoId::SFlow,
+    ProtoId::Quic,
+    ProtoId::WireGuard,
+    ProtoId::Tls,
+    ProtoId::Http,
+    ProtoId::Ssh,
+    ProtoId::Mqtt,
+    ProtoId::Modbus,
+    ProtoId::Smb2,
+    ProtoId::Ldap,
+    ProtoId::Sip,
+    ProtoId::Ftp,
+    ProtoId::Smtp,
+    ProtoId::Imap,
+    ProtoId::Telnet,
+    // protogen:builtins end
 ];
 
 #[inline]
@@ -119,6 +258,68 @@ fn builtin_desc(id: ProtoId) -> &'static ProtoDesc {
         ProtoId::Null => &null::DESC,
         ProtoId::LinuxSll => &linux_sll::DESC,
         ProtoId::LinuxSll2 => &linux_sll::DESC_V2,
+        // protogen:desc begin
+        ProtoId::Llc => &llc::DESC,
+        ProtoId::Snap => &snap::DESC,
+        ProtoId::Stp => &stp::DESC,
+        ProtoId::Lldp => &lldp::DESC,
+        ProtoId::Cdp => &cdp::DESC,
+        ProtoId::RadioTap => &radiotap::DESC,
+        ProtoId::Dot11 => &dot11::DESC,
+        ProtoId::Dot11Beacon => &dot11beacon::DESC,
+        ProtoId::Dot11ProbeReq => &dot11probereq::DESC,
+        ProtoId::Dot11ProbeResp => &dot11proberesp::DESC,
+        ProtoId::Dot11Auth => &dot11auth::DESC,
+        ProtoId::Dot11AssoReq => &dot11assoreq::DESC,
+        ProtoId::Dot11AssoResp => &dot11assoresp::DESC,
+        ProtoId::Sctp => &sctp::DESC,
+        ProtoId::Igmp => &igmp::DESC,
+        ProtoId::Icmpv6NdRs => &icmpv6_rs::DESC,
+        ProtoId::Icmpv6NdRa => &icmpv6_ra::DESC,
+        ProtoId::Icmpv6NdNs => &icmpv6_ns::DESC,
+        ProtoId::Icmpv6NdNa => &icmpv6_na::DESC,
+        ProtoId::Icmpv6NdRedirect => &icmpv6_redirect::DESC,
+        ProtoId::Icmpv6MlQuery => &mld_query::DESC,
+        ProtoId::Icmpv6MlReport => &mld_report::DESC,
+        ProtoId::Icmpv6MlDone => &mld_done::DESC,
+        ProtoId::Icmpv6MlReport2 => &mld_report2::DESC,
+        ProtoId::Esp => &esp::DESC,
+        ProtoId::Ah => &ah::DESC,
+        ProtoId::Ospf => &ospf::DESC,
+        ProtoId::Rip => &rip::DESC,
+        ProtoId::Bgp => &bgp::DESC,
+        ProtoId::Vrrp => &vrrp::DESC,
+        ProtoId::Hsrp => &hsrp::DESC,
+        ProtoId::Bfd => &bfd::DESC,
+        ProtoId::Ntp => &ntp::DESC,
+        ProtoId::Dhcp6 => &dhcp6::DESC,
+        ProtoId::Snmp => &snmp::DESC,
+        ProtoId::Tftp => &tftp::DESC,
+        ProtoId::Syslog => &syslog::DESC,
+        ProtoId::Nbns => &nbns::DESC,
+        ProtoId::NbtSession => &nbtsession::DESC,
+        ProtoId::Radius => &radius::DESC,
+        ProtoId::Rtp => &rtp::DESC,
+        ProtoId::Rtcp => &rtcp::DESC,
+        ProtoId::NetflowV5 => &netflow5::DESC,
+        ProtoId::NetflowV9 => &netflow9::DESC,
+        ProtoId::Ipfix => &ipfix::DESC,
+        ProtoId::SFlow => &sflow::DESC,
+        ProtoId::Quic => &quic::DESC,
+        ProtoId::WireGuard => &wireguard::DESC,
+        ProtoId::Tls => &tls::DESC,
+        ProtoId::Http => &http::DESC,
+        ProtoId::Ssh => &ssh::DESC,
+        ProtoId::Mqtt => &mqtt::DESC,
+        ProtoId::Modbus => &modbus::DESC,
+        ProtoId::Smb2 => &smb2::DESC,
+        ProtoId::Ldap => &ldap::DESC,
+        ProtoId::Sip => &sip::DESC,
+        ProtoId::Ftp => &ftp::DESC,
+        ProtoId::Smtp => &smtp::DESC,
+        ProtoId::Imap => &imap::DESC,
+        ProtoId::Telnet => &telnet::DESC,
+        // protogen:desc end
         _ => &raw::DESC,
     }
 }
@@ -157,7 +358,31 @@ pub fn accessor_names(id: ProtoId) -> &'static [&'static str] {
     match id {
         // RFC 1035 §4.1
         ProtoId::Dns => &["qd", "an", "ns", "ar"],
+        // protogen:accessors begin
+        // protogen:accessors end
         _ => &[],
+    }
+}
+
+/// The field a protocol's `parse_options` answers for. Line-oriented and
+/// BER-encoded layers reuse the same parsed-item shape under their own name,
+/// so `pkt[HTTP].headers` reads as `pkt[TCP].options` does.
+pub fn parsed_field_name(id: ProtoId) -> &'static str {
+    match id {
+        // protogen:parsed begin
+        ProtoId::Lldp => "options",
+        ProtoId::Cdp => "msg",
+        ProtoId::Snmp => "vars",
+        ProtoId::Syslog => "headers",
+        ProtoId::Http => "headers",
+        ProtoId::Ldap => "vars",
+        ProtoId::Sip => "headers",
+        ProtoId::Ftp => "lines",
+        ProtoId::Smtp => "lines",
+        ProtoId::Imap => "lines",
+        ProtoId::Telnet => "lines",
+        // protogen:parsed end
+        _ => "options",
     }
 }
 
@@ -355,6 +580,10 @@ pub mod ipproto {
 
 pub mod ports {
     pub const DNS: u16 = 53;
+    /// RFC 6762 §18.
+    pub const MDNS: u16 = 5353;
+    /// RFC 4795 §2.
+    pub const LLMNR: u16 = 5355;
     pub const BOOTPS: u16 = 67;
     pub const BOOTPC: u16 = 68;
 }
@@ -371,8 +600,12 @@ mod tests {
     fn builtin_ids_keep_their_numbering() {
         assert_eq!(ProtoId::Raw.0, 0);
         assert_eq!(ProtoId::Tcp.0, 7);
-        assert_eq!(ProtoId::LinuxSll2.0, BUILTIN_COUNT - 1);
         assert_eq!(desc(ProtoId::Tcp).name, "TCP");
+        // The numbering is append-only and may have gaps; what has to hold is
+        // that every built-in stays below the count that separates the static
+        // table from the registry.
+        assert!(BUILTINS.iter().all(|p| p.0 < BUILTIN_COUNT));
+        assert!(BUILTINS.iter().all(|p| !p.is_registered()));
     }
 
     #[test]

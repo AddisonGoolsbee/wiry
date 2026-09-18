@@ -1,0 +1,60 @@
+name = "QUIC"
+id = "Quic"
+num = 79
+citation = """
+RFC 9000 §17.2 long header: a header-form bit set to 1, a fixed bit, a two-bit
+packet type, two type-specific bits, the 32-bit version, a one-octet
+destination connection id length and that id, a one-octet source connection id
+length and that id. §17.3 short header: the header-form bit clear, the fixed
+bit, a spin bit, two reserved bits, a key-phase bit and two packet-number
+length bits, followed by a destination connection id whose length is known only
+to the endpoints. Everything past the header is AEAD-protected, including the
+packet number, so it stays opaque (DEVIATIONS P7).
+"""
+min_len = 1
+header_len = "hand"
+build_len = 1
+next = "raw"
+parse_options = "hand"
+
+[[fields]]
+name = "hdr_flags"
+off = 0
+len = 8
+kind = "flags"
+flags = ["pnl0", "pnl1", "res0", "res1", "type0", "type1", "fixed", "long"]
+default = 0xc0
+
+[[fields]]
+name = "version"
+off = 8
+len = 32
+when = "is_long"
+
+[[fields]]
+name = "dcid_len"
+off = 40
+len = 8
+when = "is_long"
+
+[[fields]]
+name = "options"
+off = 48
+kind = "var_bytes"
+
+[[parents]]
+from = "udp_port"
+values = [443, 80]
+guard = "crate::layers::quic::looks_like"
+bind = 443
+
+[vector]
+source = "RFC 9000 §17.2 Initial packet header: long form, version 1, 4-octet destination connection id, empty source connection id."
+bytes = [
+  0xc0, 0x00, 0x00, 0x00, 0x01,
+  0x04, 0x11, 0x22, 0x33, 0x44,
+  0x00,
+]
+[vector.fields]
+version = 1
+dcid_len = 4

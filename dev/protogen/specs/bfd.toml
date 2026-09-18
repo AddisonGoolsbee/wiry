@@ -1,0 +1,102 @@
+name = "BFD"
+id = "Bfd"
+num = 64
+citation = """
+RFC 5880 §4.1: a three-bit version, a five-bit diagnostic code, a two-bit
+state, the P, F, C, A, D and M flags, a one-octet detect multiplier, a
+one-octet length, the two 32-bit discriminators and the three 32-bit interval
+fields in microseconds. UDP ports 3784 (single hop, RFC 5881), 4784 (multihop,
+RFC 5883) and 3785 (echo).
+"""
+min_len = 24
+header_len = 24
+
+[[fields]]
+name = "version"
+off = 0
+len = 3
+default = 1
+
+[[fields]]
+name = "diag"
+off = 3
+len = 5
+
+[[fields]]
+name = "sta"
+off = 8
+len = 2
+default = 3
+
+[[fields]]
+name = "flags"
+off = 10
+len = 6
+kind = "flags"
+flags = ["M", "D", "A", "C", "F", "P"]
+
+[[fields]]
+name = "detect_mult"
+off = 16
+len = 8
+default = 3
+
+[[fields]]
+name = "len"
+off = 24
+len = 8
+default = 24
+
+[[fields]]
+name = "my_discriminator"
+off = 32
+len = 32
+
+[[fields]]
+name = "your_discriminator"
+off = 64
+len = 32
+
+[[fields]]
+name = "min_tx_interval"
+off = 96
+len = 32
+default = 1000000
+
+[[fields]]
+name = "min_rx_interval"
+off = 128
+len = 32
+default = 1000000
+
+[[fields]]
+name = "echo_rx_interval"
+off = 160
+len = 32
+
+[[parents]]
+from = "udp_port"
+values = [3784, 3785, 4784]
+bind = 3784
+
+[vector]
+source = "RFC 5880 §4.1 control packet: version 1, state Up (3), detect multiplier 3, length 24, discriminators 1 and 2."
+bytes = [
+  0x20, 0xc0, 0x03, 0x18,
+  0x00, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x02,
+  0x00, 0x0f, 0x42, 0x40,
+  0x00, 0x0f, 0x42, 0x40,
+  0x00, 0x00, 0x00, 0x00,
+]
+[vector.fields]
+version = 1
+diag = 0
+sta = 3
+detect_mult = 3
+len = 24
+my_discriminator = 1
+your_discriminator = 2
+min_tx_interval = 1000000
+min_rx_interval = 1000000
+echo_rx_interval = 0

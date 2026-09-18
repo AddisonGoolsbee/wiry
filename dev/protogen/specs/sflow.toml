@@ -1,0 +1,75 @@
+name = "SFlow"
+id = "SFlow"
+num = 78
+module = "sflow"
+citation = """
+sFlow.org, "sFlow Version 5" (July 2004), §5.1 datagram format: a 32-bit
+version (5), a 32-bit address type (1 IPv4, 2 IPv6), the agent address, a
+32-bit sub-agent id, a 32-bit datagram sequence number, the 32-bit agent
+uptime in milliseconds and a 32-bit sample count. Only the IPv4 agent-address
+form has a fixed header length; the samples that follow are an XDR array and
+stay in the payload (DEVIATIONS P3).
+"""
+min_len = 28
+header_len = "hand"
+build_len = 28
+
+[[fields]]
+name = "version"
+off = 0
+len = 32
+default = 5
+
+[[fields]]
+name = "agent_address_type"
+off = 32
+len = 32
+default = 1
+
+[[fields]]
+name = "agent_address"
+off = 64
+kind = "ipv4"
+
+[[fields]]
+name = "sub_agent_id"
+off = 96
+len = 32
+
+[[fields]]
+name = "sequence_number"
+off = 128
+len = 32
+
+[[fields]]
+name = "sysuptime"
+off = 160
+len = 32
+
+[[fields]]
+name = "num_samples"
+off = 192
+len = 32
+
+[[parents]]
+from = "udp_port"
+values = [6343]
+
+[vector]
+source = "sFlow v5 §5.1 datagram header, hand-built: agent 10.0.0.1, sequence 1, one sample."
+bytes = [
+  0x00, 0x00, 0x00, 0x05,
+  0x00, 0x00, 0x00, 0x01,
+  0x0a, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x03, 0xe8,
+  0x00, 0x00, 0x00, 0x01,
+]
+[vector.fields]
+version = 5
+agent_address_type = 1
+sub_agent_id = 0
+sequence_number = 1
+sysuptime = 1000
+num_samples = 1

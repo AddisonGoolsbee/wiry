@@ -1,0 +1,48 @@
+name = "BGPHeader"
+id = "Bgp"
+num = 61
+module = "bgp"
+citation = """
+RFC 4271 §4.1: every BGP message opens with a 16-octet marker that is all ones,
+a 16-bit length covering the whole message and a one-octet type (1 OPEN,
+2 UPDATE, 3 NOTIFICATION, 4 KEEPALIVE; 5 ROUTE-REFRESH is RFC 2918). The
+per-type bodies of §4.2 onwards are left opaque.
+"""
+min_len = 19
+header_len = 19
+content_len = "hand"
+
+[[fields]]
+name = "marker"
+off = 0
+len = 128
+kind = "bytes"
+default_bytes = [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]
+
+[[fields]]
+name = "len"
+off = 128
+len = 16
+default = 19
+
+[[fields]]
+name = "type"
+off = 144
+len = 8
+default = 4
+
+[[parents]]
+from = "tcp_port"
+values = [179]
+guard = "crate::layers::bgp::looks_like"
+
+[vector]
+source = "RFC 4271 §4.4 KEEPALIVE: the 16-octet marker, length 19, type 4."
+bytes = [
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0x00, 0x13, 0x04,
+]
+[vector.fields]
+len = 19
+type = 4

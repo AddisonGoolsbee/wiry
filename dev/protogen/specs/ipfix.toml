@@ -1,0 +1,60 @@
+name = "IPFIX"
+id = "Ipfix"
+num = 77
+citation = """
+RFC 7011 §3.1: a 16-bit version (10), a 16-bit length covering the whole
+message, a 32-bit export time in seconds, a 32-bit sequence number and a 32-bit
+observation domain id. The Sets that follow (§3.3) need the template the
+exporter sent earlier, so they stay in the payload (DEVIATIONS P6).
+"""
+min_len = 16
+header_len = 16
+content_len = "hand"
+
+[[fields]]
+name = "version"
+off = 0
+len = 16
+default = 10
+
+[[fields]]
+name = "length"
+off = 16
+len = 16
+default = 16
+
+[[fields]]
+name = "exportTime"
+off = 32
+len = 32
+
+[[fields]]
+name = "sequenceNumber"
+off = 64
+len = 32
+
+[[fields]]
+name = "observationDomainID"
+off = 96
+len = 32
+
+[[parents]]
+from = "udp_port"
+values = [4739, 2055, 9995, 9996]
+guard = "crate::layers::ipfix::looks_like"
+bind = 4739
+
+[vector]
+source = "RFC 7011 §3.1 message header, hand-built: version 10, length 16, sequence 1."
+bytes = [
+  0x00, 0x0a, 0x00, 0x10,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x00,
+]
+[vector.fields]
+version = 10
+length = 16
+exportTime = 0
+sequenceNumber = 1
+observationDomainID = 0

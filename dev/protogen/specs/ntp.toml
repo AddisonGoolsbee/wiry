@@ -1,0 +1,109 @@
+name = "NTP"
+id = "Ntp"
+num = 65
+citation = """
+RFC 5905 §7.3: a two-bit leap indicator, a three-bit version, a three-bit mode,
+a one-octet stratum, a one-octet poll exponent, a one-octet precision exponent,
+the 32-bit root delay and root dispersion in NTP short format, the 32-bit
+reference id, and the reference, origin, receive and transmit timestamps in
+64-bit NTP timestamp format. Poll and precision are signed exponents on the
+wire and are read unsigned here (DEVIATIONS P4).
+"""
+min_len = 48
+header_len = 48
+
+[[fields]]
+name = "leap"
+off = 0
+len = 2
+
+[[fields]]
+name = "version"
+off = 2
+len = 3
+default = 4
+
+[[fields]]
+name = "mode"
+off = 5
+len = 3
+default = 3
+
+[[fields]]
+name = "stratum"
+off = 8
+len = 8
+default = 2
+
+[[fields]]
+name = "poll"
+off = 16
+len = 8
+default = 6
+
+[[fields]]
+name = "precision"
+off = 24
+len = 8
+
+[[fields]]
+name = "delay"
+off = 32
+len = 32
+
+[[fields]]
+name = "dispersion"
+off = 64
+len = 32
+
+[[fields]]
+name = "id"
+off = 96
+len = 32
+
+[[fields]]
+name = "ref"
+off = 128
+len = 64
+
+[[fields]]
+name = "orig"
+off = 192
+len = 64
+
+[[fields]]
+name = "recv"
+off = 256
+len = 64
+
+[[fields]]
+name = "sent"
+off = 320
+len = 64
+
+[[parents]]
+from = "udp_port"
+values = [123]
+
+[vector]
+source = "RFC 5905 §7.3 client packet: version 4, mode 3 (client), stratum 0, poll 6, all timestamps zero."
+bytes = [
+  0x23, 0x00, 0x06, 0xec,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]
+[vector.fields]
+leap = 0
+version = 4
+mode = 3
+stratum = 0
+poll = 6
+precision = 236
+delay = 0
+dispersion = 0
+id = 0
