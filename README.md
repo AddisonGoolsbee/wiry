@@ -288,9 +288,9 @@ that ratio is the coverage statement, not the pass count. A skip is a scope
 boundary — most often a layer we do not implement, a scapy internal we have no
 equivalent for, a call we refuse by design, or a test whose `~` marker asks for
 a Linux host, root or tshark. A refusal counts as a skip rather than a failure,
-which is a choice the harness makes and `dev/scapy_suite.py` shows.
-Of the 4 failures, 1 needs
-Windows, 1 asserts by patching a scapy internal we do not have, and 2 are
+which is a choice the harness makes and `dev/scapy_suite.py` shows. Of the 4
+failures, 1 needs Windows, 1 asserts by patching a scapy internal we do not
+have, and 2 are
 generator differences [DEVIATIONS.md](DEVIATIONS.md) E21 states outright. Every
 gap is enumerated there.
 
