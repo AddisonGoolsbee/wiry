@@ -204,7 +204,14 @@ Beyond parity:
   machine behind the `live` feature, raising `CaptureUnavailable` without it.
   Reply matching is pure logic in `answers.rs`, unit-testable offline. Privileged
   round-trip checks live in `dev/live/`, never in `tests/`.
-- **Fuzzing.** Seven libFuzzer targets plus seeded property tests on stable. All
+- **Fragmentation.** `fragment`/`defragment`/`defrag` (RFC 791 §3.2) and their
+  IPv6 pair (RFC 8200 §4.5) live in `frag.rs`. Reassembly over a capture is a
+  bulk path: one crossing with the GIL released, and the suite asserts it agrees
+  with the list path octet for octet. Every bound it keeps is named in the
+  module, overlap resolves first-writer-wins, and DEVIATIONS E18 says so out
+  loud, because operating systems disagree about overlap and that disagreement
+  is what fragmentation-based IDS evasion is built on.
+- **Fuzzing.** Eight libFuzzer targets plus seeded property tests on stable. All
   three crates forbid unsafe.
 - **Two parity harnesses.** `dev/parity_check.py` covers dissection over real
   captures; `dev/build_matrix.py` enumerates construction. The second exists

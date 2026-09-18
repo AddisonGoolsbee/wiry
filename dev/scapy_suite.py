@@ -29,7 +29,7 @@ OUT_OF_SCOPE = {
     "srloop", "L3socket", "L2socket", "get_if_hwaddr", "getmacbyip",
     "fuzz", "RandIP", "RandShort", "RandNum", "RandString", "corrupt_bytes",
     "Automaton", "answering_machine", "load_contrib", "load_layer",
-    "TCPSession", "IPSession", "wireshark", "tcpdump", "hexdiff",
+    "TCPSession", "IPSession", "wireshark", "tcpdump",
     "sprintf", "pdfdump", "psdump", "voip_play", "traceroute", "arping",
 }
 

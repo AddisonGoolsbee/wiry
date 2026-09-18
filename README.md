@@ -89,7 +89,13 @@ from wiry import *
 p = Ether(dst="00:11:22:33:44:55")/IP(dst="10.0.0.2")/TCP(dport=80, flags="S")
 raw(p)                      # checksums and lengths filled in
 p[TCP].dport = 443          # mutate; checksums recompute
+p.command()                 # the expression that rebuilds it, byte for byte
 ```
+
+`fragment(pkt, 1480)` splits a datagram per RFC 791 §3.2 and `defragment(cap)`
+puts one back together, over a whole capture in a single crossing. Reassembly
+buffers attacker-controlled bytes, so its bounds and its overlap rule are
+stated in [DEVIATIONS.md](DEVIATIONS.md) E18 rather than left to be discovered.
 
 Capture and injection work too: `sniff`, `send`, `sendp`, `sr`, `sr1`, `srp`,
 `srp1` and `AsyncSniffer`, with scapy's arguments and semantics. Two limits, both
