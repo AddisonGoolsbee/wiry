@@ -658,7 +658,7 @@ def render_registration(specs: list[dict]) -> dict[Path, list[tuple[str, str]]]:
         f"ProtoId::{s['id']}," for s in sorted(specs, key=lambda s: s["num"])
     )
     descs = "\n".join(
-        f"ProtoId::{s['id']} => &{s['module']}::DESC,"
+        f"t[ProtoId::{s['id']}.0 as usize] = &{s['module']}::DESC;"
         for s in sorted(specs, key=lambda s: s["num"])
     )
     acc = []

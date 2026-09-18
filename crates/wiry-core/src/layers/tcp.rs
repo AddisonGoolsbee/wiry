@@ -46,9 +46,8 @@ fn next(hdr: &[u8]) -> Next {
         return Next::Proto(ProtoId::Dns);
     }
     let payload = hdr.get(header_len(hdr)..).unwrap_or(&[]);
-    // A bare ACK carries no message to dissect, and the dissection walk would
-    // discard the answer anyway; skipping the lookup keeps the common segment
-    // as cheap as it was before this table existed.
+    // A bare ACK carries no message to dissect, and Telnet's arm has no guard
+    // to reject one.
     if payload.is_empty() {
         return Next::Raw;
     }

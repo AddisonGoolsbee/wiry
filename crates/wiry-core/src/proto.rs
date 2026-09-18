@@ -273,103 +273,109 @@ pub fn desc(id: ProtoId) -> &'static ProtoDesc {
     }
 }
 
-fn builtin_desc(id: ProtoId) -> &'static ProtoDesc {
+/// The dissection walk asks for a descriptor once per layer per packet, so
+/// this is an index and not a match over every id the build registers.
+static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     use crate::layers::*;
-    match id {
-        ProtoId::Padding => &raw::PADDING_DESC,
-        ProtoId::Ether => &ether::DESC,
-        ProtoId::Dot1Q => &dot1q::DESC,
-        ProtoId::Arp => &arp::DESC,
-        ProtoId::Ipv4 => &ipv4::DESC,
-        ProtoId::Ipv6 => &ipv6::DESC,
-        ProtoId::Tcp => &tcp::DESC,
-        ProtoId::Udp => &udp::DESC,
-        ProtoId::Icmp => &icmp::DESC,
-        ProtoId::Icmpv6 => &icmpv6::DESC,
-        ProtoId::Dns => &dns::DESC,
-        ProtoId::Bootp => &bootp::DESC,
-        ProtoId::Dhcp => &bootp::DHCP_DESC,
-        ProtoId::Null => &null::DESC,
-        ProtoId::LinuxSll => &linux_sll::DESC,
-        ProtoId::LinuxSll2 => &linux_sll::DESC_V2,
-        ProtoId::HopByHop => &ipv6_ext::HOP_BY_HOP_DESC,
-        ProtoId::Routing => &ipv6_ext::ROUTING_DESC,
-        ProtoId::Fragment => &ipv6_ext::FRAGMENT_DESC,
-        ProtoId::DestOpt => &ipv6_ext::DEST_OPT_DESC,
-        ProtoId::Gre => &gre::DESC,
-        ProtoId::Vxlan => &vxlan::DESC,
-        ProtoId::Geneve => &geneve::DESC,
-        ProtoId::Mpls => &mpls::DESC,
-        ProtoId::PppoeDisc => &pppoe::DISC_DESC,
-        ProtoId::Pppoe => &pppoe::DESC,
-        ProtoId::Ppp => &pppoe::PPP_DESC,
-        ProtoId::GtpU => &gtp::DESC,
-        ProtoId::ErspanII => &erspan::DESC_II,
-        ProtoId::ErspanIII => &erspan::DESC_III,
-        // protogen:desc begin
-        ProtoId::Llc => &llc::DESC,
-        ProtoId::Snap => &snap::DESC,
-        ProtoId::Stp => &stp::DESC,
-        ProtoId::Lldp => &lldp::DESC,
-        ProtoId::Cdp => &cdp::DESC,
-        ProtoId::RadioTap => &radiotap::DESC,
-        ProtoId::Dot11 => &dot11::DESC,
-        ProtoId::Dot11Beacon => &dot11beacon::DESC,
-        ProtoId::Dot11ProbeReq => &dot11probereq::DESC,
-        ProtoId::Dot11ProbeResp => &dot11proberesp::DESC,
-        ProtoId::Dot11Auth => &dot11auth::DESC,
-        ProtoId::Dot11AssoReq => &dot11assoreq::DESC,
-        ProtoId::Dot11AssoResp => &dot11assoresp::DESC,
-        ProtoId::Sctp => &sctp::DESC,
-        ProtoId::Igmp => &igmp::DESC,
-        ProtoId::Icmpv6NdRs => &icmpv6_rs::DESC,
-        ProtoId::Icmpv6NdRa => &icmpv6_ra::DESC,
-        ProtoId::Icmpv6NdNs => &icmpv6_ns::DESC,
-        ProtoId::Icmpv6NdNa => &icmpv6_na::DESC,
-        ProtoId::Icmpv6NdRedirect => &icmpv6_redirect::DESC,
-        ProtoId::Icmpv6MlQuery => &mld_query::DESC,
-        ProtoId::Icmpv6MlReport => &mld_report::DESC,
-        ProtoId::Icmpv6MlDone => &mld_done::DESC,
-        ProtoId::Icmpv6MlReport2 => &mld_report2::DESC,
-        ProtoId::Esp => &esp::DESC,
-        ProtoId::Ah => &ah::DESC,
-        ProtoId::Ospf => &ospf::DESC,
-        ProtoId::Rip => &rip::DESC,
-        ProtoId::Bgp => &bgp::DESC,
-        ProtoId::Vrrp => &vrrp::DESC,
-        ProtoId::Hsrp => &hsrp::DESC,
-        ProtoId::Bfd => &bfd::DESC,
-        ProtoId::Ntp => &ntp::DESC,
-        ProtoId::Dhcp6 => &dhcp6::DESC,
-        ProtoId::Snmp => &snmp::DESC,
-        ProtoId::Tftp => &tftp::DESC,
-        ProtoId::Syslog => &syslog::DESC,
-        ProtoId::Nbns => &nbns::DESC,
-        ProtoId::NbtSession => &nbtsession::DESC,
-        ProtoId::Radius => &radius::DESC,
-        ProtoId::Rtp => &rtp::DESC,
-        ProtoId::Rtcp => &rtcp::DESC,
-        ProtoId::NetflowV5 => &netflow5::DESC,
-        ProtoId::NetflowV9 => &netflow9::DESC,
-        ProtoId::Ipfix => &ipfix::DESC,
-        ProtoId::SFlow => &sflow::DESC,
-        ProtoId::Quic => &quic::DESC,
-        ProtoId::WireGuard => &wireguard::DESC,
-        ProtoId::Tls => &tls::DESC,
-        ProtoId::Http => &http::DESC,
-        ProtoId::Ssh => &ssh::DESC,
-        ProtoId::Mqtt => &mqtt::DESC,
-        ProtoId::Modbus => &modbus::DESC,
-        ProtoId::Smb2 => &smb2::DESC,
-        ProtoId::Ldap => &ldap::DESC,
-        ProtoId::Sip => &sip::DESC,
-        ProtoId::Ftp => &ftp::DESC,
-        ProtoId::Smtp => &smtp::DESC,
-        ProtoId::Imap => &imap::DESC,
-        ProtoId::Telnet => &telnet::DESC,
-        // protogen:desc end
-        _ => &raw::DESC,
-    }
+    let mut t: [&ProtoDesc; BUILTIN_COUNT as usize] = [&raw::DESC; BUILTIN_COUNT as usize];
+    t[ProtoId::Padding.0 as usize] = &raw::PADDING_DESC;
+    t[ProtoId::Ether.0 as usize] = &ether::DESC;
+    t[ProtoId::Dot1Q.0 as usize] = &dot1q::DESC;
+    t[ProtoId::Arp.0 as usize] = &arp::DESC;
+    t[ProtoId::Ipv4.0 as usize] = &ipv4::DESC;
+    t[ProtoId::Ipv6.0 as usize] = &ipv6::DESC;
+    t[ProtoId::Tcp.0 as usize] = &tcp::DESC;
+    t[ProtoId::Udp.0 as usize] = &udp::DESC;
+    t[ProtoId::Icmp.0 as usize] = &icmp::DESC;
+    t[ProtoId::Icmpv6.0 as usize] = &icmpv6::DESC;
+    t[ProtoId::Dns.0 as usize] = &dns::DESC;
+    t[ProtoId::Bootp.0 as usize] = &bootp::DESC;
+    t[ProtoId::Dhcp.0 as usize] = &bootp::DHCP_DESC;
+    t[ProtoId::Null.0 as usize] = &null::DESC;
+    t[ProtoId::LinuxSll.0 as usize] = &linux_sll::DESC;
+    t[ProtoId::LinuxSll2.0 as usize] = &linux_sll::DESC_V2;
+    t[ProtoId::HopByHop.0 as usize] = &ipv6_ext::HOP_BY_HOP_DESC;
+    t[ProtoId::Routing.0 as usize] = &ipv6_ext::ROUTING_DESC;
+    t[ProtoId::Fragment.0 as usize] = &ipv6_ext::FRAGMENT_DESC;
+    t[ProtoId::DestOpt.0 as usize] = &ipv6_ext::DEST_OPT_DESC;
+    t[ProtoId::Gre.0 as usize] = &gre::DESC;
+    t[ProtoId::Vxlan.0 as usize] = &vxlan::DESC;
+    t[ProtoId::Geneve.0 as usize] = &geneve::DESC;
+    t[ProtoId::Mpls.0 as usize] = &mpls::DESC;
+    t[ProtoId::PppoeDisc.0 as usize] = &pppoe::DISC_DESC;
+    t[ProtoId::Pppoe.0 as usize] = &pppoe::DESC;
+    t[ProtoId::Ppp.0 as usize] = &pppoe::PPP_DESC;
+    t[ProtoId::GtpU.0 as usize] = &gtp::DESC;
+    t[ProtoId::ErspanII.0 as usize] = &erspan::DESC_II;
+    t[ProtoId::ErspanIII.0 as usize] = &erspan::DESC_III;
+    // protogen:desc begin
+    t[ProtoId::Llc.0 as usize] = &llc::DESC;
+    t[ProtoId::Snap.0 as usize] = &snap::DESC;
+    t[ProtoId::Stp.0 as usize] = &stp::DESC;
+    t[ProtoId::Lldp.0 as usize] = &lldp::DESC;
+    t[ProtoId::Cdp.0 as usize] = &cdp::DESC;
+    t[ProtoId::RadioTap.0 as usize] = &radiotap::DESC;
+    t[ProtoId::Dot11.0 as usize] = &dot11::DESC;
+    t[ProtoId::Dot11Beacon.0 as usize] = &dot11beacon::DESC;
+    t[ProtoId::Dot11ProbeReq.0 as usize] = &dot11probereq::DESC;
+    t[ProtoId::Dot11ProbeResp.0 as usize] = &dot11proberesp::DESC;
+    t[ProtoId::Dot11Auth.0 as usize] = &dot11auth::DESC;
+    t[ProtoId::Dot11AssoReq.0 as usize] = &dot11assoreq::DESC;
+    t[ProtoId::Dot11AssoResp.0 as usize] = &dot11assoresp::DESC;
+    t[ProtoId::Sctp.0 as usize] = &sctp::DESC;
+    t[ProtoId::Igmp.0 as usize] = &igmp::DESC;
+    t[ProtoId::Icmpv6NdRs.0 as usize] = &icmpv6_rs::DESC;
+    t[ProtoId::Icmpv6NdRa.0 as usize] = &icmpv6_ra::DESC;
+    t[ProtoId::Icmpv6NdNs.0 as usize] = &icmpv6_ns::DESC;
+    t[ProtoId::Icmpv6NdNa.0 as usize] = &icmpv6_na::DESC;
+    t[ProtoId::Icmpv6NdRedirect.0 as usize] = &icmpv6_redirect::DESC;
+    t[ProtoId::Icmpv6MlQuery.0 as usize] = &mld_query::DESC;
+    t[ProtoId::Icmpv6MlReport.0 as usize] = &mld_report::DESC;
+    t[ProtoId::Icmpv6MlDone.0 as usize] = &mld_done::DESC;
+    t[ProtoId::Icmpv6MlReport2.0 as usize] = &mld_report2::DESC;
+    t[ProtoId::Esp.0 as usize] = &esp::DESC;
+    t[ProtoId::Ah.0 as usize] = &ah::DESC;
+    t[ProtoId::Ospf.0 as usize] = &ospf::DESC;
+    t[ProtoId::Rip.0 as usize] = &rip::DESC;
+    t[ProtoId::Bgp.0 as usize] = &bgp::DESC;
+    t[ProtoId::Vrrp.0 as usize] = &vrrp::DESC;
+    t[ProtoId::Hsrp.0 as usize] = &hsrp::DESC;
+    t[ProtoId::Bfd.0 as usize] = &bfd::DESC;
+    t[ProtoId::Ntp.0 as usize] = &ntp::DESC;
+    t[ProtoId::Dhcp6.0 as usize] = &dhcp6::DESC;
+    t[ProtoId::Snmp.0 as usize] = &snmp::DESC;
+    t[ProtoId::Tftp.0 as usize] = &tftp::DESC;
+    t[ProtoId::Syslog.0 as usize] = &syslog::DESC;
+    t[ProtoId::Nbns.0 as usize] = &nbns::DESC;
+    t[ProtoId::NbtSession.0 as usize] = &nbtsession::DESC;
+    t[ProtoId::Radius.0 as usize] = &radius::DESC;
+    t[ProtoId::Rtp.0 as usize] = &rtp::DESC;
+    t[ProtoId::Rtcp.0 as usize] = &rtcp::DESC;
+    t[ProtoId::NetflowV5.0 as usize] = &netflow5::DESC;
+    t[ProtoId::NetflowV9.0 as usize] = &netflow9::DESC;
+    t[ProtoId::Ipfix.0 as usize] = &ipfix::DESC;
+    t[ProtoId::SFlow.0 as usize] = &sflow::DESC;
+    t[ProtoId::Quic.0 as usize] = &quic::DESC;
+    t[ProtoId::WireGuard.0 as usize] = &wireguard::DESC;
+    t[ProtoId::Tls.0 as usize] = &tls::DESC;
+    t[ProtoId::Http.0 as usize] = &http::DESC;
+    t[ProtoId::Ssh.0 as usize] = &ssh::DESC;
+    t[ProtoId::Mqtt.0 as usize] = &mqtt::DESC;
+    t[ProtoId::Modbus.0 as usize] = &modbus::DESC;
+    t[ProtoId::Smb2.0 as usize] = &smb2::DESC;
+    t[ProtoId::Ldap.0 as usize] = &ldap::DESC;
+    t[ProtoId::Sip.0 as usize] = &sip::DESC;
+    t[ProtoId::Ftp.0 as usize] = &ftp::DESC;
+    t[ProtoId::Smtp.0 as usize] = &smtp::DESC;
+    t[ProtoId::Imap.0 as usize] = &imap::DESC;
+    t[ProtoId::Telnet.0 as usize] = &telnet::DESC;
+    // protogen:desc end
+    t
+};
+
+#[inline]
+fn builtin_desc(id: ProtoId) -> &'static ProtoDesc {
+    BUILTIN_DESCS[id.0 as usize]
 }
 
 pub fn by_name(name: &str) -> Option<ProtoId> {
