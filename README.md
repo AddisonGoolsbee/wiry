@@ -41,9 +41,8 @@ BFD, NTP, DHCPv6, SNMP, TFTP, syslog, NBNS, NBT, RADIUS, RTP, RTCP, NetFlow v5
 and v9, IPFIX, sFlow, QUIC, WireGuard, TLS, HTTP, SSH, MQTT, Modbus/TCP, SMB2,
 LDAP, SIP, FTP, SMTP, IMAP and Telnet.
 
-The method surface is narrower too. TCP stream reassembly is absent: `sessions()`
-groups packets into flows but never reorders or rebuilds a stream. Most of what
-else scapy's `Packet` carries is its own internal machinery, `do_build`,
+The method surface is narrower too. Most of what
+scapy's `Packet` carries is its own internal machinery, `do_build`,
 `post_dissect`, `self_build` and the rest, which exists because scapy assembles
 an object graph per packet. wiry does not, so it has no equivalent and needs
 none.
@@ -227,6 +226,7 @@ cap = rdpcap("capture.pcap")
 cap.sprintf("%IP.src% > %IP.dst%")   # the whole capture, one pass
 cap.summary()
 cap.sessions()                       # flows, keyed by address tuple
+cap.streams()                        # what the flows said, in sequence order
 ```
 
 `sprintf` over a `PacketList` resolves the fields the format names as columns, so
@@ -236,7 +236,18 @@ when you ask for that flow. Give either one a callback — `prn`, or a
 `session_extractor` — and the per-packet crossing is back, because that is what
 the callback asked for.
 
-Flows, not streams. wiry does not reassemble TCP.
+`sessions()` says which packets belong to a flow; `streams()` says what the flow
+said. It reassembles every TCP stream in one crossing — octets in sequence order,
+retransmissions dropped, out-of-order arrival put back, holes named rather than
+filled in — and hands back each direction with the provenance to map a stream
+offset to the packet it came from. `sniff(offline=..., session=TCPSession)` takes
+the scapy-shaped route to the same engine.
+
+That is what makes the application layers reach past one segment. On
+`bigFlows.pcap`, 37% of the complete HTTP messages and 29% of the complete TLS
+records span more than one segment, and no single-packet dissector can see any of
+them. The bounds it works inside, and the rule it resolves overlapping octets by,
+are stated in `crates/wiry-core/src/stream.rs` and in DEVIATIONS E25.
 
 ## Your own layers
 

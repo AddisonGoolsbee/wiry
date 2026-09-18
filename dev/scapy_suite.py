@@ -28,8 +28,8 @@ import wiry
 # `L3socket`/`L2socket` are the classes, not `conf.l3socket`: wiry has no socket
 # object to hand in or subclass, and the knob that would hold one says so.
 OUT_OF_SCOPE = {
-    "Automaton", "BER_Exception", "IPSession", "L2socket", "L3socket",
-    "TCPSession", "answering_machine", "load_contrib", "load_layer",
+    "Automaton", "BER_Exception", "L2socket", "L3socket",
+    "answering_machine", "load_contrib", "load_layer",
     "pdfdump", "psdump", "tcpdump", "voip_play", "wireshark",
 }
 

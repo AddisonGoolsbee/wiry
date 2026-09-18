@@ -1197,7 +1197,8 @@ fn reassembled_streams(frames: &[Vec<u8>]) -> Vec<stream::Stream> {
 /// noisy, and a quadratic term would show up as 16 or more.
 #[test]
 fn no_arrival_order_makes_an_insert_cost_what_is_already_held() {
-    let shapes: &[(&str, fn(usize, usize) -> Vec<Vec<u8>>)] = &[
+    type Shape = fn(usize, usize) -> Vec<Vec<u8>>;
+    let shapes: &[(&str, Shape)] = &[
         // Descending, abutting: every arrival lands in front of everything
         // held, which is the shape that made a merging buffer quadratic.
         ("descending", |n, _| {
@@ -1314,7 +1315,7 @@ fn a_hostile_stream_cannot_outgrow_what_it_sent() {
 /// A truncated segment is normal on a snaplen-clipped capture.
 #[test]
 fn a_truncated_segment_reassembles_what_it_managed() {
-    let full = tcp_segment(1, 1234, 80, 1, 0x18, &vec![0x41u8; 200]);
+    let full = tcp_segment(1, 1234, 80, 1, 0x18, &[0x41u8; 200]);
     for cut in 0..full.len() {
         let frames = vec![full[..cut].to_vec(), full.clone()];
         let out = reassembled_streams(&frames);
