@@ -773,7 +773,10 @@ mod tests {
             }
             assert_eq!(desc(id).name, "Raw", "id {} is a gap that is not Raw", id.0);
         }
-        for n in [BUILTIN_COUNT, BUILTIN_COUNT + 500, u16::MAX] {
+        // Not BUILTIN_COUNT itself: that is the first registry slot, and the
+        // registry is process-global and append-only, so another test's
+        // registration owns it in a whole-suite run but not a filtered one.
+        for n in [BUILTIN_COUNT + 500, u16::MAX] {
             assert_eq!(desc(ProtoId(n)).name, "Raw", "id {n}");
         }
         let id = register("GapDemo".into(), vec![uint("a", 0, 8)], 1).unwrap();

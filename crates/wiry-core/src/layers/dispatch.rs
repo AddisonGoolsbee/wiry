@@ -295,4 +295,25 @@ mod tests {
             }
         }
     }
+
+    /// The reverse map is what stacking a layer writes, so a port it
+    /// names that the gate does not claim would build a packet the
+    /// dissector cannot read back.
+    #[test]
+    fn every_bound_port_is_still_claimed() {
+        for id in crate::proto::builtins() {
+            if let Some(v) = super::by_udp_port_of(id) {
+                assert!(
+                    super::claimed(&super::UDP_PORT_CLAIMED, v),
+                    "by_udp_port {v}"
+                );
+            }
+            if let Some(v) = super::by_tcp_port_of(id) {
+                assert!(
+                    super::claimed(&super::TCP_PORT_CLAIMED, v),
+                    "by_tcp_port {v}"
+                );
+            }
+        }
+    }
 }
