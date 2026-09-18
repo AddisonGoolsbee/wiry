@@ -363,6 +363,90 @@ pub fn count(buf: &[u8]) -> Result<usize, PcapngError> {
     Ok(Reader::new(buf)?.count())
 }
 
+/// The captured length has to fit the block's own 32-bit total length, framing
+/// and the fixed part of the body included.
+pub const MAX_CAPLEN: usize = (u32::MAX - 36) as usize & !3;
+
+/// Little-endian throughout: the byte-order magic tells the reader, so there is
+/// nothing to gain from writing a section in the other order.
+fn open_block(out: &mut Vec<u8>, btype: u32, body_len: usize) -> u32 {
+    let total = (12 + pad4(body_len)) as u32;
+    out.extend_from_slice(&btype.to_le_bytes());
+    out.extend_from_slice(&total.to_le_bytes());
+    total
+}
+
+/// The body pads to four octets and the total length repeats at the end, which
+/// is what lets a reader walk the file backwards.
+fn close_block(out: &mut Vec<u8>, body_len: usize, total: u32) {
+    out.resize(out.len() + pad4(body_len) - body_len, 0);
+    out.extend_from_slice(&total.to_le_bytes());
+}
+
+fn write_block(out: &mut Vec<u8>, btype: u32, body: &[u8]) {
+    let total = open_block(out, btype, body.len());
+    out.extend_from_slice(body);
+    close_block(out, body.len(), total);
+}
+
+pub fn write_shb(out: &mut Vec<u8>) {
+    let mut body = Vec::with_capacity(16);
+    body.extend_from_slice(&BYTE_ORDER_MAGIC.to_le_bytes());
+    body.extend_from_slice(&1u16.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    // Section length unknown: a stream writer does not know it yet, and a
+    // reader that trusted a stale one would stop early.
+    body.extend_from_slice(&(-1i64).to_le_bytes());
+    write_block(out, BLOCK_SHB, &body);
+}
+
+/// The link type is 16 bits here, unlike pcap's 32.
+pub fn write_idb(out: &mut Vec<u8>, linktype: u32, snaplen: u32, nanos: bool) {
+    let mut body = Vec::with_capacity(24);
+    body.extend_from_slice(&(linktype as u16).to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.extend_from_slice(&snaplen.to_le_bytes());
+    // 10^-6 is the default, so only the other resolution needs saying.
+    if nanos {
+        body.extend_from_slice(&OPT_IF_TSRESOL.to_le_bytes());
+        body.extend_from_slice(&1u16.to_le_bytes());
+        body.extend_from_slice(&[9, 0, 0, 0]);
+        body.extend_from_slice(&OPT_END.to_le_bytes());
+        body.extend_from_slice(&0u16.to_le_bytes());
+    }
+    write_block(out, BLOCK_IDB, &body);
+}
+
+pub fn write_epb(
+    out: &mut Vec<u8>,
+    iface: u32,
+    ts_sec: u32,
+    ts_frac: u32,
+    data: &[u8],
+    origlen: u32,
+    nanos: bool,
+) {
+    let data = &data[..data.len().min(MAX_CAPLEN)];
+    let caplen = data.len() as u32;
+    let tsresol = if nanos {
+        1_000_000_000u64
+    } else {
+        DEFAULT_TSRESOL
+    };
+    let ticks = (ts_sec as u64)
+        .saturating_mul(tsresol)
+        .saturating_add(ts_frac as u64);
+    let body_len = 20 + data.len();
+    let total = open_block(out, BLOCK_EPB, body_len);
+    out.extend_from_slice(&iface.to_le_bytes());
+    out.extend_from_slice(&((ticks >> 32) as u32).to_le_bytes());
+    out.extend_from_slice(&(ticks as u32).to_le_bytes());
+    out.extend_from_slice(&caplen.to_le_bytes());
+    out.extend_from_slice(&origlen.max(caplen).to_le_bytes());
+    out.extend_from_slice(data);
+    close_block(out, body_len, total);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -610,7 +694,7 @@ mod tests {
         assert!(is_pcapng(&minimal(true, None, 0)));
 
         let mut classic = Vec::new();
-        crate::pcap::write_header(&mut classic, linktype::ETHERNET, 65535);
+        crate::pcap::write_header(&mut classic, linktype::ETHERNET, 65535, false);
         assert!(!is_pcapng(&classic));
         assert!(!is_pcapng(&[0u8; 64]));
         assert!(!is_pcapng(&[0x0a, 0x0d, 0x0d]));
@@ -682,6 +766,66 @@ mod tests {
         assert_eq!(recs[0].ts_sec, 1);
         assert_eq!(recs[1].ts_sec, 7);
         assert_eq!(recs[1].data, &[0x5a; 8]);
+    }
+
+    fn written(nanos: bool, recs: &[(u32, u32, &[u8], u32)]) -> Vec<u8> {
+        let mut v = Vec::new();
+        write_shb(&mut v);
+        write_idb(&mut v, linktype::ETHERNET, 65535, nanos);
+        for (s, f, d, o) in recs {
+            write_epb(&mut v, 0, *s, *f, d, *o, nanos);
+        }
+        v
+    }
+
+    #[test]
+    fn what_we_write_our_own_reader_reads_back() {
+        let v = written(
+            false,
+            &[(1, 2, &[0xaa; 60], 60), (3, 400_000, &[0xbb; 13], 20)],
+        );
+        let r = Reader::new(&v).unwrap();
+        assert!(!r.header.swapped);
+        assert_eq!(r.header.linktype, linktype::ETHERNET);
+        assert_eq!(r.header.tsresol, DEFAULT_TSRESOL);
+
+        let recs: Vec<_> = Reader::new(&v).unwrap().collect();
+        assert_eq!(recs.len(), 2);
+        assert_eq!((recs[0].ts_sec, recs[0].ts_frac), (1, 2));
+        assert_eq!(recs[0].data, &[0xaa; 60]);
+        assert_eq!((recs[1].ts_sec, recs[1].ts_frac), (3, 400_000));
+        assert_eq!((recs[1].caplen, recs[1].origlen), (13, 20));
+        assert_eq!(recs[1].data, &[0xbb; 13]);
+    }
+
+    #[test]
+    fn every_block_is_padded_to_four_bytes_and_ends_with_its_length() {
+        for n in 0..9usize {
+            let v = written(false, &[(0, 0, &vec![0x5a; n], n as u32)]);
+            assert_eq!(v.len() % 4, 0, "{n}-byte packet left an unpadded file");
+            // SHB(28) + IDB(20) + EPB(32 + padded data).
+            assert_eq!(v.len(), 28 + 20 + 32 + pad4(n));
+            let recs: Vec<_> = Reader::new(&v).unwrap().collect();
+            assert_eq!(recs.len(), 1);
+            assert_eq!(recs[0].data, &vec![0x5a; n][..]);
+        }
+    }
+
+    #[test]
+    fn nanosecond_resolution_is_declared_and_survives() {
+        let v = written(true, &[(7, 123_456_789, &[0xcc; 4], 4)]);
+        let r = Reader::new(&v).unwrap();
+        assert_eq!(r.header.tsresol, 1_000_000_000);
+        assert!(r.header.nanos());
+        let rec = Reader::new(&v).unwrap().next().unwrap();
+        assert_eq!((rec.ts_sec, rec.ts_frac), (7, 123_456_789));
+    }
+
+    #[test]
+    fn the_largest_timestamp_the_record_fields_hold_still_round_trips() {
+        let v = written(true, &[(u32::MAX, 999_999_999, &[0x01; 4], 4)]);
+        let rec = Reader::new(&v).unwrap().next().unwrap();
+        assert_eq!((rec.ts_sec, rec.ts_frac), (u32::MAX, 999_999_999));
     }
 
     #[test]

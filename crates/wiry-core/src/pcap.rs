@@ -166,8 +166,9 @@ pub fn count(buf: &[u8]) -> Result<usize, PcapError> {
     Ok(Reader::new(buf)?.count())
 }
 
-pub fn write_header(out: &mut Vec<u8>, linktype: u32, snaplen: u32) {
-    out.extend_from_slice(&MAGIC_LE_USEC.to_le_bytes());
+pub fn write_header(out: &mut Vec<u8>, linktype: u32, snaplen: u32, nanos: bool) {
+    let magic = if nanos { MAGIC_LE_NSEC } else { MAGIC_LE_USEC };
+    out.extend_from_slice(&magic.to_le_bytes());
     out.extend_from_slice(&2u16.to_le_bytes());
     out.extend_from_slice(&4u16.to_le_bytes());
     out.extend_from_slice(&0i32.to_le_bytes());
@@ -176,12 +177,45 @@ pub fn write_header(out: &mut Vec<u8>, linktype: u32, snaplen: u32) {
     out.extend_from_slice(&linktype.to_le_bytes());
 }
 
-pub fn write_record(out: &mut Vec<u8>, ts_sec: u32, ts_usec: u32, data: &[u8], origlen: u32) {
+/// `origlen` below the captured length would describe a frame shorter than its
+/// own bytes, so it is raised rather than written.
+pub fn write_record(out: &mut Vec<u8>, ts_sec: u32, ts_frac: u32, data: &[u8], origlen: u32) {
+    let data = &data[..data.len().min(u32::MAX as usize)];
+    let caplen = data.len() as u32;
     out.extend_from_slice(&ts_sec.to_le_bytes());
-    out.extend_from_slice(&ts_usec.to_le_bytes());
-    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
-    out.extend_from_slice(&origlen.to_le_bytes());
+    out.extend_from_slice(&ts_frac.to_le_bytes());
+    out.extend_from_slice(&caplen.to_le_bytes());
+    out.extend_from_slice(&origlen.max(caplen).to_le_bytes());
     out.extend_from_slice(data);
+}
+
+/// Splits a POSIX timestamp into the two fields a capture record carries.
+/// Anything the fields cannot hold — a negative time, one past 2106, a NaN —
+/// clamps, because a wrapped timestamp is a lie the reader cannot detect.
+pub fn split_time(t: f64, nanos: bool) -> (u32, u32) {
+    let scale = if nanos { 1e9 } else { 1e6 };
+    // Also the NaN case, which compares false against everything.
+    if t.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+        return (0, 0);
+    }
+    let secs = t.floor();
+    if secs >= u32::MAX as f64 {
+        return (u32::MAX, scale as u32 - 1);
+    }
+    let frac = ((t - secs) * scale).round() as u32;
+    if frac >= scale as u32 {
+        (secs as u32 + 1, 0)
+    } else {
+        (secs as u32, frac)
+    }
+}
+
+pub fn rescale_frac(frac: u32, from_nanos: bool, to_nanos: bool) -> u32 {
+    match (from_nanos, to_nanos) {
+        (false, true) => frac.saturating_mul(1000),
+        (true, false) => frac / 1000,
+        _ => frac,
+    }
 }
 
 #[cfg(test)]
@@ -190,7 +224,7 @@ mod tests {
 
     fn tiny_pcap() -> Vec<u8> {
         let mut v = Vec::new();
-        write_header(&mut v, linktype::ETHERNET, 65535);
+        write_header(&mut v, linktype::ETHERNET, 65535, false);
         write_record(&mut v, 1, 2, &[0xaa; 60], 60);
         write_record(&mut v, 3, 4, &[0xbb; 14], 14);
         v
@@ -212,7 +246,7 @@ mod tests {
     #[test]
     fn a_dlt_null_file_dissects_from_its_link_type() {
         let mut v = Vec::new();
-        write_header(&mut v, linktype::NULL, 65535);
+        write_header(&mut v, linktype::NULL, 65535, false);
         let mut frame = vec![2, 0, 0, 0];
         frame.extend_from_slice(&[
             0x45, 0x00, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 127, 0, 0, 1,
@@ -253,5 +287,42 @@ mod tests {
     #[test]
     fn handles_short_file() {
         assert!(Reader::new(&[0u8; 4]).is_err());
+    }
+
+    #[test]
+    fn the_nanosecond_magic_round_trips() {
+        let mut v = Vec::new();
+        write_header(&mut v, linktype::ETHERNET, 65535, true);
+        write_record(&mut v, 7, 123_456_789, &[0xaa; 4], 4);
+        let r = Reader::new(&v).unwrap();
+        assert!(r.header.nanos);
+        let rec = Reader::new(&v).unwrap().next().unwrap();
+        assert_eq!((rec.ts_sec, rec.ts_frac), (7, 123_456_789));
+        assert!((rec.time(true) - 7.123456789).abs() < 1e-12);
+    }
+
+    #[test]
+    fn split_time_clamps_what_the_fields_cannot_hold() {
+        assert_eq!(split_time(1.5, false), (1, 500_000));
+        assert_eq!(split_time(1.5, true), (1, 500_000_000));
+        assert_eq!(split_time(0.0, false), (0, 0));
+        assert_eq!(split_time(-1.0, false), (0, 0));
+        assert_eq!(split_time(f64::NAN, false), (0, 0));
+        assert_eq!(split_time(f64::NEG_INFINITY, true), (0, 0));
+        assert_eq!(split_time(f64::INFINITY, false), (u32::MAX, 999_999));
+        assert_eq!(split_time(1e30, false), (u32::MAX, 999_999));
+        // Rounding the fraction up must carry, not report a 1_000_000th usec.
+        assert_eq!(split_time(2.9999999, false), (3, 0));
+    }
+
+    #[test]
+    fn a_record_never_claims_fewer_wire_bytes_than_it_carries() {
+        let mut v = Vec::new();
+        write_header(&mut v, linktype::ETHERNET, 64, false);
+        write_record(&mut v, 0, 0, &[0x11; 100], 4);
+        write_record(&mut v, 0, 0, &[], 0);
+        let recs: Vec<_> = Reader::new(&v).unwrap().collect();
+        assert_eq!((recs[0].caplen, recs[0].origlen), (100, 100));
+        assert_eq!((recs[1].caplen, recs[1].origlen), (0, 0));
     }
 }
