@@ -11,7 +11,7 @@ cap.columns([("IP", "src"), ("IP", "dst"), ("TCP", "dport")])
 ```
 
 Those two lines read a 368 MB capture off disk and pull three fields out of all
-791,615 packets in 407 ms, without building a Python object for a single one of
+791,615 packets in 391 ms, without building a Python object for a single one of
 them.
 
 **wiry implements 91 layers, sixty of them to header depth only. scapy registers
@@ -55,51 +55,67 @@ That is the trade. Everything below assumes you already know it.
 `bigFlows.pcap` from the tcpreplay project: 368,083,648 bytes, 791,615 packets,
 SHA-256 `2b630291cc848c79949e12a54edebe07d20f644747db28899ac4d568c42dc141`,
 fetched from `https://s3.amazonaws.com/tcpreplay-pcap-files/bigFlows.pcap`. That
-URL is mutable and has already served a different capture under the same name —
-an earlier version of this table was measured on a 256 MB, 549,726-packet
-revision of it — so the hash is what makes "the same corpus" checkable. Apple M1 Pro, macOS 26.6,
-CPython 3.13.5, scapy 2.7.0, dpkt 1.9.8, measured 2026-09-18. Each row is the
-best of nine timed runs: three invocations of `dev/bench.py`, each taking the
-best of three. Reproduce with `python dev/bench.py <pcap>`.
+URL is mutable and has already served a different capture under the same name,
+so the hash is what makes "the same corpus" checkable.
 
-| Read 2 fields from every packet | rate | |
+Apple M1 Pro, macOS 26.6, CPython 3.13.5, scapy 2.7.0, dpkt 1.9.8, measured
+2026-09-18 on a **release build**: a debug one reads about a third as fast, and
+`dev/bench.py` refuses to run on one rather than publish that. Each row is the
+best of nine: three invocations of the script, each taking the best of three.
+
+```sh
+pip install .                  # maturin builds release; maturin develop does not
+python dev/bench.py <pcap>
+```
+
+| Read `IP.src` and `TCP.dport` from every packet | rate | |
 |---|---|---|
-| scapy `PcapReader` loop | 11,183 pkt/s | |
-| dpkt `Reader` loop | 178,944 pkt/s | |
-| wiry per-packet loop | 301,473 pkt/s | **1.7x dpkt** |
-| wiry `field_column()` | 3,992,337 pkt/s | **22.3x dpkt** |
+| scapy `PcapReader` loop | 11,315 pkt/s | |
+| dpkt `Reader` loop | 183,305 pkt/s | |
+| wiry per-packet loop | 305,113 pkt/s | **1.7x dpkt** |
+| wiry `columns()` | 2,667,208 pkt/s | **14.6x dpkt** |
 
 | Other workloads | scapy | wiry | |
 |---|---|---|---|
-| Dissect + re-serialise | 11,116 pkt/s | 680,985 pkt/s | **61.3x** |
-| Build + serialise Ether/IP/TCP | 4,577 pkt/s | 96,384 pkt/s | **21.1x** |
+| Dissect + re-serialise | 11,127 pkt/s | 688,520 pkt/s | **61.9x** |
+| Build + serialise Ether/IP/TCP | 4,570 pkt/s | 94,860 pkt/s | **20.8x** |
 
 Memory, each in its own process (`python dev/bench_memory.py <pcap>`):
 
 | | packets held | peak RSS | per packet |
 |---|---|---|---|
 | scapy | 200,000 | 1,317 MB | 6.59 KB |
-| wiry | 791,615 | 492 MB | **0.62 KB** |
+| wiry | 791,615 | 487 MB | **0.62 KB** |
 
 Read the per-packet row honestly: **against dpkt it is 1.7x, not an order of
 magnitude.** Every per-packet API pays for one Python object per packet and that
 cost sets the ceiling. dpkt sits near it and so do we. Across the three
-invocations that ratio moved between 1.6x and 1.8x, which is the measurement's
+invocations that ratio moved between 1.6x and 1.7x, which is the measurement's
 own spread and worth more than a third significant figure. `columns()` amortises
 the object cost instead, returning one list per field for the whole capture, and
-that is where the 22.3x comes from.
+that is where the 14.6x comes from — 14.5x to 15.1x across the same three.
+
+An earlier version of the last row published 22.3x. It was `field_column()`,
+which reads one field, sitting under a header that says two and ratioed against
+three rows that read two. The row now does the same work as the rows above it,
+and the number is smaller.
 
 The same effect caps the bulk API. Four separate `field_column()` calls dissect
-the capture four times, yet cost 1.7x one fused `columns()` pass rather than 4x
-(793 ms against 472 ms, `python dev/bench_columnar.py <pcap>`). Fusing the
+the capture four times, yet cost 1.6x one fused `columns()` pass rather than 4x
+(687 ms against 423 ms, `python dev/bench_columnar.py <pcap>`). Fusing the
 passes removes three quarters of the dissection and well under half the runtime,
 so most of what is left is building the Python lists. That is the floor, and no
 amount of Rust moves it.
 
-An earlier version of this table read higher per packet. It is not comparable:
-both the corpus and the protocol set changed underneath it. Bounds checks,
-Ethernet-trailer handling and sixty more layers in the dispatch tables all cost
-something, and a table measured on a different capture cannot price them.
+The machine was not idle: load average sat near 5 throughout, against the idle
+machine this project's own rules ask for. The check that it did not distort the
+comparison is that scapy and dpkt both reproduced their previously published
+rates to within 3%, and load hurts them more than it hurts us, not less.
+
+An earlier version of this table read higher per packet on a different corpus
+and a smaller protocol set. Bounds checks, Ethernet-trailer handling and sixty
+more layers in the dispatch tables all cost something, and a table measured on a
+different capture cannot price them.
 
 ## Crafting
 

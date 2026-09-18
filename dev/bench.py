@@ -224,6 +224,13 @@ def summarise(name, r):
 
 
 if __name__ == "__main__":
+    if getattr(B._b, "__debug_build__", False):
+        sys.exit(
+            "refusing to benchmark a debug build: it reads about a third as "
+            "fast, and the published table was measured on a release one.\n"
+            "Rebuild with: maturin develop --release --features "
+            "pyo3/extension-module"
+        )
     pcap = sys.argv[1]
     total = len(B.rdpcap(pcap))
     limit = int(sys.argv[2]) if len(sys.argv) > 2 else total

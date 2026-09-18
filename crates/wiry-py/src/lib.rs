@@ -1857,6 +1857,9 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.py().get_type_bound::<capture::CaptureUnavailable>(),
     )?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    // An unoptimised engine reads about a third as fast, which is indetectable
+    // from Python and has already been benchmarked by mistake.
+    m.add("__debug_build__", cfg!(debug_assertions))?;
     Ok(())
 }
 
