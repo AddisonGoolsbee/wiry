@@ -267,17 +267,18 @@ pub fn builtins() -> impl Iterator<Item = ProtoId> {
 #[inline]
 pub fn desc(id: ProtoId) -> &'static ProtoDesc {
     if id.0 < BUILTIN_COUNT {
-        builtin_desc(id)
+        BUILTIN_DESCS[id.0 as usize]
     } else {
         registered_desc(id)
     }
 }
 
-/// The dissection walk asks for a descriptor once per layer per packet, so
-/// this is an index and not a match over every id the build registers.
+/// A match over every registered id is too large for the inliner to take into
+/// the dissection walk, which asks for a descriptor once per layer per packet.
+/// An id the build does not register reads `Raw`, as the match's `_` arm did.
 static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     use crate::layers::*;
-    let mut t: [&ProtoDesc; BUILTIN_COUNT as usize] = [&raw::DESC; BUILTIN_COUNT as usize];
+    let mut t = [&raw::DESC; BUILTIN_COUNT as usize];
     t[ProtoId::Padding.0 as usize] = &raw::PADDING_DESC;
     t[ProtoId::Ether.0 as usize] = &ether::DESC;
     t[ProtoId::Dot1Q.0 as usize] = &dot1q::DESC;
@@ -372,11 +373,6 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     // protogen:desc end
     t
 };
-
-#[inline]
-fn builtin_desc(id: ProtoId) -> &'static ProtoDesc {
-    BUILTIN_DESCS[id.0 as usize]
-}
 
 pub fn by_name(name: &str) -> Option<ProtoId> {
     if let Some(p) = BUILTINS.iter().copied().find(|p| desc(*p).name == name) {

@@ -458,8 +458,6 @@ def render_dispatch(specs: list[dict]) -> str:
 
     if any(by_kind[k] for k in PARENT_KINDS if k.endswith("_port")):
         out += [
-            "/// Every port lookup is on the dissection path of traffic that claims",
-            "/// no layer here, so the match is reached only through this bitmap.",
             "const fn port_bits<const N: usize>(ports: &[u16]) -> [u64; N] {",
             "    let mut bits = [0u64; N];",
             "    let mut i = 0;",
@@ -468,6 +466,14 @@ def render_dispatch(specs: list[dict]) -> str:
             "        i += 1;",
             "    }",
             "    bits",
+            "}",
+            "",
+            "/// The table is sized to the largest claimed port, so a port past its end",
+            "/// is unclaimed by construction.",
+            "#[inline]",
+            "fn claimed(bits: &[u64], v: u16) -> bool {",
+            "    let i = (v >> 6) as usize;",
+            "    i < bits.len() && bits[i] & (1u64 << (v & 63)) != 0",
             "}",
             "",
         ]
@@ -533,59 +539,51 @@ def render_dispatch(specs: list[dict]) -> str:
             continue
 
         if is_port:
+            if ty != "u16":
+                raise SpecError(f"{kind}: the port bitmap is u16-only")
             inner = f"{fname}_one"
-            claimed = f"{fname}_claimed"
+            values = f"{kind.upper()}_VALUES"
             bits = f"{kind.upper()}_CLAIMED"
             arms = arms_for(entries, True)
             used = any("payload" in a for a in arms)
             ports = sorted({v for _, p in entries for v in p["values"]})
-            words = (ports[-1] >> 6) + 1
-            out.append(f"static {bits}: [u64; {words}] = port_bits(&[")
-            out.append("    " + ", ".join(str(v) for v in ports) + ",")
-            out.append("]);")
-            out.append("")
-            out.append("#[inline]")
-            out.append(f"fn {claimed}(v: {ty}) -> bool {{")
-            out.append("    let i = (v >> 6) as usize;")
-            out.append(f"    i < {bits}.len() && {bits}[i] & (1u64 << (v & 63)) != 0")
-            out.append("}")
-            out.append("")
-            out.append("#[inline(never)]")
-            out.append(
+            out += [
+                f"const {values}: &[u16] = &[" + ", ".join(str(v) for v in ports) + "];",
+                "",
+                f"static {bits}: [u64; {(ports[-1] >> 6) + 1}] = port_bits({values});",
+                "",
+                "// Out of line: almost no traffic claims a layer here, so the match",
+                "// must not weigh on the callers that never reach it.",
+                "#[inline(never)]",
                 f"fn {inner}(v: {ty}, {'payload' if used else '_payload'}: &[u8])"
-                " -> Option<ProtoId> {"
-            )
-            out.append("    match v {")
-            out.extend(arms)
-            out.append("        _ => None,")
-            out.append("    }")
-            out.append("}")
-            out.append("")
-            out.append("/// The destination port names the service, so it is asked first.")
-            out.append("#[inline]")
-            out.append(
+                " -> Option<ProtoId> {",
+                "    match v {",
+                *arms,
+                "        _ => None,",
+                "    }",
+                "}",
+                "",
+                "/// The destination port names the service, so it is asked first.",
+                "#[inline]",
                 f"pub fn {fname}(sport: {ty}, dport: {ty}, payload: &[u8])"
-                " -> Option<ProtoId> {"
-            )
-            out.append(f"    if {claimed}(dport) {{")
-            out.append(f"        if let Some(p) = {inner}(dport, payload) {{")
-            out.append("            return Some(p);")
-            out.append("        }")
-            out.append("    }")
-            out.append(f"    if {claimed}(sport) {{")
-            out.append(f"        return {inner}(sport, payload);")
-            out.append("    }")
-            out.append("    None")
-            out.append("}")
-            out.append("")
+                " -> Option<ProtoId> {",
+                f"    if !claimed(&{bits}, dport) && !claimed(&{bits}, sport) {{",
+                "        return None;",
+                "    }",
+                f"    {inner}(dport, payload).or_else(|| {inner}(sport, payload))",
+                "}",
+                "",
+            ]
             tests += [
                 "    #[test]",
-                f"    fn {kind}_bitmap_covers_every_arm() {{",
+                f"    fn {kind}_bitmap_agrees_with_the_match() {{",
                 f"        for v in 0..={ty}::MAX {{",
-                "            let want = matches!(v, "
-                + " | ".join(str(v) for v in ports)
-                + ");",
-                f"            assert_eq!(super::{claimed}(v), want, \"{kind} {{v}}\");",
+                f"            let c = super::claimed(&super::{bits}, v);",
+                f"            assert_eq!(c, super::{values}.contains(&v), \"{kind} {{v}}\");",
+                "            for p in PROBES {",
+                f"                assert!(c || super::{inner}(v, p).is_none(),",
+                f"                    \"{kind} {{v}} dispatches past the bitmap\");",
+                "            }",
                 "        }",
                 "    }",
                 "",
@@ -622,10 +620,21 @@ def render_dispatch(specs: list[dict]) -> str:
             out.append("}")
             out.append("")
     if tests:
-        out.append("#[cfg(test)]")
-        out.append("mod tests {")
-        out += tests
-        out.append("}")
+        out += [
+            "#[cfg(test)]",
+            "mod tests {",
+            "    /// A guard that rejects every probe would hide a dropped bitmap bit,",
+            "    /// so the probes have to reach as many arms as they can.",
+            "    const PROBES: &[&[u8]] = &[",
+            "        &[],",
+            "        &[0u8; 64],",
+            "        &[0xff; 64],",
+            "        b\"GET / HTTP/1.1\\r\\nHost: h\\r\\n\\r\\n\",",
+            "    ];",
+            "",
+            *tests,
+            "}",
+        ]
     return "\n".join(out).rstrip() + "\n"
 
 

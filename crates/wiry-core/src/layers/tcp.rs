@@ -46,8 +46,8 @@ fn next(hdr: &[u8]) -> Next {
         return Next::Proto(ProtoId::Dns);
     }
     let payload = hdr.get(header_len(hdr)..).unwrap_or(&[]);
-    // A bare ACK carries no message to dissect, and Telnet's arm has no guard
-    // to reject one.
+    // Telnet's dispatch arm is unguarded, so a bare ACK to port 23 would
+    // otherwise dissect as Telnet.
     if payload.is_empty() {
         return Next::Raw;
     }
