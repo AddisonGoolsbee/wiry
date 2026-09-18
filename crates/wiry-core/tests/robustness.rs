@@ -133,6 +133,7 @@ fn exercise(pkt: &mut Packet, what: &str) {
     }
     let _ = show::summary(pkt);
     let _ = show::show(pkt);
+    let _ = show::session_key(pkt.raw_bytes(), pkt.layers());
     let _ = pkt.to_bytes();
     check_spans(pkt, what);
     exercise_writes(pkt, what);

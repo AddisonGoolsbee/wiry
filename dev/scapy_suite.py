@@ -30,7 +30,7 @@ OUT_OF_SCOPE = {
     "fuzz", "RandIP", "RandShort", "RandNum", "RandString", "corrupt_bytes",
     "Automaton", "answering_machine", "load_contrib", "load_layer",
     "TCPSession", "IPSession", "wireshark", "tcpdump", "hexdiff",
-    "sprintf", "pdfdump", "psdump", "voip_play", "traceroute", "arping",
+    "pdfdump", "psdump", "voip_play", "traceroute", "arping",
 }
 
 

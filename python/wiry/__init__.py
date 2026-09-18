@@ -635,6 +635,19 @@ class Packet(metaclass=_PacketMeta):
     def show_str(self) -> str:
         return self._materialize().show()
 
+    def show2(self) -> None:
+        print(self.show2_str(), end="")
+
+    def show2_str(self) -> str:
+        """As it will be sent: the lengths and checksums are the computed ones."""
+        from .report import show2_str
+        return show2_str(self)
+
+    def sprintf(self, fmt: str) -> str:
+        """See `wiry.report` for the format language."""
+        from .report import sprintf
+        return sprintf(self, fmt)
+
     def summary(self) -> str:
         if self._rust is None and self._stack:
             return " / ".join(n for n, _ in self._stack)
@@ -736,6 +749,45 @@ class PacketList:
     def head(self, n: int) -> "PacketList":
         """The first n packets, as a view. Shares the capture buffer."""
         return PacketList(self._list.head(n))
+
+    def sprintf(self, fmt: str) -> list[str]:
+        """Every packet through one format string, in one pass."""
+        from .report import sprintf_list
+        return sprintf_list(self, fmt)
+
+    def summary(self, prn: Any = None, lfilter: Any = None) -> None:
+        """Prints; `report.summary_lines` returns the lines instead."""
+        from .report import summary_lines
+        for line in summary_lines(self, prn, lfilter):
+            print(line)
+
+    def nsummary(self, prn: Any = None, lfilter: Any = None) -> None:
+        from .report import summary_lines
+        for line in summary_lines(self, prn, lfilter, numbered=True):
+            print(line)
+
+    def show(self, prn: Any = None, lfilter: Any = None) -> None:
+        self.nsummary(prn, lfilter)
+
+    def sessions(self, session_extractor: Any = None) -> Any:
+        """Flows, not streams: wiry does not reassemble TCP."""
+        from .report import sessions
+        return sessions(self, session_extractor)
+
+    def conversations(self, getsrcdst: Any = None, **kw: Any) -> Any:
+        """DOT source for the conversations. See `wiry.report`."""
+        from .report import conversations
+        return conversations(self, getsrcdst, **kw)
+
+    def make_table(self, fn: Any, lfilter: Any = None) -> str:
+        """`fn` returns (column, row, cell) per packet."""
+        from .report import make_table
+        return make_table(self, fn, lfilter)
+
+    def plot(self, fn: Any, lfilter: Any = None, **kw: Any) -> Any:
+        """matplotlib is optional and imported only here."""
+        from .report import plot
+        return plot(self, fn, lfilter, **kw)
 
     def times(self) -> list[float]:
         return self._list.times()

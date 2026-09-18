@@ -110,11 +110,8 @@ fn find(spans: &[LayerSpan], p: ProtoId) -> Option<&LayerSpan> {
     spans.iter().find(|s| s.proto == p)
 }
 
-/// The layer's header octets, clamped to what the buffer holds.
 fn hdr<'a>(buf: &'a [u8], s: &LayerSpan) -> &'a [u8] {
-    let a = (s.off as usize).min(buf.len());
-    let b = (a + s.hlen as usize).min(buf.len());
-    &buf[a..b]
+    s.header(buf)
 }
 
 /// From the layer's first octet to the end of the buffer, for a field the

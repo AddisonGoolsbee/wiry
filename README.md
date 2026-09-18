@@ -19,8 +19,9 @@ Ethernet, 802.1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP,
 Loopback or Linux cooked capture, it dissects to `Raw` and round-trips unchanged,
 and you get bytes rather than fields.
 
-The method surface is narrower too. `show2`, `sprintf`, `fragment`, `json` and
-`command` are absent. Most of what else scapy's `Packet` carries is its own
+The method surface is narrower too. `fragment`, `json` and `command` are absent,
+and so is TCP stream reassembly: `sessions()` groups packets into flows but
+never reorders or rebuilds a stream. Most of what else scapy's `Packet` carries is its own
 internal machinery, `do_build`, `post_dissect`, `self_build` and the rest, which
 exists because scapy assembles an object graph per packet. wiry does not, so it
 has no equivalent and needs none.
@@ -121,6 +122,32 @@ cap.to_dict()
 One call, one pass, one crossing. Filters are data rather than callbacks, so
 selection stays in Rust. Dataframes export lazily to polars, arrow and pandas:
 `pip install 'wiry[polars]'`.
+
+## Reporting
+
+The familiar reporting surface, on the same machinery.
+
+```python
+from wiry import rdpcap, Ether, IP, TCP
+
+pkt = Ether() / IP(dst="10.0.0.2") / TCP(dport=80, flags="S")
+pkt.sprintf("%IP.src% > %IP.dst% {TCP:%TCP.flags%}")
+pkt.show2()                 # as it will be sent: lengths and checksums computed
+
+cap = rdpcap("capture.pcap")
+cap.sprintf("%IP.src% > %IP.dst%")   # the whole capture, one pass
+cap.summary()
+cap.sessions()                       # flows, keyed by address tuple
+```
+
+`sprintf` over a `PacketList` resolves the fields the format names as columns, so
+it dissects once and builds no packet. `sessions()` computes the flow keys in
+Rust and leaves the membership there: a flow's packets become a `PacketList` only
+when you ask for that flow. Give either one a callback — `prn`, or a
+`session_extractor` — and the per-packet crossing is back, because that is what
+the callback asked for.
+
+Flows, not streams. wiry does not reassemble TCP.
 
 ## Your own layers
 

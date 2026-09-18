@@ -11,6 +11,23 @@ pub struct LayerSpan {
     pub total: u32,
 }
 
+impl LayerSpan {
+    /// This layer's header, clamped to what the buffer holds. Every read of a
+    /// span-addressed field clamps here, so the bulk and per-packet paths
+    /// cannot disagree about a truncated header.
+    #[inline]
+    pub fn hdr_range(&self, len: usize) -> (usize, usize) {
+        let a = (self.off as usize).min(len);
+        (a, (a + self.hlen as usize).min(len))
+    }
+
+    #[inline]
+    pub fn header<'a>(&self, buf: &'a [u8]) -> &'a [u8] {
+        let (a, b) = self.hdr_range(buf.len());
+        &buf[a..b]
+    }
+}
+
 pub type Spans = SmallVec<[LayerSpan; 8]>;
 
 /// Bounds the dissection walk on malformed input.
@@ -148,17 +165,15 @@ impl Packet {
 
     #[inline]
     fn hdr_range(&self, s: &LayerSpan) -> (usize, usize) {
-        let a = (s.off as usize).min(self.buf.len());
-        (a, (a + s.hlen as usize).min(self.buf.len()))
+        s.hdr_range(self.buf.len())
     }
 
     #[inline]
     pub fn header(&self, layer: usize) -> &[u8] {
-        let Some(s) = self.spans.get(layer) else {
-            return &[];
-        };
-        let (a, b) = self.hdr_range(s);
-        &self.buf[a..b]
+        match self.spans.get(layer) {
+            Some(s) => s.header(&self.buf),
+            None => &[],
+        }
     }
 
     /// Everything from this layer to the end of the packet.
