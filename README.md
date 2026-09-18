@@ -164,7 +164,7 @@ scapy's `Net` address generators, 1 needs gzip input, 1 needs Windows, and 1
 asserts by patching a scapy internal we do not have. Every gap is enumerated in
 [DEVIATIONS.md](DEVIATIONS.md).
 
-281 Rust and 594 Python tests pass, 286 Rust with live capture built in. All
+307 Rust and 619 Python tests pass, 312 Rust with live capture built in. All
 three crates set `#![forbid(unsafe_code)]`, which constrains this code and says
 nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
 compiled in. The dissector carries seven fuzz targets plus seeded property tests

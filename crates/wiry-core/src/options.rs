@@ -6,9 +6,12 @@ pub enum ItemValue {
     Flag,
     Uint(u64),
     Pair(u64, u64),
+    /// RFC 2018 §3 SACK blocks.
+    Pairs(Vec<(u64, u64)>),
     Bytes(Vec<u8>),
     Ipv4List(Vec<[u8; 4]>),
     Text(String),
+    Items(Vec<Item>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -100,6 +103,7 @@ pub enum Shape {
     LooseUint(usize),
     /// Two big-endian 32-bit words.
     Pair,
+    PairList,
     Bytes,
     Ipv4List,
     Text,
@@ -110,7 +114,7 @@ impl Shape {
     const fn width(self) -> usize {
         match self {
             Shape::Uint(w) | Shape::LooseUint(w) => w,
-            Shape::Pair => 8,
+            Shape::Pair | Shape::PairList => 8,
             Shape::Ipv4List => 4,
             Shape::Bytes | Shape::Text => 1,
             Shape::Bare | Shape::Empty => 0,
@@ -124,6 +128,9 @@ pub struct OptDesc {
     pub shape: Shape,
     /// Symbolic values accepted in place of the integer (DHCP message types).
     pub names: &'static [(&'static str, u64)],
+    /// No such table nests one of its own, so a walk descends exactly one
+    /// level.
+    pub sub: Option<&'static OptTable>,
 }
 
 impl OptDesc {
@@ -133,11 +140,17 @@ impl OptDesc {
             code,
             shape,
             names: &[],
+            sub: None,
         }
     }
 
     pub const fn with_names(mut self, names: &'static [(&'static str, u64)]) -> Self {
         self.names = names;
+        self
+    }
+
+    pub const fn nesting(mut self, t: &'static OptTable) -> Self {
+        self.sub = Some(t);
         self
     }
 }
@@ -180,6 +193,9 @@ impl OptTable {
             return Item::unknown(code as u32, p);
         };
         let c = code as u32;
+        if let Some(t) = d.sub {
+            return Item::named(d.name, c, ItemValue::Items(t.walk(p)));
+        }
         match d.shape {
             Shape::Bare | Shape::Empty => Item::flag(d.name, c),
             Shape::Uint(w) if p.len() == w => Item::uint(d.name, c, be(p)),
@@ -187,7 +203,10 @@ impl OptTable {
             Shape::Uint(_) => Item::bytes(d.name, c, p),
             Shape::LooseUint(_) => Item::uint(d.name, c, be(p)),
             Shape::Pair if p.len() == 8 => Item::pair(d.name, c, be(&p[..4]), be(&p[4..])),
-            Shape::Pair | Shape::Bytes => Item::bytes(d.name, c, p),
+            Shape::PairList if !p.is_empty() && p.len() % 8 == 0 => {
+                Item::named(d.name, c, ItemValue::Pairs(pairs(p)))
+            }
+            Shape::Pair | Shape::PairList | Shape::Bytes => Item::bytes(d.name, c, p),
             Shape::Ipv4List => Item::named(d.name, c, ItemValue::Ipv4List(addrs(p))),
             Shape::Text => Item::named(
                 d.name,
@@ -200,6 +219,15 @@ impl OptTable {
     /// Malformed input stops the walk rather than erroring: truncation is
     /// normal on a snaplen-clipped capture.
     pub fn walk(&self, data: &[u8]) -> Vec<Item> {
+        self.walk_raw(data)
+            .into_iter()
+            .map(|(code, p)| self.decode(code, p))
+            .collect()
+    }
+
+    /// One code and one borrowed payload per option. RFC 3396 joining needs the
+    /// octets as the wire carried them, before any shape has been imposed.
+    pub fn walk_raw<'a>(&self, data: &'a [u8]) -> Vec<(u8, &'a [u8])> {
         let mut out = Vec::new();
         let mut i = 0usize;
         // Bound the walk: a zero-length option would otherwise spin forever.
@@ -211,7 +239,7 @@ impl OptTable {
                 break;
             }
             if self.is_bare(code) {
-                out.push(self.decode(code, &[]));
+                out.push((code, &data[i..i]));
                 i += 1;
                 if Some(code) == self.end {
                     break;
@@ -230,7 +258,7 @@ impl OptTable {
             if next > data.len() {
                 break;
             }
-            out.push(self.decode(code, &data[i + 2..next]));
+            out.push((code, &data[i + 2..next]));
             i = next;
         }
         out
@@ -249,7 +277,10 @@ impl OptTable {
             return Ok(Item {
                 name: Cow::Borrowed(d.name),
                 code: d.code as u32,
-                value: value_of(d.shape, d.names, arg)?,
+                value: match d.sub {
+                    Some(t) => sub_value(t, arg)?,
+                    None => value_of(d.shape, d.names, arg)?,
+                },
             });
         }
         if let Ok(code) = name.parse::<u8>() {
@@ -268,12 +299,16 @@ impl OptTable {
         for it in items {
             let code = u8::try_from(it.code)
                 .map_err(|_| format!("{} option code {} is out of range", self.proto, it.code))?;
-            let shape = self.by_code(code).map_or(Shape::Bytes, |d| d.shape);
+            let d = self.by_code(code);
+            let shape = d.map_or(Shape::Bytes, |d| d.shape);
             if shape == Shape::Bare {
                 out.push(code);
                 continue;
             }
-            let p = payload(shape, &it.value);
+            let p = match (d.and_then(|d| d.sub), &it.value) {
+                (Some(t), ItemValue::Items(v)) => t.encode(v)?,
+                _ => payload(shape, &it.value),
+            };
             let len = match self.rule {
                 LenRule::WithHeader => p.len() + 2,
                 LenRule::PayloadOnly => p.len(),
@@ -314,9 +349,14 @@ fn payload(shape: Shape, v: &ItemValue) -> Vec<u8> {
             out.extend_from_slice(&be_bytes(*b, 4));
             out
         }
+        ItemValue::Pairs(l) => l
+            .iter()
+            .flat_map(|(a, b)| [be_bytes(*a, 4), be_bytes(*b, 4)].concat())
+            .collect(),
         ItemValue::Bytes(b) => b.clone(),
         ItemValue::Ipv4List(l) => l.concat(),
         ItemValue::Text(s) => s.as_bytes().to_vec(),
+        ItemValue::Items(_) => Vec::new(),
     }
 }
 
@@ -324,9 +364,66 @@ fn value_of(shape: Shape, names: &[(&str, u64)], arg: &OptArg) -> Result<ItemVal
     match shape {
         Shape::Bare | Shape::Empty => Ok(ItemValue::Flag),
         Shape::Uint(_) | Shape::LooseUint(_) | Shape::Pair => num_value(shape, names, arg),
+        Shape::PairList => pair_value(arg),
         Shape::Ipv4List => ip_value(arg),
         Shape::Text | Shape::Bytes => Ok(ItemValue::Bytes(flat_bytes(arg))),
     }
+}
+
+/// Accepts what the parse produced: (name, value) pairs. Anything else is raw
+/// octets.
+fn sub_value(t: &'static OptTable, arg: &OptArg) -> Result<ItemValue, String> {
+    let OptArg::List(entries) = arg else {
+        return Ok(ItemValue::Bytes(flat_bytes(arg)));
+    };
+    let mut items = Vec::with_capacity(entries.len());
+    for e in entries {
+        let named = match e {
+            OptArg::List(pair) => match pair.as_slice() {
+                [OptArg::Text(n), v] => Some(t.item(n, v)?),
+                [OptArg::Text(n)] => Some(t.item(n, &OptArg::Flag)?),
+                _ => None,
+            },
+            _ => None,
+        };
+        match named {
+            Some(i) => items.push(i),
+            None => return Ok(ItemValue::Bytes(flat_bytes(arg))),
+        }
+    }
+    Ok(ItemValue::Items(items))
+}
+
+fn pair_value(arg: &OptArg) -> Result<ItemValue, String> {
+    if let OptArg::Bytes(b) = arg {
+        return Ok(ItemValue::Bytes(b.clone()));
+    }
+    let mut edges = Vec::new();
+    push_uints(arg, &mut edges)?;
+    if edges.len() % 2 != 0 {
+        return Err("a block takes a left and a right edge".into());
+    }
+    Ok(ItemValue::Pairs(
+        edges.chunks_exact(2).map(|c| (c[0], c[1])).collect(),
+    ))
+}
+
+fn push_uints(arg: &OptArg, out: &mut Vec<u64>) -> Result<(), String> {
+    match arg {
+        OptArg::Flag => {}
+        OptArg::Uint(n) => out.push(*n),
+        OptArg::Text(s) => out.push(
+            s.parse::<u64>()
+                .map_err(|_| format!("cannot encode {s:?} as an edge"))?,
+        ),
+        OptArg::Bytes(b) => out.extend(b.chunks_exact(4).map(be)),
+        OptArg::List(v) => {
+            for e in v {
+                push_uints(e, out)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn num_value(shape: Shape, names: &[(&str, u64)], arg: &OptArg) -> Result<ItemValue, String> {
@@ -404,6 +501,12 @@ fn flat_bytes(arg: &OptArg) -> Vec<u8> {
 fn addrs(p: &[u8]) -> Vec<[u8; 4]> {
     p.chunks_exact(4)
         .map(|c| [c[0], c[1], c[2], c[3]])
+        .collect()
+}
+
+fn pairs(p: &[u8]) -> Vec<(u64, u64)> {
+    p.chunks_exact(8)
+        .map(|c| (be(&c[..4]), be(&c[4..])))
         .collect()
 }
 
@@ -511,11 +614,17 @@ mod tests {
         assert!(!wide.nests_deeper_than(MAX_ARG_DEPTH));
     }
 
-    fn sample(shape: Shape) -> Vec<u8> {
-        match shape {
+    fn sample(d: &OptDesc) -> Vec<u8> {
+        if let Some(t) = d.sub {
+            let first = t.opts.first().expect("a nested table names something");
+            return t
+                .encode(&[t.decode(first.code, &sample(first))])
+                .expect("a nested sample encodes");
+        }
+        match d.shape {
             Shape::Bare | Shape::Empty => vec![],
             Shape::Uint(w) | Shape::LooseUint(w) => vec![1u8; w],
-            Shape::Pair => vec![0, 0, 0, 1, 0, 0, 0, 2],
+            Shape::Pair | Shape::PairList => vec![0, 0, 0, 1, 0, 0, 0, 2],
             Shape::Bytes => vec![0xaa, 0xbb],
             Shape::Ipv4List => vec![10, 0, 0, 1],
             Shape::Text => b"lan".to_vec(),
@@ -529,7 +638,7 @@ mod tests {
             table.opts.iter().partition(|d| Some(d.code) == table.end);
         let mut items: Vec<Item> = body
             .iter()
-            .map(|d| table.decode(d.code, &sample(d.shape)))
+            .map(|d| table.decode(d.code, &sample(d)))
             .collect();
         // A closing code ends the region, so it can only come last, and only
         // where the walk emits it at all.
@@ -545,6 +654,32 @@ mod tests {
         assert_round_trips(&crate::layers::tcp::OPTIONS);
         assert_round_trips(&crate::layers::ipv4::OPTIONS);
         assert_round_trips(&crate::layers::bootp::DHCP_OPTIONS);
+    }
+
+    /// `walk` descends into `sub` without a depth counter, so the tables must
+    /// not nest one that nests another.
+    #[test]
+    fn a_nested_option_table_nests_nothing_itself() {
+        for t in [
+            &crate::layers::tcp::OPTIONS,
+            &crate::layers::ipv4::OPTIONS,
+            &crate::layers::bootp::DHCP_OPTIONS,
+            &crate::layers::bootp::RELAY_OPTIONS,
+        ] {
+            for d in t.opts {
+                let Some(sub) = d.sub else { continue };
+                for inner in sub.opts {
+                    assert!(
+                        inner.sub.is_none(),
+                        "{}.{} nests {}.{}, more than one level",
+                        t.proto,
+                        d.name,
+                        sub.proto,
+                        inner.name
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -200,7 +200,7 @@ mod tests {
     }
 
     fn active(p: &Packet, layer: usize) -> Vec<&'static str> {
-        crate::proto::active_fields(ProtoId::Icmp, p.header(layer))
+        crate::proto::active_fields(ProtoId::Icmp, false, p.header(layer))
             .map(|f| f.name)
             .collect()
     }

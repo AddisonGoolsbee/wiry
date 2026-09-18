@@ -17,7 +17,7 @@ use std::sync::Arc;
 use wiry_capture::Flow;
 use wiry_core::field::{self, FieldDesc, FieldKind, FieldValue};
 use wiry_core::options::{Item, OptArg};
-use wiry_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
+use wiry_core::packet::{self, dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use wiry_core::pcap;
 use wiry_core::proto::{self, ProtoId};
 use wiry_core::show;
@@ -42,10 +42,45 @@ const FRAME: &str = "Frame";
 
 #[derive(Clone, Copy)]
 enum ColSpec {
-    Field(ProtoId, &'static FieldDesc),
+    Field(ProtoId, FieldRef),
+    Options(ProtoId),
     Time,
     Len,
     Num,
+}
+
+/// One field name resolved against both layouts a layer can take. Resolving
+/// once, outside the bulk loop, is what keeps a framed layer from being read
+/// through the unframed table's offsets — and an unframed one from answering to
+/// a name only the framed table declares.
+#[derive(Clone, Copy)]
+struct FieldRef {
+    plain: Option<&'static FieldDesc>,
+    framed: Option<&'static FieldDesc>,
+}
+
+impl FieldRef {
+    fn resolve(id: ProtoId, name: &str) -> Option<Self> {
+        let pick = |framed| proto::fields_of(id, framed).iter().find(|f| f.name == name);
+        let r = Self {
+            plain: pick(false),
+            framed: pick(true),
+        };
+        (r.plain.is_some() || r.framed.is_some()).then_some(r)
+    }
+
+    fn any(&self) -> &'static FieldDesc {
+        self.plain.or(self.framed).expect("resolve kept one side")
+    }
+
+    #[inline]
+    fn at(&self, spans: &[LayerSpan], at: usize) -> Option<&'static FieldDesc> {
+        if packet::framing_at(spans, at) > 0 {
+            self.framed
+        } else {
+            self.plain
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -90,7 +125,7 @@ enum CondVal {
 
 struct Cond {
     proto: ProtoId,
-    field: &'static FieldDesc,
+    field: FieldRef,
     op: CmpOp,
     val: CondVal,
 }
@@ -113,10 +148,10 @@ impl Query {
             }
         }
         self.conds.iter().all(|c| {
-            let Some(s) = spans.iter().find(|s| s.proto == c.proto) else {
+            let Some(at) = spans.iter().position(|s| s.proto == c.proto) else {
                 return false;
             };
-            let Some(v) = decode_span(buf, s, c.field) else {
+            let Some(v) = decode_at(buf, spans, at, &c.field) else {
                 return false;
             };
             match &c.val {
@@ -131,23 +166,15 @@ impl Query {
 /// paths cannot disagree.
 #[inline]
 fn decode_span(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<FieldValue> {
-    let a = s.off as usize;
+    let a = (s.off as usize).min(buf.len());
     let b = (a + s.hlen as usize).min(buf.len());
     let hdr = &buf[a..b];
     f.is_active(hdr).then(|| field::decode(hdr, f))
 }
 
-/// The named item list a per-packet `.options` read returns. A bulk read of
-/// the same field has to answer with this and not the raw region, which the
-/// facade already exposes separately as `raw_options()`.
-fn parsed_options(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<Vec<Item>> {
-    if f.name != "options" {
-        return None;
-    }
-    let parse = proto::desc(s.proto).parse_options?;
-    let a = (s.off as usize).min(buf.len());
-    let b = (a + s.hlen as usize).min(buf.len());
-    Some(parse(&buf[a..b]))
+#[inline]
+fn decode_at(buf: &[u8], spans: &[LayerSpan], at: usize, r: &FieldRef) -> Option<FieldValue> {
+    decode_span(buf, spans.get(at)?, r.at(spans, at)?)
 }
 
 fn options_to_py(py: Python<'_>, items: &[Item]) -> PyResult<Py<PyList>> {
@@ -165,10 +192,19 @@ fn options_to_py(py: Python<'_>, items: &[Item]) -> PyResult<Py<PyList>> {
                 .map(|a| format!("{}.{}.{}.{}", a[0], a[1], a[2], a[3]))
                 .collect::<Vec<_>>()
                 .into_py(py),
+            ItemValue::Pairs(l) => PyList::new_bound(py, l).into(),
+            ItemValue::Items(v) => options_to_py(py, v)?.into_py(py),
         };
         out.append((it.name.as_ref(), v))?;
     }
     Ok(out.unbind())
+}
+
+fn type_names(types: &[u16]) -> Vec<&'static str> {
+    types
+        .iter()
+        .map(|t| wiry_core::layers::dns::rtype_name(*t))
+        .collect()
 }
 
 fn raw_bytes(v: &FieldValue) -> Option<&[u8]> {
@@ -193,9 +229,12 @@ fn resolve_spec(layer: &str, name: &str) -> PyResult<ColSpec> {
         };
     }
     let id = proto_by_name(layer)?;
-    let f = proto::field_of(id, name)
+    if name == "options" && proto::desc(id).parse_options.is_some() {
+        return Ok(ColSpec::Options(id));
+    }
+    let r = FieldRef::resolve(id, name)
         .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} on {layer}")))?;
-    Ok(ColSpec::Field(id, f))
+    Ok(ColSpec::Field(id, r))
 }
 
 pub(crate) fn build_query(
@@ -210,8 +249,9 @@ pub(crate) fn build_query(
     let mut out = Vec::with_capacity(conds.len());
     for (lname, fname, op, val) in conds {
         let proto = proto_by_name(&lname)?;
-        let f = proto::field_of(proto, &fname)
+        let r = FieldRef::resolve(proto, &fname)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {fname:?} on {lname}")))?;
+        let f = r.any();
         let v = val.bind(py);
         let cv = if let Ok(n) = v.extract::<u64>() {
             CondVal::Uint(n)
@@ -234,7 +274,7 @@ pub(crate) fn build_query(
         };
         out.push(Cond {
             proto,
-            field: f,
+            field: r,
             op: CmpOp::parse(&op)?,
             val: cv,
         });
@@ -323,13 +363,12 @@ impl PyPkt {
     }
 
     fn set_field_str(&mut self, layer: usize, name: &str, val: &str) -> PyResult<()> {
-        let span = self
+        if layer >= self.inner.layers().len() {
+            return Err(PyIndexError::new_err("layer out of range"));
+        }
+        let f = self
             .inner
-            .layers()
-            .get(layer)
-            .copied()
-            .ok_or_else(|| PyIndexError::new_err("layer out of range"))?;
-        let f = proto::active_field_of(span.proto, self.inner.header(layer), name)
+            .active_field(layer, name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
         match wiry_core::parse::value_for(f, val) {
             Some(wiry_core::parse::ValueBits::Uint(v)) => {
@@ -377,8 +416,15 @@ impl PyPkt {
         if span.proto != ProtoId::Dns {
             return Ok(None);
         }
-        // Compression pointers are offsets from the start of the DNS message.
-        let recs = dns::parse_records(self.inner.layer_bytes(layer));
+        let recs = dns::parse_records(self.inner.framed_body(layer));
+
+        let dict = |pairs: &[(&str, PyObject)]| -> PyObject {
+            let d = PyDict::new_bound(py);
+            for (k, v) in pairs {
+                let _ = d.set_item(k, v);
+            }
+            d.into()
+        };
 
         let rdata_to_py = |rd: &RData| -> PyObject {
             match rd {
@@ -395,17 +441,121 @@ impl PyPkt {
                     retry,
                     expire,
                     minimum,
-                } => {
-                    let d = PyDict::new_bound(py);
-                    let _ = d.set_item("mname", mname);
-                    let _ = d.set_item("rname", rname);
-                    let _ = d.set_item("serial", serial);
-                    let _ = d.set_item("refresh", refresh);
-                    let _ = d.set_item("retry", retry);
-                    let _ = d.set_item("expire", expire);
-                    let _ = d.set_item("minimum", minimum);
-                    d.into()
+                } => dict(&[
+                    ("mname", mname.into_py(py)),
+                    ("rname", rname.into_py(py)),
+                    ("serial", serial.into_py(py)),
+                    ("refresh", refresh.into_py(py)),
+                    ("retry", retry.into_py(py)),
+                    ("expire", expire.into_py(py)),
+                    ("minimum", minimum.into_py(py)),
+                ]),
+                RData::Srv {
+                    priority,
+                    weight,
+                    port,
+                    target,
+                } => dict(&[
+                    ("priority", priority.into_py(py)),
+                    ("weight", weight.into_py(py)),
+                    ("port", port.into_py(py)),
+                    ("target", target.into_py(py)),
+                ]),
+                RData::Caa { flags, tag, value } => dict(&[
+                    ("flags", flags.into_py(py)),
+                    ("tag", tag.into_py(py)),
+                    ("value", value.into_py(py)),
+                ]),
+                RData::Opt(opts) => {
+                    let out = PyList::empty_bound(py);
+                    for o in opts {
+                        let _ = out.append(dict(&[
+                            ("code", o.code.into_py(py)),
+                            ("name", dns::ednsopt_name(o.code).into_py(py)),
+                            ("data", PyBytes::new_bound(py, &o.data).into()),
+                        ]));
+                    }
+                    out.into()
                 }
+                RData::Ds {
+                    keytag,
+                    algorithm,
+                    digest_type,
+                    digest,
+                } => dict(&[
+                    ("keytag", keytag.into_py(py)),
+                    ("algorithm", algorithm.into_py(py)),
+                    ("digesttype", digest_type.into_py(py)),
+                    ("digest", PyBytes::new_bound(py, digest).into()),
+                ]),
+                RData::Rrsig {
+                    type_covered,
+                    algorithm,
+                    labels,
+                    original_ttl,
+                    expiration,
+                    inception,
+                    keytag,
+                    signer,
+                    signature,
+                } => dict(&[
+                    ("typecovered", dns::rtype_name(*type_covered).into_py(py)),
+                    ("rtypecovered", type_covered.into_py(py)),
+                    ("algorithm", algorithm.into_py(py)),
+                    ("labels", labels.into_py(py)),
+                    ("originalttl", original_ttl.into_py(py)),
+                    ("expiration", expiration.into_py(py)),
+                    ("inception", inception.into_py(py)),
+                    ("keytag", keytag.into_py(py)),
+                    ("signersname", signer.into_py(py)),
+                    ("signature", PyBytes::new_bound(py, signature).into()),
+                ]),
+                RData::Nsec { next, types } => dict(&[
+                    ("nextname", next.into_py(py)),
+                    ("types", type_names(types).into_py(py)),
+                    ("rtypes", PyList::new_bound(py, types).into()),
+                ]),
+                RData::Nsec3 {
+                    hash_alg,
+                    flags,
+                    iterations,
+                    salt,
+                    next_hashed,
+                    types,
+                } => dict(&[
+                    ("hashalg", hash_alg.into_py(py)),
+                    ("flags", flags.into_py(py)),
+                    ("iterations", iterations.into_py(py)),
+                    ("salt", PyBytes::new_bound(py, salt).into()),
+                    (
+                        "nexthashedownername",
+                        PyBytes::new_bound(py, next_hashed).into(),
+                    ),
+                    ("types", type_names(types).into_py(py)),
+                    ("rtypes", PyList::new_bound(py, types).into()),
+                ]),
+                RData::Nsec3Param {
+                    hash_alg,
+                    flags,
+                    iterations,
+                    salt,
+                } => dict(&[
+                    ("hashalg", hash_alg.into_py(py)),
+                    ("flags", flags.into_py(py)),
+                    ("iterations", iterations.into_py(py)),
+                    ("salt", PyBytes::new_bound(py, salt).into()),
+                ]),
+                RData::Dnskey {
+                    flags,
+                    protocol,
+                    algorithm,
+                    key,
+                } => dict(&[
+                    ("flags", flags.into_py(py)),
+                    ("protocol", protocol.into_py(py)),
+                    ("algorithm", algorithm.into_py(py)),
+                    ("publickey", PyBytes::new_bound(py, key).into()),
+                ]),
                 RData::Other(b) => PyBytes::new_bound(py, b).into(),
             }
         };
@@ -420,6 +570,14 @@ impl PyPkt {
                 d.set_item("rclass", r.rclass)?;
                 d.set_item("ttl", r.ttl)?;
                 d.set_item("rdata", rdata_to_py(&r.rdata))?;
+                // RFC 6891 §6.1.3: OPT spends CLASS and TTL on other fields.
+                if let Some(e) = r.edns() {
+                    d.set_item("udpsize", e.udpsize)?;
+                    d.set_item("extrcode", e.ext_rcode)?;
+                    d.set_item("version", e.version)?;
+                    d.set_item("do", e.dnssec_ok)?;
+                    d.set_item("z", e.z)?;
+                }
                 out.append(d)?;
             }
             Ok(out.unbind())
@@ -487,9 +645,7 @@ impl PyPkt {
             .get(layer)
             .ok_or_else(|| PyIndexError::new_err("layer out of range"))?
             .proto;
-        let mut out: Vec<&'static str> = proto::active_fields(proto, self.inner.header(layer))
-            .map(|f| f.name)
-            .collect();
+        let mut out: Vec<&'static str> = self.inner.active_fields(layer).map(|f| f.name).collect();
         out.extend_from_slice(proto::accessor_names(proto));
         Ok(out)
     }
@@ -680,7 +836,10 @@ impl PyPktList {
         let link = self.link;
         let div = if self.nanos { 1e9 } else { 1e6 };
         let nums = self.nums.as_deref();
-        let dissect = !q.is_empty() || resolved.iter().any(|s| matches!(s, ColSpec::Field(..)));
+        let dissect = !q.is_empty()
+            || resolved
+                .iter()
+                .any(|s| matches!(s, ColSpec::Field(..) | ColSpec::Options(..)));
 
         let cols: Vec<Vec<Cell>> = py.allow_threads(|| {
             let mut cols: Vec<Vec<Cell>> = resolved
@@ -705,11 +864,18 @@ impl PyPktList {
                         ColSpec::Num => {
                             Cell::Val(FieldValue::Uint(nums.map_or(row as u64, |n| n[row] as u64)))
                         }
-                        ColSpec::Field(id, f) => match spans.iter().find(|s| s.proto == *id) {
-                            Some(s) => match parsed_options(bytes, s, f) {
-                                Some(items) => Cell::Opts(items),
-                                None => decode_span(bytes, s, f).map_or(Cell::Null, Cell::Val),
-                            },
+                        ColSpec::Field(id, r) => match spans.iter().position(|s| s.proto == *id) {
+                            Some(at) => {
+                                decode_at(bytes, &spans, at, r).map_or(Cell::Null, Cell::Val)
+                            }
+                            None => Cell::Null,
+                        },
+                        // The named item list a per-packet `.options` read
+                        // returns, not the raw region: `raw_options()` is that.
+                        ColSpec::Options(id) => match spans.iter().position(|s| s.proto == *id) {
+                            Some(at) => {
+                                packet::options_at(bytes, &spans, at).map_or(Cell::Null, Cell::Opts)
+                            }
                             None => Cell::Null,
                         },
                     });
@@ -1104,11 +1270,11 @@ fn apply_fields(
         }
     }
     for (layer, name, s) in strs {
-        let span = pkt
-            .layers()
-            .get(*layer)
-            .ok_or_else(|| PyIndexError::new_err("layer out of range"))?;
-        let f = proto::active_field_of(span.proto, pkt.header(*layer), name)
+        if *layer >= pkt.layers().len() {
+            return Err(PyIndexError::new_err("layer out of range"));
+        }
+        let f = pkt
+            .active_field(*layer, name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
         match wiry_core::parse::value_for(f, s) {
             Some(wiry_core::parse::ValueBits::Uint(v)) => {
@@ -1201,7 +1367,7 @@ fn write_pcap(path: &str, packets: Vec<Vec<u8>>, linktype: u32) -> PyResult<()> 
 #[pyfunction]
 fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
     let id = proto_by_name(name)?;
-    let mut out: Vec<&'static str> = proto::desc(id).fields.iter().map(|f| f.name).collect();
+    let mut out = proto::all_field_names(id);
     out.extend_from_slice(proto::accessor_names(id));
     Ok(out)
 }

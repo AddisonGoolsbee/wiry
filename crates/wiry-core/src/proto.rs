@@ -137,19 +137,82 @@ pub fn known_layers() -> Vec<&'static str> {
     out
 }
 
-/// Ignores conditions, so it sees every field the protocol can ever carry.
-pub fn field_of(id: ProtoId, name: &str) -> Option<&'static FieldDesc> {
-    desc(id).fields.iter().find(|f| f.name == name)
+/// Octets of framing a `child` carries when it sits directly under `parent`.
+/// RFC 1035 §4.2.2 prefixes a DNS message with its own length over a stream;
+/// those two octets belong to neither header alone, so the pair decides. The
+/// dissector counts them into the child's header, ahead of every field.
+#[inline]
+pub fn framing_octets(parent: ProtoId, child: ProtoId) -> usize {
+    match (parent, child) {
+        (ProtoId::Tcp, ProtoId::Dns) => 2,
+        _ => 0,
+    }
 }
 
-pub fn active_fields(id: ProtoId, hdr: &[u8]) -> impl Iterator<Item = &'static FieldDesc> + '_ {
-    desc(id).fields.iter().filter(move |f| f.is_active(hdr))
+/// Framing moves every field, which a condition cannot express, so it is a
+/// second table rather than a second set of conditions.
+#[inline]
+pub fn fields_of(id: ProtoId, framed: bool) -> &'static [FieldDesc] {
+    match (id, framed) {
+        (ProtoId::Dns, true) => crate::layers::dns::TCP_FIELDS,
+        _ => desc(id).fields,
+    }
+}
+
+/// Empty for a layer that takes the same layout either way, so the callers below
+/// do not walk one table twice.
+fn framed_only(id: ProtoId) -> &'static [FieldDesc] {
+    let framed = fields_of(id, true);
+    if std::ptr::eq(framed, desc(id).fields) {
+        &[]
+    } else {
+        framed
+    }
+}
+
+/// Ignores conditions and framing, so it sees every field the protocol can ever
+/// carry. The descriptor answers questions about the *name* — its kind, width,
+/// flags, whether it is computed or conditional. It must not be decoded through:
+/// where a layer has two layouts the offsets are only right for one of them, so
+/// a read goes via `Packet::active_field`, which knows which layout this packet
+/// took.
+pub fn field_of(id: ProtoId, name: &str) -> Option<&'static FieldDesc> {
+    desc(id)
+        .fields
+        .iter()
+        .chain(framed_only(id))
+        .find(|f| f.name == name)
+}
+
+pub fn all_field_names(id: ProtoId) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = desc(id).fields.iter().map(|f| f.name).collect();
+    for f in framed_only(id) {
+        if !out.contains(&f.name) {
+            out.push(f.name);
+        }
+    }
+    out
+}
+
+pub fn active_fields(
+    id: ProtoId,
+    framed: bool,
+    hdr: &[u8],
+) -> impl Iterator<Item = &'static FieldDesc> + '_ {
+    fields_of(id, framed)
+        .iter()
+        .filter(move |f| f.is_active(hdr))
 }
 
 /// Two fields may share a name when their conditions are disjoint; the header
 /// bytes pick between them.
-pub fn active_field_of(id: ProtoId, hdr: &[u8], name: &str) -> Option<&'static FieldDesc> {
-    active_fields(id, hdr).find(|f| f.name == name)
+pub fn active_field_of(
+    id: ProtoId,
+    framed: bool,
+    hdr: &[u8],
+    name: &str,
+) -> Option<&'static FieldDesc> {
+    active_fields(id, framed, hdr).find(|f| f.name == name)
 }
 
 /// Names served by a parser rather than by the flat field table.
@@ -429,5 +492,77 @@ mod tests {
         let mut back = [0u8; 8];
         apply_bind(&mut back, ProtoId::Udp, id);
         assert_eq!(&back[..4], &hdr[..4]);
+    }
+
+    /// Every pair that contributes framing, and every layer that therefore has
+    /// a second field table. A layer added without an entry here takes the same
+    /// layout under every parent, which is what makes framing invisible to an
+    /// author who does not want it — and adding one has to be deliberate.
+    const FRAMED: &[(ProtoId, ProtoId)] = &[(ProtoId::Tcp, ProtoId::Dns)];
+
+    #[test]
+    fn only_a_declared_pair_carries_framing() {
+        for p in (0..BUILTIN_COUNT).map(ProtoId) {
+            for c in (0..BUILTIN_COUNT).map(ProtoId) {
+                let n = framing_octets(p, c);
+                assert_eq!(
+                    n > 0,
+                    FRAMED.contains(&(p, c)),
+                    "{}/{} framing is {n}, which the list does not declare",
+                    p.name(),
+                    c.name()
+                );
+            }
+        }
+        for id in (0..BUILTIN_COUNT).map(ProtoId) {
+            let framed = FRAMED.iter().any(|(_, c)| *c == id);
+            assert_eq!(
+                framed,
+                !framed_only(id).is_empty(),
+                "{} has a second field table without a pair that reaches it, or the reverse",
+                id.name()
+            );
+        }
+    }
+
+    /// A second table shifts the first, so it must still name everything the
+    /// first does: a name readable under one parent and missing under another
+    /// would be a layout that silently lost a field.
+    #[test]
+    fn a_framed_table_names_everything_the_plain_one_does() {
+        for id in (0..BUILTIN_COUNT).map(ProtoId) {
+            let extra = framed_only(id);
+            if extra.is_empty() {
+                continue;
+            }
+            for f in desc(id).fields {
+                assert!(
+                    extra.iter().any(|g| g.name == f.name),
+                    "{}.{} is missing from the framed table",
+                    id.name(),
+                    f.name
+                );
+            }
+        }
+    }
+
+    /// A condition is a closure over raw header offsets, and the header a framed
+    /// layer is read from starts at the framing, not at the first field. Shifting
+    /// the offsets in a second table therefore does not shift its conditions, so
+    /// the two cannot be combined until a condition is told where the fields
+    /// begin.
+    #[test]
+    fn no_framed_table_declares_a_conditional_field() {
+        for id in (0..BUILTIN_COUNT).map(ProtoId) {
+            for f in framed_only(id) {
+                assert!(
+                    f.cond.is_none(),
+                    "{}.{} is conditional in a framed table, where its predicate \
+                     would read the framing octets as the first header bytes",
+                    id.name(),
+                    f.name
+                );
+            }
+        }
     }
 }

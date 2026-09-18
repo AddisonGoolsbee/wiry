@@ -66,13 +66,18 @@ impl Packet {
                     spans[i - 1].hlen += extra.len() as u32;
                 }
             }
+            let pre = match i.checked_sub(1) {
+                Some(j) => crate::proto::framing_octets(stack[j].0, p),
+                None => 0,
+            };
+            let fields = crate::proto::fields_of(p, pre > 0);
             let off = buf.len();
-            buf.resize(off + d.build_len, 0);
-            let mut hlen = d.build_len;
+            buf.resize(off + pre + d.build_len, 0);
+            let mut hlen = pre + d.build_len;
             if let Some(o) = opts {
                 if !o.is_empty() {
                     buf.extend_from_slice(o);
-                    hlen = d.build_len + o.len();
+                    hlen = pre + d.build_len + o.len();
                     if d.set_hlen.is_some() {
                         let pad = (4 - (o.len() % 4)) % 4;
                         buf.extend(std::iter::repeat(0u8).take(pad));
@@ -81,7 +86,7 @@ impl Packet {
                 }
             }
             let hdr_end = (off + hlen).min(buf.len());
-            for f in d.fields {
+            for f in fields {
                 if !f.is_active(&buf[off..hdr_end]) {
                     continue;
                 }
@@ -180,9 +185,39 @@ impl Packet {
         &self.buf[a..]
     }
 
+    #[inline]
+    pub fn framing(&self, layer: usize) -> usize {
+        framing_at(&self.spans, layer)
+    }
+
+    #[inline]
+    pub fn fields(&self, layer: usize) -> &'static [FieldDesc] {
+        match self.spans.get(layer) {
+            Some(s) => crate::proto::fields_of(s.proto, self.framing(layer) > 0),
+            None => &[],
+        }
+    }
+
+    pub fn active_fields(&self, layer: usize) -> impl Iterator<Item = &'static FieldDesc> + '_ {
+        let hdr = self.header(layer);
+        self.fields(layer).iter().filter(move |f| f.is_active(hdr))
+    }
+
+    #[inline]
+    pub fn active_field(&self, layer: usize, name: &str) -> Option<&'static FieldDesc> {
+        let s = self.spans.get(layer)?;
+        crate::proto::active_field_of(s.proto, self.framing(layer) > 0, self.header(layer), name)
+    }
+
+    /// The DNS message proper: RFC 1035 §4.1.4 compression pointers count from
+    /// its first octet, which is past any framing.
+    pub fn framed_body(&self, layer: usize) -> &[u8] {
+        let n = self.framing(layer);
+        self.layer_bytes(layer).get(n..).unwrap_or(&[])
+    }
+
     pub fn get(&self, layer: usize, name: &str) -> Option<FieldValue> {
-        let proto = self.spans.get(layer)?.proto;
-        let f = crate::proto::active_field_of(proto, self.header(layer), name)?;
+        let f = self.active_field(layer, name)?;
         Some(self.get_desc(layer, f))
     }
 
@@ -199,7 +234,7 @@ impl Packet {
         let Some(s) = self.spans.get(layer).copied() else {
             return false;
         };
-        let Some(f) = crate::proto::active_field_of(s.proto, self.header(layer), name) else {
+        let Some(f) = self.active_field(layer, name) else {
             return false;
         };
         if !field::fits(f, val) {
@@ -220,11 +255,7 @@ impl Packet {
     /// Whether `set_uint` would accept this value, so a caller can tell a field
     /// that does not exist from one that cannot hold what it was given.
     pub fn uint_fits(&self, layer: usize, name: &str, val: u64) -> bool {
-        let f = self
-            .spans
-            .get(layer)
-            .and_then(|s| crate::proto::active_field_of(s.proto, self.header(layer), name));
-        match f {
+        match self.active_field(layer, name) {
             Some(f) => field::fits(f, val),
             None => true,
         }
@@ -250,7 +281,7 @@ impl Packet {
         let Some(s) = self.spans.get(layer).copied() else {
             return false;
         };
-        let Some(f) = crate::proto::active_field_of(s.proto, self.header(layer), name) else {
+        let Some(f) = self.active_field(layer, name) else {
             return false;
         };
         // A conditional field can be declared past the end of a header this short
@@ -413,10 +444,7 @@ impl Packet {
     /// `None` means the protocol has no option region at all, unlike
     /// `Some(vec![])`, which means it has an empty one.
     pub fn options(&self, layer: usize) -> Option<Vec<crate::options::Item>> {
-        let s = self.spans.get(layer)?;
-        let parse = desc(s.proto).parse_options?;
-        let (a, b) = self.hdr_range(s);
-        Some(parse(&self.buf[a..b]))
+        options_at(&self.buf, &self.spans, layer)
     }
 
     pub fn raw_bytes(&self) -> &[u8] {
@@ -432,6 +460,50 @@ pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
     spans_of(buf, link, true)
 }
 
+fn span_slice<'a>(buf: &'a [u8], s: &LayerSpan) -> &'a [u8] {
+    let a = (s.off as usize).min(buf.len());
+    let b = (a + s.hlen as usize).min(buf.len());
+    &buf[a..b]
+}
+
+/// The one parse of an option region, so a bulk read and a per-packet read
+/// cannot answer differently. DHCP's region is not only its own bytes: RFC 2131
+/// §4.1 lets `sname` and `file` carry options too, and RFC 3396 splits one long
+/// value over repeated appearances of its code.
+pub fn options_at(
+    buf: &[u8],
+    spans: &[LayerSpan],
+    layer: usize,
+) -> Option<Vec<crate::options::Item>> {
+    let s = spans.get(layer)?;
+    let d = desc(s.proto);
+    let parse = d.parse_options?;
+    let Some(t) = d.opt_table.filter(|_| s.proto == ProtoId::Dhcp) else {
+        return Some(parse(span_slice(buf, s)));
+    };
+    let mut tlvs = t.walk_raw(span_slice(buf, s));
+    if let Some(b) = spans[..layer].iter().rfind(|x| x.proto == ProtoId::Bootp) {
+        let hdr = span_slice(buf, b);
+        for (lo, hi) in crate::layers::bootp::overload_regions(&tlvs) {
+            if let Some(region) = hdr.get(lo..hi) {
+                tlvs.extend(t.walk_raw(region));
+            }
+        }
+    }
+    Some(crate::layers::bootp::decode_joined(t, &tlvs))
+}
+
+#[inline]
+pub fn framing_at(spans: &[LayerSpan], layer: usize) -> usize {
+    match (
+        layer.checked_sub(1).and_then(|j| spans.get(j)),
+        spans.get(layer),
+    ) {
+        (Some(p), Some(s)) => crate::proto::framing_octets(p.proto, s.proto),
+        _ => 0,
+    }
+}
+
 /// `bound` is false when rebuilding after the buffer changed under us: the
 /// length fields still describe the old extent, so they bound nothing yet.
 fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
@@ -441,12 +513,17 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
     // 60-octet minimum carries bytes past it.
     let mut end = buf.len();
     let mut proto = link;
+    // `None`, not a sentinel protocol: the outermost layer has no enclosing pair
+    // to contribute framing, which is also how `framing_at` reads it back.
+    let mut parent: Option<ProtoId> = None;
 
     for _ in 0..MAX_LAYERS {
         let d = desc(proto);
         let remaining = end.saturating_sub(off);
+        // Framing lengthens the header and the shortest readable input alike.
+        let pre = parent.map_or(0, |p| crate::proto::framing_octets(p, proto));
 
-        if remaining < d.min_len {
+        if remaining < d.min_len + pre {
             if remaining > 0 {
                 spans.push(LayerSpan {
                     proto: ProtoId::Raw,
@@ -458,8 +535,8 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
             break;
         }
 
-        let hdr = &buf[off..end];
-        let hlen = (d.header_len)(hdr).max(d.min_len).min(remaining);
+        let hdr = &buf[off + pre..end];
+        let hlen = (pre + (d.header_len)(hdr).max(d.min_len)).min(remaining);
 
         spans.push(LayerSpan {
             proto,
@@ -471,7 +548,7 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
         // A length claiming more than was captured means a clipped capture, not
         // a trailer, so the bound only ever tightens.
         if let Some(f) = d.content_len.filter(|_| bound) {
-            let claimed = f(hdr);
+            let claimed = pre + f(hdr);
             if claimed >= hlen && off + claimed < end {
                 end = off + claimed;
             }
@@ -484,6 +561,7 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
             None => (d.next)(hdr),
         };
         off += hlen;
+        parent = Some(proto);
 
         match next {
             Next::Proto(p) if off < end => proto = p,
