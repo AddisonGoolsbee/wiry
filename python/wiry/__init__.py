@@ -14,7 +14,9 @@ __version__ = _b.__version__
 
 __all__ = [
     "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "PcapReader",
-    "raw", "hexdump", "hexdump_str", "ls", "known_layers", "bind_layers",
+    "raw", "hexdump", "hexdump_str", "hexdiff", "hexdiff_str",
+    "ls", "known_layers", "bind_layers",
+    "fragment", "fragment6", "defragment", "defrag", "defragment6",
     "to_arrow", "to_polars", "to_pandas",
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
     "get_if_list", "get_if_addr", "get_working_if", "interfaces", "conf",
@@ -22,6 +24,10 @@ __all__ = [
 ]
 
 _COLUMNAR = ("to_arrow", "to_polars", "to_pandas")
+
+_FRAG = ("fragment", "fragment6", "defragment", "defrag", "defragment6")
+
+_DESCRIBE = ("hexdiff", "hexdiff_str")
 
 _CAPTURE = (
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
@@ -37,6 +43,12 @@ def __getattr__(name: str) -> Any:
     if name in _CAPTURE:
         from . import capture
         return getattr(capture, name)
+    if name in _FRAG:
+        from . import frag
+        return getattr(frag, name)
+    if name in _DESCRIBE:
+        from . import describe
+        return getattr(describe, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -639,6 +651,20 @@ class Packet(metaclass=_PacketMeta):
         if self._rust is None and self._stack:
             return " / ".join(n for n, _ in self._stack)
         return self._materialize().summary()
+
+    def command(self) -> str:
+        """The Python expression that rebuilds this packet, byte for byte."""
+        from .describe import command
+        return command(self)
+
+    def json(self, **kw: Any) -> str:
+        from .describe import json_str
+        return json_str(self, **kw)
+
+    def fragment(self, fragsize: int | None = None) -> list["Packet"]:
+        """Split this datagram per RFC 791 §3.2."""
+        from .frag import FRAGSIZE, fragment
+        return fragment(self, FRAGSIZE if fragsize is None else fragsize)
 
     def __repr__(self) -> str:
         return f"<{self.summary()}>"

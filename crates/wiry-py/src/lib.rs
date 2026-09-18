@@ -16,6 +16,7 @@ use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PySequence};
 use std::sync::Arc;
 use wiry_capture::Flow;
 use wiry_core::field::{self, FieldDesc, FieldKind, FieldValue};
+use wiry_core::frag;
 use wiry_core::options::{Item, OptArg};
 use wiry_core::packet::{dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use wiry_core::pcap;
@@ -479,6 +480,53 @@ impl PyPkt {
         self.inner.len()
     }
 
+    /// The raw integer behind a field. A flags field renders as a string and an
+    /// unnamed bit renders as nothing, so a caller that has to reproduce the
+    /// octets reads the number instead.
+    fn field_uint(&self, layer: usize, name: &str) -> Option<u64> {
+        self.inner.get(layer, name).and_then(|v| v.as_uint())
+    }
+
+    /// Bytes the layer stacked under this one contributes to this one's header
+    /// (BOOTP's magic cookie, RFC 2131 §3). Construction appends them itself, so
+    /// a caller rebuilding from field values must not pass them a second time.
+    fn bound_suffix<'py>(&self, py: Python<'py>, layer: usize) -> Bound<'py, PyBytes> {
+        let spans = self.inner.layers();
+        let extra = match (spans.get(layer), spans.get(layer + 1)) {
+            (Some(s), Some(n)) => proto::desc(s.proto)
+                .bind_next_bytes
+                .map(|f| f(n.proto))
+                .unwrap_or(&[]),
+            _ => &[],
+        };
+        PyBytes::new_bound(py, extra)
+    }
+
+    /// Octets past the last dissected layer. Dissection stops at a depth bound,
+    /// so a chain deeper than that leaves a tail no layer describes and a
+    /// caller rebuilding from field values would otherwise drop it.
+    fn tail<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        let end = self
+            .inner
+            .layers()
+            .last()
+            .map_or(0, |s| (s.off + s.hlen) as usize);
+        PyBytes::new_bound(py, self.inner.buf.get(end..).unwrap_or(&[]))
+    }
+
+    /// Names `field_names` lists that a parser answers rather than octets
+    /// (`DNS.an`), so they have no offset and cannot be read or assigned as
+    /// fields. A caller reproducing a header skips exactly these.
+    fn accessor_names(&self, layer: usize) -> PyResult<Vec<&'static str>> {
+        let proto = self
+            .inner
+            .layers()
+            .get(layer)
+            .ok_or_else(|| PyIndexError::new_err("layer out of range"))?
+            .proto;
+        Ok(proto::accessor_names(proto).to_vec())
+    }
+
     /// A conditional field absent from this particular header is not listed.
     fn field_names(&self, layer: usize) -> PyResult<Vec<&'static str>> {
         let proto = self
@@ -823,6 +871,47 @@ impl PyPktList {
             });
         }
         Ok(self.keeping(&keep))
+    }
+
+    /// The result is a new capture rather than a view, because a reassembled
+    /// datagram is bytes no record in this one holds. Alongside it comes one tag
+    /// per packet: 0 carried no fragment, 1 was reassembled, 2 is a fragment
+    /// whose datagram never completed.
+    fn defragmented(&self, py: Python<'_>) -> (PyPktList, Vec<u8>) {
+        let link = self.link;
+        let (buf, index, kinds) = py.allow_threads(|| {
+            let n = self.index.len();
+            let frames: Vec<&[u8]> = (0..n).map(|i| self.bytes_at(i)).collect();
+            // Reassembly only ever joins records, so the output is no longer
+            // than the input and no reallocation is needed.
+            let mut buf: Vec<u8> = Vec::with_capacity(self.buf.len());
+            let mut index: Vec<Record> = Vec::with_capacity(n);
+            let mut kinds: Vec<u8> = Vec::with_capacity(n);
+            for piece in frag::defragment(frames.iter().copied(), link) {
+                let (_, _, sec, frac) = self.index[piece.at() as usize];
+                let (bytes, kind): (&[u8], u8) = match &piece {
+                    frag::Piece::Whole(i) => (frames[*i as usize], 0),
+                    frag::Piece::Complete(_, f) => (f, 1),
+                    frag::Piece::Incomplete(i) => (frames[*i as usize], 2),
+                };
+                index.push((buf.len(), bytes.len() as u32, sec, frac));
+                buf.extend_from_slice(bytes);
+                kinds.push(kind);
+            }
+            (buf, index, kinds)
+        });
+        (
+            PyPktList::from_capture(buf, index, self.dlt, self.nanos),
+            kinds,
+        )
+    }
+
+    /// Shares the capture buffer: no copy.
+    fn select(&self, idx: Vec<u32>) -> PyResult<PyPktList> {
+        if idx.iter().any(|i| *i as usize >= self.index.len()) {
+            return Err(PyIndexError::new_err("packet index out of range"));
+        }
+        Ok(self.keeping(&idx))
     }
 
     /// Shares the capture buffer: no copy.
@@ -1186,6 +1275,49 @@ fn build_packet(
     })
 }
 
+/// One crossing for the whole fragment list.
+#[pyfunction]
+fn fragment_frame<'py>(
+    py: Python<'py>,
+    data: &[u8],
+    link: &str,
+    fragsize: usize,
+) -> PyResult<Bound<'py, PyList>> {
+    let id = proto_by_name(link)?;
+    let out = PyList::empty_bound(py);
+    for f in frag::fragment(data, id, fragsize) {
+        out.append(PyBytes::new_bound(py, &f))?;
+    }
+    Ok(out)
+}
+
+/// The list-granularity half of reassembly, for packets that are not backed by
+/// a capture buffer. Returns the positions that carried no fragment, the
+/// datagrams reassembled and where each one began, and the positions of
+/// fragments that never completed.
+#[pyfunction]
+fn defragment_frames<'py>(
+    py: Python<'py>,
+    frames: Vec<Vec<u8>>,
+    link: &str,
+) -> PyResult<(Vec<u32>, Bound<'py, PyList>, Vec<u32>)> {
+    let id = proto_by_name(link)?;
+    let pieces = py.allow_threads(|| {
+        let refs: Vec<&[u8]> = frames.iter().map(|f| f.as_slice()).collect();
+        frag::defragment(refs, id)
+    });
+    let (mut whole, mut missing) = (Vec::new(), Vec::new());
+    let done = PyList::empty_bound(py);
+    for piece in pieces {
+        match piece {
+            frag::Piece::Whole(i) => whole.push(i),
+            frag::Piece::Incomplete(i) => missing.push(i),
+            frag::Piece::Complete(i, f) => done.append((i, PyBytes::new_bound(py, &f)))?,
+        }
+    }
+    Ok((whole, done, missing))
+}
+
 #[pyfunction]
 #[pyo3(signature = (path, packets, linktype = 1))]
 fn write_pcap(path: &str, packets: Vec<Vec<u8>>, linktype: u32) -> PyResult<()> {
@@ -1356,6 +1488,8 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_pcap, m)?)?;
     m.add_function(wrap_pyfunction!(write_pcap, m)?)?;
     m.add_function(wrap_pyfunction!(dissect, m)?)?;
+    m.add_function(wrap_pyfunction!(fragment_frame, m)?)?;
+    m.add_function(wrap_pyfunction!(defragment_frames, m)?)?;
     m.add_function(wrap_pyfunction!(build_stack, m)?)?;
     m.add_function(wrap_pyfunction!(build_packet, m)?)?;
     m.add_function(wrap_pyfunction!(build_and_serialize, m)?)?;

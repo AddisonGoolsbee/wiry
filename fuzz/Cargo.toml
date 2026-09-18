@@ -71,3 +71,10 @@ path = "fuzz_targets/roundtrip.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "reassemble"
+path = "fuzz_targets/reassemble.rs"
+test = false
+doc = false
+bench = false

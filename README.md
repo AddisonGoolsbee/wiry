@@ -19,8 +19,8 @@ Ethernet, 802.1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP,
 Loopback or Linux cooked capture, it dissects to `Raw` and round-trips unchanged,
 and you get bytes rather than fields.
 
-The method surface is narrower too. `show2`, `sprintf`, `fragment`, `json` and
-`command` are absent. Most of what else scapy's `Packet` carries is its own
+The method surface is narrower too. `show2` and `sprintf` are absent. Most of
+what else scapy's `Packet` carries is its own
 internal machinery, `do_build`, `post_dissect`, `self_build` and the rest, which
 exists because scapy assembles an object graph per packet. wiry does not, so it
 has no equivalent and needs none.
@@ -82,7 +82,13 @@ from wiry import *
 p = Ether(dst="00:11:22:33:44:55")/IP(dst="10.0.0.2")/TCP(dport=80, flags="S")
 raw(p)                      # checksums and lengths filled in
 p[TCP].dport = 443          # mutate; checksums recompute
+p.command()                 # the expression that rebuilds it, byte for byte
 ```
+
+`fragment(pkt, 1480)` splits a datagram per RFC 791 §3.2 and `defragment(cap)`
+puts one back together, over a whole capture in a single crossing. Reassembly
+buffers attacker-controlled bytes, so its bounds and its overlap rule are
+stated in [DEVIATIONS.md](DEVIATIONS.md) E18 rather than left to be discovered.
 
 Capture and injection work too: `sniff`, `send`, `sendp`, `sr`, `sr1`, `srp`,
 `srp1` and `AsyncSniffer`, with scapy's arguments and semantics. Two limits, both
@@ -157,24 +163,26 @@ Against a real 14,261-packet capture, compared with scapy 2.7.0: all 14,261
 layer chains agree, all 155,501 field comparisons are equal, and every packet
 re-serialises byte-identically.
 
-scapy's own regression suite runs against wiry: **39 pass, 636 skip, 5 fail.**
+scapy's own regression suite runs against wiry: **40 pass, 635 skip, 5 fail.**
 A skip is a scope boundary, most often a layer we do not implement or a test
 whose `~` marker asks for a Linux host, root or tshark. Of the 5 failures, 2 are
 scapy's `Net` address generators, 1 needs gzip input, 1 needs Windows, and 1
 asserts by patching a scapy internal we do not have. Every gap is enumerated in
 [DEVIATIONS.md](DEVIATIONS.md).
 
-281 Rust and 594 Python tests pass, 286 Rust with live capture built in. All
+312 Rust and 724 Python tests pass, 317 Rust with live capture built in. All
 three crates set `#![forbid(unsafe_code)]`, which constrains this code and says
 nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
-compiled in. The dissector carries seven fuzz targets plus seeded property tests
+compiled in. The dissector carries eight fuzz targets plus seeded property tests
 that run on stable.
 
-Three adversarial reviews went looking for wrong answers, hostile-input
-failures and races in the capture surface. They found fifteen bugs, including a
+Four adversarial reviews went looking for wrong answers, hostile-input
+failures and races in the capture surface. They found nineteen bugs, including a
 field write that could corrupt the layer beside it, a reply matcher that paired
-answers with the wrong probe, and an option value that could crash the
-interpreter. All are fixed, with a regression test each.
+answers with the wrong probe, an option value that could crash the interpreter,
+a reassembler whose received-range bookkeeping went quadratic on a fragment set
+built to make it, and an expression rebuild that silently dropped whatever lay
+past the dissector's depth bound. All are fixed, with a regression test each.
 
 ## When not to use wiry
 

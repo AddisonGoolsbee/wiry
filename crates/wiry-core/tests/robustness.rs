@@ -5,6 +5,8 @@
 
 use std::time::{Duration, Instant};
 use wiry_core::answers;
+use wiry_core::checksum;
+use wiry_core::frag;
 use wiry_core::layers::{bootp, dns, ipv4, tcp};
 use wiry_core::packet::Packet;
 use wiry_core::proto::{self, desc, ProtoId};
@@ -839,4 +841,169 @@ fn capture_readers_survive_corruption() {
         start.elapsed() < BUDGET,
         "capture reading did not finish promptly (seed {SEED:#x})"
     );
+}
+
+/// Ether/IPv4/payload with a correct Total Length and header checksum, so
+/// reassembly's recomputed checksum can be compared against the original.
+fn ip_datagram(opts: &[u8], payload: &[u8]) -> Vec<u8> {
+    let ihl = 20 + opts.len();
+    let mut v = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+    v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]);
+    v.extend_from_slice(&[0x08, 0x00]);
+    v.push(0x40 | (ihl / 4) as u8);
+    v.push(0);
+    v.extend_from_slice(&((ihl + payload.len()) as u16).to_be_bytes());
+    v.extend_from_slice(&[0x12, 0x34, 0x00, 0x00, 0x40, 6, 0x00, 0x00]);
+    v.extend_from_slice(&[10, 0, 0, 1, 10, 0, 0, 2]);
+    v.extend_from_slice(opts);
+    let ck = checksum::ones_complement(&v[14..14 + ihl]);
+    v[14 + 10..14 + 12].copy_from_slice(&ck.to_be_bytes());
+    v.extend_from_slice(payload);
+    v
+}
+
+fn reassembled(frames: &[Vec<u8>]) -> Vec<frag::Piece> {
+    let refs: Vec<&[u8]> = frames.iter().map(|f| f.as_slice()).collect();
+    frag::defragment(refs, ProtoId::Ether)
+}
+
+/// RFC 791 §3.2 in both directions.
+#[test]
+fn fragmenting_and_reassembling_returns_the_datagram() {
+    let mut rng = Rng::new(SEED ^ 0xf9a6);
+    let opt_sets: [&[u8]; 3] = [
+        &[],
+        &[0x83, 0x07, 0x04, 10, 0, 0, 9, 0x00],
+        &[0x07, 0x0b, 0x08, 10, 0, 0, 1, 0, 0, 0, 0, 0x00],
+    ];
+    for i in 0..500 {
+        let opts = opt_sets[rng.below(opt_sets.len())];
+        let n = 1 + rng.below(2000);
+        let payload = rng.bytes(n);
+        let size = rng.below(1600);
+        let d = ip_datagram(opts, &payload);
+        let mut frames = frag::fragment(&d, ProtoId::Ether, size);
+        assert!(!frames.is_empty(), "#{i} size {size} (seed {SEED:#x})");
+        // Order is not a property of a datagram, so shuffle sometimes.
+        if i % 3 == 0 {
+            for at in (1..frames.len()).rev() {
+                frames.swap(at, rng.below(at + 1));
+            }
+        }
+        match reassembled(&frames).as_slice() {
+            [frag::Piece::Complete(_, back)] => {
+                assert_eq!(back, &d, "#{i} size {size} (seed {SEED:#x})")
+            }
+            [frag::Piece::Whole(0)] => {
+                assert_eq!(frames.len(), 1, "#{i} size {size} (seed {SEED:#x})")
+            }
+            other => panic!("#{i} size {size} (seed {SEED:#x}): {other:?}"),
+        }
+        if i % 25 == 0 {
+            for f in &frames {
+                let mut p = Packet::dissect(f.clone(), ProtoId::Ether);
+                exercise(&mut p, "fragment");
+            }
+        }
+    }
+}
+
+#[test]
+fn reassembly_survives_hostile_fragments() {
+    within(BUDGET, "hostile reassembly", || {
+        let mut rng = Rng::new(SEED ^ 0x0f4a);
+        let base = ip_datagram(&[], &[0x5a; 900]);
+        let good = frag::fragment(&base, ProtoId::Ether, 64);
+        for _ in 0..600 {
+            let mut batch: Vec<Vec<u8>> = Vec::new();
+            for _ in 0..1 + rng.below(12) {
+                let mut f = good[rng.below(good.len())].clone();
+                for _ in 0..rng.below(6) {
+                    let at = rng.below(f.len());
+                    f[at] = match rng.below(4) {
+                        0 => 0,
+                        1 => 1,
+                        2 => 0xff,
+                        _ => rng.byte(),
+                    };
+                }
+                if rng.below(4) == 0 {
+                    f.truncate(rng.below(f.len() + 1));
+                }
+                batch.push(f);
+            }
+            batch.push(rng.bytes_below(200));
+            let got = reassembled(&batch);
+            assert!(got.len() <= batch.len(), "reassembly invented pieces");
+            for piece in got {
+                if let frag::Piece::Complete(_, f) = piece {
+                    assert!(f.len() <= frag::MAX_DATAGRAM + 64);
+                    let mut p = Packet::dissect(f, ProtoId::Ether);
+                    exercise(&mut p, "reassembled from mutated fragments");
+                }
+            }
+        }
+        // Pure noise, at every entry point the dissector knows.
+        for _ in 0..2000 {
+            let n = 1 + rng.below(8);
+            let batch: Vec<Vec<u8>> = (0..n).map(|_| rng.bytes_below(120)).collect();
+            let refs: Vec<&[u8]> = batch.iter().map(|f| f.as_slice()).collect();
+            let link = ENTRY_POINTS[rng.below(ENTRY_POINTS.len())];
+            let _ = frag::defragment(refs, link);
+            let _ = frag::fragment(&batch[0], link, rng.below(200));
+        }
+    });
+}
+
+/// Teardrop and its descendants are refused before anything is buffered.
+#[test]
+fn an_impossible_fragment_extent_buffers_nothing() {
+    let base = ip_datagram(&[], &[0u8; 64]);
+    let good = frag::fragment(&base, ProtoId::Ether, 8);
+    let mut evil = good[1].clone();
+    evil[14 + 6] = 0x3f;
+    evil[14 + 7] = 0xff;
+    assert_eq!(reassembled(&[evil]), vec![frag::Piece::Incomplete(0)]);
+}
+
+/// The named caps bound how much a hostile capture may buffer; this bounds
+/// what it may cost. Non-adjacent fragments are the worst shape for the
+/// received-range list, and re-sorting that list per fragment made one datagram
+/// quadratic.
+#[test]
+fn a_datagram_fed_non_adjacent_fragments_stays_cheap() {
+    within(Duration::from_secs(20), "sparse reassembly", || {
+        let base = ip_datagram(&[], &[0u8; 8]);
+        let mut frames = Vec::new();
+        for group in 0..16u16 {
+            for at in 0..(frag::MAX_DATAGRAM / 16) {
+                let mut f = base.clone();
+                f[14 + 4..14 + 6].copy_from_slice(&group.to_be_bytes());
+                f[14 + 6..14 + 8].copy_from_slice(&(0x2000u16 | (at * 2) as u16).to_be_bytes());
+                f[14 + 10] = 0;
+                f[14 + 11] = 0;
+                let ck = checksum::ones_complement(&f[14..14 + 20]);
+                f[14 + 10..14 + 12].copy_from_slice(&ck.to_be_bytes());
+                frames.push(f);
+            }
+        }
+        let got = reassembled(&frames);
+        assert_eq!(got.len(), frames.len());
+        assert!(got.iter().all(|p| matches!(p, frag::Piece::Incomplete(_))));
+    });
+}
+
+/// Every fragment dropped by the in-flight cap is still reported.
+#[test]
+fn unfinished_datagrams_are_capped() {
+    let base = ip_datagram(&[], &[0u8; 64]);
+    let mut frames = Vec::new();
+    for i in 0..(frag::MAX_INFLIGHT * 2) {
+        let mut f = frag::fragment(&base, ProtoId::Ether, 8).swap_remove(0);
+        f[14 + 4..14 + 6].copy_from_slice(&((i % 65536) as u16).to_be_bytes());
+        frames.push(f);
+    }
+    let got = reassembled(&frames);
+    assert_eq!(got.len(), frames.len());
+    assert!(got.iter().all(|p| matches!(p, frag::Piece::Incomplete(_))));
 }
