@@ -1,8 +1,8 @@
 use wiry_core::pcap;
 
-/// (offset into the image, caplen, ts_sec, ts_frac), matching the index a read
-/// pcap file produces.
-pub type Record = (usize, u32, u32, u32);
+/// (offset into the image, caplen, ts_sec, ts_frac, origlen), matching the
+/// index a read pcap file produces.
+pub type Record = (usize, u32, u32, u32, u32);
 
 /// What the caller wants after seeing a packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +43,7 @@ pub struct CaptureBuf {
 impl CaptureBuf {
     pub fn new(linktype: u32, snaplen: u32) -> Self {
         let mut buf = Vec::new();
-        pcap::write_header(&mut buf, linktype, snaplen);
+        pcap::write_header(&mut buf, linktype, snaplen, false);
         Self {
             buf,
             index: Vec::new(),
@@ -55,8 +55,13 @@ impl CaptureBuf {
         // write_record emits a 16-byte record header before the data.
         let off = self.buf.len() + 16;
         pcap::write_record(&mut self.buf, meta.ts_sec, meta.ts_frac, data, meta.origlen);
-        self.index
-            .push((off, data.len() as u32, meta.ts_sec, meta.ts_frac));
+        self.index.push((
+            off,
+            data.len() as u32,
+            meta.ts_sec,
+            meta.ts_frac,
+            meta.origlen,
+        ));
     }
 
     pub fn len(&self) -> usize {
@@ -112,7 +117,7 @@ mod tests {
         cb.push(&meta(2, 2), &[0xee, 0xff]);
         let (buf, index, _) = cb.into_parts();
         let expected: [&[u8]; 2] = [&[0xaa, 0xbb, 0xcc, 0xdd], &[0xee, 0xff]];
-        for (i, (off, len, _, _)) in index.iter().enumerate() {
+        for (i, (off, len, _, _, _)) in index.iter().enumerate() {
             assert_eq!(&buf[*off..*off + *len as usize], expected[i]);
         }
     }

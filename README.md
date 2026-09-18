@@ -107,6 +107,28 @@ have been restricted by the OS since XP SP2. Those entry points exist and raise
 capture file with no privileges and no feature flag: `count`, `store`, `prn`,
 `lfilter`, `stop_filter`, `timeout` and the `where=` extension.
 
+## Capture files
+
+pcap and pcapng, read and written, plus gzip on both sides — picked by magic
+bytes on the way in and by file name on the way out.
+
+```python
+from wiry import rdpcap, wrpcap, PcapWriter, Ether, IP, TCP
+
+wrpcap("out.pcapng", rdpcap("capture.pcap"))   # whole capture, one crossing
+
+with PcapWriter("stream.pcap.gz", append=True) as w:
+    w.write(Ether()/IP()/TCP(dport=80))
+```
+
+Writing a whole `PacketList` copies it inside Rust with the GIL released and
+builds no Python object per packet; `PcapWriter.write()` is the per-packet
+streaming path, and both encode through the same code, so the files agree byte
+for byte. Appending reads the existing file's header first and refuses a link
+type it would misdescribe, or a pcapng that ends mid-block; a refused append
+leaves the file exactly as it found it. What pcapng we do not write is listed in
+[DEVIATIONS.md](DEVIATIONS.md) E5.
+
 ## Captures as columns
 
 The part scapy has no equivalent for. A capture already lives in Rust as one
@@ -164,17 +186,17 @@ Against a real 14,261-packet capture, compared with scapy 2.7.0: all 14,261
 layer chains agree, all 155,501 field comparisons are equal, and every packet
 re-serialises byte-identically.
 
-scapy's own regression suite runs against wiry: **39 pass, 636 skip, 5 fail.**
+scapy's own regression suite runs against wiry: **40 pass, 636 skip, 4 fail.**
 A skip is a scope boundary, most often a layer we do not implement or a test
-whose `~` marker asks for a Linux host, root or tshark. Of the 5 failures, 2 are
-scapy's `Net` address generators, 1 needs gzip input, 1 needs Windows, and 1
-asserts by patching a scapy internal we do not have. Every gap is enumerated in
+whose `~` marker asks for a Linux host, root or tshark. Of the 4 failures, 2 are
+scapy's `Net` address generators, 1 needs Windows, and 1 asserts by patching a
+scapy internal we do not have. Every gap is enumerated in
 [DEVIATIONS.md](DEVIATIONS.md).
 
 328 Rust and 654 Python tests pass, 333 Rust with live capture built in. All
 three crates set `#![forbid(unsafe_code)]`, which constrains this code and says
 nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
-compiled in. The dissector carries seven fuzz targets plus seeded property tests
+compiled in. The dissector carries eight fuzz targets plus seeded property tests
 that run on stable.
 
 Four adversarial reviews went looking for wrong answers, hostile-input

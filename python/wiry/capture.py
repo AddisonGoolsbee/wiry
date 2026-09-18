@@ -22,7 +22,7 @@ import threading
 import weakref
 from typing import Any, Callable, Optional
 
-from . import Packet, PacketList
+from . import Packet, PacketList, _as_path
 from . import _wiry as _b
 from .columnar import _normalize_where
 
@@ -46,7 +46,7 @@ def _iface_name(iface: Any) -> str:
 
 
 def _wrap(rust: Any) -> Packet:
-    return Packet(_rust=rust, time=rust.time)
+    return Packet(_rust=rust, time=rust.time, wirelen=rust.wirelen)
 
 
 def _printing(prn: Optional[Callable], quiet: bool) -> Optional[Callable]:
@@ -66,7 +66,8 @@ def _offline_source(offline: Any) -> Any:
     if isinstance(offline, PacketList):
         return offline._list
     if isinstance(offline, (str, os.PathLike)):
-        return _b.read_pcap(str(offline))
+        with _as_path(offline) as real:
+            return _b.read_pcap(real)
     raise NotImplementedError(
         "offline= takes a capture file path or a PacketList; for a list of "
         "packets, write it with wrpcap() first"

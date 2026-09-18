@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import atexit
 import contextlib
+import gzip
 import os
 import tempfile
 import warnings
+import weakref
+import zlib
 from typing import Any, Iterator, Optional, Sequence
 
 from . import _wiry as _b
@@ -13,7 +17,8 @@ from . import _wiry as _b
 __version__ = _b.__version__
 
 __all__ = [
-    "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "PcapReader",
+    "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
+    "PcapReader", "PcapWriter", "PcapNgWriter",
     "raw", "hexdump", "hexdump_str", "ls", "known_layers", "bind_layers",
     "to_arrow", "to_polars", "to_pandas",
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
@@ -373,7 +378,7 @@ class Packet(metaclass=_PacketMeta):
 
     _name: str | None = None
 
-    __slots__ = ("_stack", "_payload", "_rust", "time")
+    __slots__ = ("_stack", "_payload", "_rust", "time", "wirelen")
 
     def __init__(
         self,
@@ -381,11 +386,13 @@ class Packet(metaclass=_PacketMeta):
         _payload: bytes | None = None,
         _rust: Any = None,
         time: float = 0.0,
+        wirelen: int = 0,
     ):
         self._stack = _stack if _stack is not None else []
         self._payload = _payload
         self._rust = _rust
         self.time = time
+        self.wirelen = wirelen
 
     def __truediv__(self, other: "Packet") -> "Packet":
         """Stack another layer beneath this one."""
@@ -403,7 +410,7 @@ class Packet(metaclass=_PacketMeta):
             n = len(new.layer_names())
             if n:
                 new.set_payload(n - 1, bytes(other))
-            return Packet(_rust=new, time=self.time)
+            return Packet(_rust=new, time=self.time, wirelen=self.wirelen)
 
         return Packet(_stack=_float_padding(self._spec() + other._spec()))
 
@@ -591,11 +598,12 @@ class Packet(metaclass=_PacketMeta):
     def copy(self) -> "Packet":
         """An independent packet carrying the same layers and values."""
         if self._rust is not None:
-            return Packet(_rust=self._rust.copy(), time=self.time)
+            return Packet(_rust=self._rust.copy(), time=self.time, wirelen=self.wirelen)
         return Packet(
             _stack=[(n, dict(f)) for n, f in self._stack],
             _payload=self._payload,
             time=self.time,
+            wirelen=self.wirelen,
         )
 
     def __getattr__(self, field: str) -> Any:
@@ -697,7 +705,7 @@ class PacketList:
         if isinstance(i, slice):
             return [self[k] for k in range(*i.indices(len(self)))]
         rust = self._list[i]
-        return Packet(_rust=rust, time=rust.time)
+        return Packet(_rust=rust, time=rust.time, wirelen=rust.wirelen)
 
     def __iter__(self) -> Iterator[Packet]:
         for i in range(len(self)):
@@ -747,24 +755,98 @@ class PacketList:
         return f"<PacketList: {len(self)} packets>"
 
 
+_GZIP_MAGIC = b"\x1f\x8b"
+
+_GZIP_CHUNK = 1 << 20
+
+# A decompressor is a walk over an attacker-controlled length: 200 KB of gzip
+# expands to a gigabyte of zeros.
+_MAX_GUNZIP = 4 << 30
+
+_CAPTURE_MAGICS = (
+    b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4",  # pcap, either byte order
+    b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d",  # the nanosecond variants
+    b"\x0a\x0d\x0d\x0a",  # pcapng, whose block type reads the same both ways
+)
+
+
+def _gzip_body(data: bytes) -> int:
+    """Offset of the deflate stream inside a member, per RFC 1952 §2.3."""
+    flg = data[3]
+    off = 10
+    if flg & 4:
+        off += 2 + int.from_bytes(data[off : off + 2], "little")
+    for name in (8, 16):
+        if flg & name:
+            off = data.index(b"\x00", off) + 1
+    return off + 2 if flg & 2 else off
+
+
+def _gunzip_into(write: Any, data: bytes) -> int:
+    """Expand every member, keeping what a truncated or CRC-broken tail left.
+
+    A capture cut short still holds the packets that made it, and the reader
+    already stops cleanly at a partial record, so the 8-byte trailer is read
+    past rather than enforced.
+    """
+    total = 0
+    while data[:2] == _GZIP_MAGIC:
+        try:
+            pending = data[_gzip_body(data) :]
+        except (ValueError, IndexError):
+            break
+        member = zlib.decompressobj(wbits=-15)
+        try:
+            while True:
+                out = member.decompress(pending, _GZIP_CHUNK)
+                pending = member.unconsumed_tail
+                if not out:
+                    break
+                if not total and not out.startswith(_CAPTURE_MAGICS):
+                    raise ValueError("gzipped data is not a capture file")
+                total += len(out)
+                if total > _MAX_GUNZIP:
+                    raise ValueError(
+                        f"gzipped capture expands past {_MAX_GUNZIP} bytes"
+                    )
+                write(out)
+        except zlib.error:
+            break
+        data = member.unused_data[8:]
+    if not total:
+        raise ValueError("capture is not readable gzip data")
+    return total
+
+
 @contextlib.contextmanager
 def _as_path(source: Any) -> Iterator[str]:
     """Yield a filesystem path for a path or a file-like object.
 
     The reader memory-maps a file and indexes records by offset into it, so a
-    stream has to land on disk before it can be read.
+    stream has to land on disk before it can be read, and a gzipped capture has
+    to be expanded there.
     """
     read = getattr(source, "read", None)
     if read is None:
-        yield str(source)
-        return
-    data = read()
-    if isinstance(data, str):
-        raise ValueError("capture stream must be opened in binary mode")
+        with open(source, "rb") as fh:
+            # Rewinding is not an option: `open` may hand back a pipe, which
+            # scapy's own suite does. The probe is put back by concatenation.
+            probe = fh.read(2)
+            data = probe + fh.read() if probe == _GZIP_MAGIC else None
+        if data is None:
+            yield str(source)
+            return
+    else:
+        data = read()
+        if isinstance(data, str):
+            raise ValueError("capture stream must be opened in binary mode")
     fd, tmp = tempfile.mkstemp(suffix=".pcap")
     try:
         with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
+            if data[:2] == _GZIP_MAGIC:
+                _gunzip_into(fh.write, data)
+            else:
+                fh.write(data)
         yield tmp
     finally:
         try:
@@ -808,22 +890,235 @@ def _linktype_of(pkt: Any) -> Optional[int]:
     return _LINKTYPE_OF.get(names[0]) if names else None
 
 
-def wrpcap(path: str, packets: Any, linktype: Optional[int] = None) -> None:
-    """Write packets to a pcap file."""
-    if isinstance(packets, (Packet, bytes, bytearray)):
-        packets = [packets]
-    packets = list(packets)
-    if linktype is None:
-        seen = {lt for lt in (_linktype_of(p) for p in packets) if lt is not None}
-        if len(seen) > 1:
+_PCAPNG_SUFFIXES = (".pcapng", ".ntar")
+
+_DEFAULT_LINKTYPE = 1
+
+_OPEN_WRITERS: Any = weakref.WeakSet()
+
+
+@atexit.register
+def _close_open_writers() -> None:
+    """Deliver buffered captures while the interpreter can still import.
+
+    `__del__` alone runs too late: `tempfile` and `gzip` import lazily, which
+    fails once `sys.meta_path` is gone, and the packets would go silently.
+    """
+    for writer in list(_OPEN_WRITERS):
+        with contextlib.suppress(Exception):
+            writer.close()
+
+
+class PcapWriter:
+    """Streaming capture writer, in either format.
+
+    The header is written from the first packet's link type unless `linktype`
+    says otherwise, so a writer opened before its packets exist still declares
+    what it ends up holding. `.pcapng` names a pcapng file and `.gz` a gzipped
+    one, either of which `pcapng=` and `gz=` can also force.
+
+    A whole `PacketList` goes out in one crossing, copied straight from the
+    buffer it was read into. `write()` of a single packet is a crossing per
+    packet, which is what a streaming writer is for; both paths encode through
+    the same Rust code, so the files agree byte for byte.
+    """
+
+    __slots__ = (
+        "_target", "_path", "_gz", "_pcapng", "_append", "_sync", "_nano",
+        "_snaplen", "_linktype", "_fixed", "_w", "_warned", "_closed",
+        "__weakref__",
+    )
+
+    def __init__(
+        self,
+        filename: Any,
+        linktype: Optional[int] = None,
+        gz: bool = False,
+        endianness: str = "",
+        append: bool = False,
+        sync: bool = False,
+        nano: bool = False,
+        snaplen: int = 65535,
+        bufsz: int = 4096,
+        pcapng: Optional[bool] = None,
+    ):
+        if endianness not in ("", "<"):
+            raise NotImplementedError("wiry writes little-endian capture files only")
+        self._target = filename if hasattr(filename, "write") else None
+        name = "" if self._target is not None else str(filename)
+        lowered = name.lower()
+        self._gz = bool(gz) or lowered.endswith(".gz")
+        stem = lowered[:-3] if lowered.endswith(".gz") else lowered
+        self._pcapng = stem.endswith(_PCAPNG_SUFFIXES) if pcapng is None else bool(pcapng)
+        self._path = name
+        self._append = bool(append)
+        self._sync = bool(sync)
+        self._nano = bool(nano)
+        self._snaplen = int(snaplen)
+        self._linktype = None if linktype is None else int(linktype)
+        self._fixed = linktype is not None
+        self._warned = False
+        self._closed = False
+        self._w: Any = None
+        if self._fixed:
+            self._open()
+
+    @property
+    def nano(self) -> bool:
+        return self._nano
+
+    @property
+    def linktype(self) -> Optional[int]:
+        return self._linktype
+
+    def __enter__(self) -> "PcapWriter":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def write(self, pkt: Any) -> None:
+        """Write a packet, a capture, an iterable of packets, or raw bytes."""
+        if isinstance(pkt, PacketList):
+            self._settle({pkt._list.dlt})
+            self._open().write_list(pkt._list)
+            return
+        if isinstance(pkt, Packet) or _is_bytes(pkt):
+            pkt = [pkt]
+        else:
+            pkt = list(pkt)
+        self._settle({lt for lt in map(_linktype_of, pkt) if lt is not None})
+        self._open().write_records([_record(p) for p in pkt])
+
+    def flush(self) -> None:
+        if self._w is not None:
+            self._w.flush()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        writer = self._open()
+        self._closed = True
+        self._w = None
+        _OPEN_WRITERS.discard(self)
+        buffered = writer.close()
+        if buffered is not None:
+            self._deliver(buffered)
+
+    def _settle(self, seen: set) -> None:
+        """Pick the file's link type, warning if the packets disagree with it."""
+        if self._fixed:
+            return
+        if self._linktype is not None:
+            seen = seen | {self._linktype}
+        if len(seen) > 1 and not self._warned:
+            self._warned = True
             warnings.warn(
                 "Inconsistent linktypes detected! The resulting file might "
                 "contain invalid packets.",
-                stacklevel=2,
+                stacklevel=3,
             )
-        linktype = seen.pop() if len(seen) == 1 else 1
-    blobs = [bytes(p) for p in packets]
-    _b.write_pcap(str(path), blobs, linktype)
+        if self._linktype is None:
+            self._linktype = seen.pop() if len(seen) == 1 else _DEFAULT_LINKTYPE
+
+    def _open(self) -> Any:
+        if self._closed:
+            raise ValueError("the capture file is closed")
+        if self._w is not None:
+            return self._w
+        if self._linktype is None:
+            self._linktype = _DEFAULT_LINKTYPE
+        path, existing = self._path, None
+        if self._gz or self._target is not None:
+            path = None
+            if self._append and self._target is None and os.path.exists(self._path):
+                with open(self._path, "rb") as fh:
+                    existing = fh.read()
+                if existing[:2] == _GZIP_MAGIC:
+                    held = bytearray()
+                    _gunzip_into(held.extend, existing)
+                    existing = held
+        try:
+            self._w = _b.CaptureWriter(
+                path, self._pcapng, self._linktype, self._snaplen,
+                self._nano, self._sync, self._append, existing,
+            )
+        except Exception:
+            # A writer that could not open its file has nothing left to close,
+            # and retrying at close() would only mask the real error.
+            self._closed = True
+            raise
+        _OPEN_WRITERS.add(self)
+        return self._w
+
+    def _deliver(self, data: bytes) -> None:
+        """A compressed or file-like target is written whole: the appended part
+        was folded into the buffer when the writer opened."""
+        if self._target is not None:
+            self._encode(self._target, data)
+            close = getattr(self._target, "close", None)
+            if close is not None:
+                close()
+            return
+        # One rename rather than a truncating write: appending to a capture
+        # rewrites all of it, and a write that fails partway through would
+        # otherwise leave the user with none of it.
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self._path) or ".", prefix=".wiry-")
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                self._encode(fh, data)
+            os.replace(tmp, self._path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
+
+    def _encode(self, fh: Any, data: bytes) -> None:
+        if not self._gz:
+            fh.write(data)
+            return
+        # Streamed rather than compressed whole, so the buffered capture does
+        # not have to coexist with a compressed copy of itself.
+        with gzip.GzipFile(fileobj=fh, mode="wb", mtime=0) as gz:
+            gz.write(data)
+
+
+class PcapNgWriter(PcapWriter):
+    """`PcapWriter` fixed to pcapng, whatever the file is called."""
+
+    __slots__ = ()
+
+    def __init__(self, filename: Any, **kw: Any):
+        kw["pcapng"] = True
+        super().__init__(filename, **kw)
+
+
+def _record(pkt: Any) -> tuple:
+    """(bytes, timestamp, wire length). A wire length of 0 means untruncated."""
+    return (
+        bytes(pkt),
+        float(getattr(pkt, "time", 0.0) or 0.0),
+        int(getattr(pkt, "wirelen", 0) or 0),
+    )
+
+
+def wrpcap(filename: Any, pkt: Any, *args: Any, **kargs: Any) -> None:
+    """Write packets to a pcap file. A whole capture costs one crossing."""
+    with PcapWriter(filename, *args, **kargs) as writer:
+        writer.write(pkt)
+
+
+def wrpcapng(filename: Any, pkt: Any, **kargs: Any) -> None:
+    """Write packets to a pcapng file."""
+    kargs["pcapng"] = True
+    with PcapWriter(filename, **kargs) as writer:
+        writer.write(pkt)
 
 
 class PcapReader:

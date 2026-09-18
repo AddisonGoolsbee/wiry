@@ -158,7 +158,7 @@ impl LiveRun {
             } = self;
             let (store, flow) = if st.needs_python() {
                 let t = stamp(&meta);
-                gil.attached(|py| st.step_py(py, scratch, *link, t))?
+                gil.attached(|py| st.step_py(py, scratch, *link, t, meta.origlen))?
             } else {
                 gil.blocking(|| st.step(scratch, *link))
             };

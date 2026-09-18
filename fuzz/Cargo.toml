@@ -59,6 +59,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "capture_writer"
+path = "fuzz_targets/capture_writer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "options_walk"
 path = "fuzz_targets/options_walk.rs"
 test = false

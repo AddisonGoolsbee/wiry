@@ -9,6 +9,7 @@
 mod capture;
 mod live;
 mod sniff;
+mod writer;
 
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -305,6 +306,10 @@ pub struct PyPkt {
     pub(crate) inner: CorePacket,
     #[pyo3(get)]
     pub(crate) time: f64,
+    /// Length on the wire, which exceeds the captured length on a record a
+    /// snaplen clipped. Zero where nothing measured it.
+    #[pyo3(get)]
+    pub(crate) wirelen: u32,
 }
 
 #[pymethods]
@@ -626,6 +631,7 @@ impl PyPkt {
         PyPkt {
             inner: self.inner.clone(),
             time: self.time,
+            wirelen: self.wirelen,
         }
     }
 
@@ -651,10 +657,12 @@ impl PyPkt {
     }
 }
 
-/// (offset, caplen, ts_sec, ts_frac). The offset is a `usize` because
+/// (offset, caplen, ts_sec, ts_frac, origlen). The offset is a `usize` because
 /// `fs::read` has no size limit: as a `u32` it wraps past 4 GiB, and the
 /// wrapped slice stays in bounds, so a read returns another packet's bytes.
-type Record = (usize, u32, u32, u32);
+/// `origlen` is the length on the wire, which a snaplen-clipped record needs
+/// to keep or a copy of the file would claim the clipped bytes were all of it.
+pub(crate) type Record = (usize, u32, u32, u32, u32);
 
 /// One buffer plus a record index; indexing mints one Python object.
 #[pyclass(name = "PktList")]
@@ -685,6 +693,12 @@ impl PyPktList {
         }
     }
 
+    /// The capture buffer, its record index, and the unit `ts_frac` is in:
+    /// what a writer needs to copy the whole list without minting a packet.
+    pub(crate) fn parts(&self) -> (&[u8], &[Record], bool) {
+        (&self.buf, &self.index, self.nanos)
+    }
+
     /// A view over the kept positions, sharing the capture buffer.
     fn keeping(&self, keep: &[u32]) -> Self {
         Self {
@@ -698,13 +712,13 @@ impl PyPktList {
     }
 
     fn time_at(&self, i: usize) -> f64 {
-        let (_, _, sec, frac) = self.index[i];
+        let (_, _, sec, frac, _) = self.index[i];
         let div = if self.nanos { 1e9 } else { 1e6 };
         sec as f64 + frac as f64 / div
     }
 
     fn bytes_at(&self, i: usize) -> &[u8] {
-        let (off, len, _, _) = self.index[i];
+        let (off, len, _, _, _) = self.index[i];
         &self.buf[off..off + len as usize]
     }
 
@@ -722,7 +736,7 @@ impl PyPktList {
         py.allow_threads(|| {
             idx.iter()
                 .enumerate()
-                .filter(|(_, (off, len, _, _))| {
+                .filter(|(_, (off, len, _, _, _))| {
                     let a = *off;
                     let bytes = &buf[a..a + *len as usize];
                     q.matches(bytes, &dissect_spans(bytes, link))
@@ -733,7 +747,7 @@ impl PyPktList {
     }
 
     fn dissect_at(&self, i: usize) -> PyPkt {
-        let (off, len, sec, frac) = self.index[i];
+        let (off, len, sec, frac, origlen) = self.index[i];
         let a = off;
         let b = a + len as usize;
         let bytes = self.buf[a..b].to_vec();
@@ -741,6 +755,7 @@ impl PyPktList {
         PyPkt {
             inner: CorePacket::dissect(bytes, self.link),
             time: sec as f64 + frac as f64 / div,
+            wirelen: origlen,
         }
     }
 }
@@ -767,7 +782,7 @@ impl PyPktList {
         let link = self.link;
         Ok(py.allow_threads(move || {
             idx.iter()
-                .filter(|(off, len, _, _)| {
+                .filter(|(off, len, _, _, _)| {
                     let a = *off;
                     let b = a + *len as usize;
                     wiry_core::packet::dissect_spans(&buf[a..b], link)
@@ -793,7 +808,7 @@ impl PyPktList {
 
         let collected: Vec<Cell> = py.allow_threads(move || {
             idx.iter()
-                .map(|(off, len, _, _)| {
+                .map(|(off, len, _, _, _)| {
                     let a = *off;
                     let b = a + *len as usize;
                     let pkt = CorePacket::dissect(buf[a..b].to_vec(), link);
@@ -846,7 +861,7 @@ impl PyPktList {
                 .iter()
                 .map(|_| Vec::with_capacity(idx.len()))
                 .collect();
-            for (row, (off, len, sec, frac)) in idx.iter().enumerate() {
+            for (row, (off, len, sec, frac, _)) in idx.iter().enumerate() {
                 let a = *off;
                 let bytes = &buf[a..a + *len as usize];
                 let spans = if dissect {
@@ -967,7 +982,8 @@ impl PyPktList {
 
         if st.needs_python() {
             for i in 0..n {
-                let (put, flow) = st.step_py(py, self.bytes_at(i), link, self.time_at(i))?;
+                let (put, flow) =
+                    st.step_py(py, self.bytes_at(i), link, self.time_at(i), self.index[i].4)?;
                 if put {
                     keep.push(i as u32);
                 }
@@ -1012,12 +1028,12 @@ impl PyPktList {
         let div = if self.nanos { 1e9 } else { 1e6 };
         self.index
             .iter()
-            .map(|(_, _, s, f)| *s as f64 + *f as f64 / div)
+            .map(|(_, _, s, f, _)| *s as f64 + *f as f64 / div)
             .collect()
     }
 
     fn raw_at<'py>(&self, py: Python<'py>, i: usize) -> PyResult<Bound<'py, PyBytes>> {
-        let (off, len, _, _) = *self
+        let (off, len, _, _, _) = *self
             .index
             .get(i)
             .ok_or_else(|| PyIndexError::new_err("packet index out of range"))?;
@@ -1028,6 +1044,17 @@ impl PyPktList {
     #[getter]
     fn linktype(&self) -> &'static str {
         self.link.name()
+    }
+
+    /// The DLT number itself, where `linktype()` gives its name.
+    #[getter]
+    fn dlt(&self) -> u32 {
+        self.dlt
+    }
+
+    #[getter]
+    fn nanos(&self) -> bool {
+        self.nanos
     }
 }
 
@@ -1046,7 +1073,7 @@ fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
                 let nanos = r.header.nanos();
                 for rec in wiry_core::pcapng::Reader::new(&data).map_err(|e| e.to_string())? {
                     let off = rec.data.as_ptr() as usize - base;
-                    index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
+                    index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac, rec.origlen));
                 }
                 Ok((index, dlt, nanos))
             } else {
@@ -1055,7 +1082,7 @@ fn read_pcap(py: Python<'_>, path: &str) -> PyResult<PyPktList> {
                 let nanos = r.header.nanos;
                 for rec in pcap::Reader::new(&data).map_err(|e| e.to_string())? {
                     let off = rec.data.as_ptr() as usize - base;
-                    index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac));
+                    index.push((off, rec.caplen, rec.ts_sec, rec.ts_frac, rec.origlen));
                 }
                 Ok((index, dlt, nanos))
             }
@@ -1078,6 +1105,7 @@ fn dissect(data: &[u8], link: &str) -> PyResult<PyPkt> {
     Ok(PyPkt {
         inner: CorePacket::dissect(data.to_vec(), proto_by_name(link)?),
         time: 0.0,
+        wirelen: 0,
     })
 }
 
@@ -1090,6 +1118,7 @@ fn build_stack(names: Vec<String>) -> PyResult<PyPkt> {
     Ok(PyPkt {
         inner: CorePacket::build(&stack),
         time: 0.0,
+        wirelen: 0,
     })
 }
 
@@ -1349,19 +1378,8 @@ fn build_packet(
     Ok(PyPkt {
         inner: pkt,
         time: 0.0,
+        wirelen: 0,
     })
-}
-
-#[pyfunction]
-#[pyo3(signature = (path, packets, linktype = 1))]
-fn write_pcap(path: &str, packets: Vec<Vec<u8>>, linktype: u32) -> PyResult<()> {
-    let mut out = Vec::new();
-    pcap::write_header(&mut out, linktype, 65535);
-    for p in &packets {
-        pcap::write_record(&mut out, 0, 0, p, p.len() as u32);
-    }
-    std::fs::write(path, out)?;
-    Ok(())
 }
 
 #[pyfunction]
@@ -1520,7 +1538,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPkt>()?;
     m.add_class::<PyPktList>()?;
     m.add_function(wrap_pyfunction!(read_pcap, m)?)?;
-    m.add_function(wrap_pyfunction!(write_pcap, m)?)?;
+    m.add_class::<writer::PyCaptureWriter>()?;
     m.add_function(wrap_pyfunction!(dissect, m)?)?;
     m.add_function(wrap_pyfunction!(build_stack, m)?)?;
     m.add_function(wrap_pyfunction!(build_packet, m)?)?;
@@ -1596,8 +1614,8 @@ mod tests {
     #[test]
     fn a_record_offset_past_four_gibibytes_is_not_truncated() {
         let off = u32::MAX as usize + 4096;
-        let index: Vec<Record> = vec![(off, 64, 0, 0)];
-        let (a, len, _, _) = index[0];
+        let index: Vec<Record> = vec![(off, 64, 0, 0, 64)];
+        let (a, len, _, _, _) = index[0];
         assert_eq!(a, off);
         assert_eq!(a + len as usize, off + 64);
     }

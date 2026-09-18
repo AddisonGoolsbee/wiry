@@ -142,6 +142,7 @@ impl SniffState {
         data: &[u8],
         link: ProtoId,
         time: f64,
+        wirelen: u32,
     ) -> PyResult<(bool, Flow)> {
         if self.expired() {
             return Ok((false, Flow::Stop));
@@ -154,6 +155,7 @@ impl SniffState {
             PyPkt {
                 inner: CorePacket::dissect(data.to_vec(), link),
                 time,
+                wirelen,
             },
         )?;
         let pkt: PyObject = match &self.wrap {

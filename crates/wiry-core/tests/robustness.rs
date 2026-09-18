@@ -776,7 +776,7 @@ fn option_regions_never_hang_or_over_read() {
 
 fn pcap_file(link: u32, records: &[Vec<u8>]) -> Vec<u8> {
     let mut v = Vec::new();
-    pcap::write_header(&mut v, link, 65535);
+    pcap::write_header(&mut v, link, 65535, false);
     for (i, r) in records.iter().enumerate() {
         pcap::write_record(&mut v, i as u32 + 1, 0, r, r.len() as u32);
     }
@@ -921,4 +921,76 @@ fn capture_readers_survive_corruption() {
         start.elapsed() < BUDGET,
         "capture reading did not finish promptly (seed {SEED:#x})"
     );
+}
+
+/// The write half of the file layer: absurd records must come back out exactly
+/// as written, in both formats and both resolutions. Reading is only half the
+/// contract, and the other half is where a length or padding bug would live.
+#[test]
+fn capture_writers_survive_absurd_records() {
+    let mut rng = Rng::new(SEED ^ 0x0f11e);
+    let times = [
+        0.0,
+        -1.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        1e30,
+        2.9999999,
+        1_700_000_000.123_456_7,
+        u32::MAX as f64 + 5.0,
+    ];
+
+    for round in 0..200 {
+        let nanos = round % 2 == 0;
+        let link = if round % 3 == 0 { 1 } else { 101 };
+        let scale = if nanos { 1_000_000_000 } else { 1_000_000 };
+
+        let mut want = Vec::new();
+        for i in 0..1 + rng.below(6) {
+            // Zero-length, odd-length and longer-than-snaplen records.
+            let body = rng.bytes_below(if i % 3 == 0 { 1 } else { 300 });
+            let wirelen = match rng.below(3) {
+                0 => 0,
+                1 => 1,
+                _ => u32::MAX,
+            };
+            let (sec, frac) = pcap::split_time(times[rng.below(times.len())], nanos);
+            assert!(frac < scale, "fraction is not a fraction of a second");
+            want.push((sec, frac, body, wirelen));
+        }
+
+        let mut pc = Vec::new();
+        pcap::write_header(&mut pc, link, 64, nanos);
+        let mut png = Vec::new();
+        pcapng::write_shb(&mut png);
+        pcapng::write_idb(&mut png, link, 64, nanos);
+        for (sec, frac, body, wirelen) in &want {
+            pcap::write_record(&mut pc, *sec, *frac, body, *wirelen);
+            pcapng::write_epb(&mut png, 0, *sec, *frac, body, *wirelen, nanos);
+        }
+        assert_eq!(png.len() % 4, 0, "a pcapng block was left unpadded");
+
+        let rp = pcap::Reader::new(&pc).expect("what we wrote is not a pcap file");
+        assert_eq!((rp.header.linktype, rp.header.nanos), (link, nanos));
+        let rn = pcapng::Reader::new(&png).expect("what we wrote is not a pcapng file");
+        assert_eq!((rn.header.linktype, rn.header.nanos()), (link, nanos));
+
+        let got: Vec<_> = rp.zip(rn).collect();
+        assert_eq!(
+            got.len(),
+            want.len(),
+            "records went missing (seed {SEED:#x})"
+        );
+        for ((a, b), (sec, frac, body, wirelen)) in got.iter().zip(&want) {
+            for rec in [a, b] {
+                assert_eq!((rec.ts_sec, rec.ts_frac), (*sec, *frac));
+                assert_eq!(rec.data, &body[..]);
+                assert_eq!(rec.caplen as usize, body.len());
+                assert_eq!(rec.origlen, (*wirelen).max(body.len() as u32));
+            }
+        }
+        assert_eq!(read_all_pcap(&pc), want.len());
+        assert_eq!(read_all_pcapng(&png), want.len());
+    }
 }
