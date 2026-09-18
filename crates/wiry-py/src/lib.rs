@@ -10,6 +10,7 @@ mod capture;
 mod live;
 mod sniff;
 mod writer;
+mod template;
 
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -24,7 +25,7 @@ use wiry_core::pcap;
 use wiry_core::proto::{self, ProtoId};
 use wiry_core::show;
 
-fn proto_by_name(name: &str) -> PyResult<ProtoId> {
+pub(crate) fn proto_by_name(name: &str) -> PyResult<ProtoId> {
     proto::by_name(name).ok_or_else(|| PyValueError::new_err(format!("unknown layer {name:?}")))
 }
 
@@ -1222,7 +1223,7 @@ fn build_stack(names: Vec<String>) -> PyResult<PyPkt> {
 /// or, with no name, bytes to append verbatim. The facade normalises the
 /// container shape; resolving the name and laying out the payload is this
 /// crate's job.
-type OptEntry = (usize, Option<String>, OptArgIn);
+pub(crate) type OptEntry = (usize, Option<String>, OptArgIn);
 
 struct OptArgIn(OptArg);
 
@@ -1277,7 +1278,10 @@ fn opt_arg_at(ob: &Bound<'_, PyAny>, depth: usize) -> PyResult<OptArg> {
     )))
 }
 
-fn make_stack(names: &[String], opts: &[OptEntry]) -> PyResult<Vec<(ProtoId, Option<Vec<u8>>)>> {
+pub(crate) fn make_stack(
+    names: &[String],
+    opts: &[OptEntry],
+) -> PyResult<Vec<(ProtoId, Option<Vec<u8>>)>> {
     if names.is_empty() {
         return Err(PyValueError::new_err("empty packet"));
     }
@@ -1346,7 +1350,7 @@ fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u
 /// an unconditional one (ICMP's `type`), which can also lengthen the header.
 /// Growing it between the passes is what lets `ICMP(type=13, ts_ori=...)`
 /// reach octets the fixed template lacks.
-fn apply_all_fields(
+pub(crate) fn apply_all_fields(
     pkt: &mut CorePacket,
     ints: &[(usize, String, u64)],
     strs: &[(usize, String, String)],
@@ -1551,6 +1555,19 @@ fn leak(s: String) -> &'static str {
 /// name, bit width, kind, integer default, wide default, flag names.
 type FieldSpec = (String, u16, String, u64, Option<Vec<u8>>, Vec<String>);
 
+pub(crate) fn kind_name(k: FieldKind) -> &'static str {
+    match k {
+        FieldKind::Uint => "uint",
+        FieldKind::LeUint => "le_uint",
+        FieldKind::Ipv4Addr => "ipv4",
+        FieldKind::Ipv6Addr => "ipv6",
+        FieldKind::MacAddr => "mac",
+        FieldKind::Flags => "flags",
+        FieldKind::Bytes => "bytes",
+        FieldKind::VarBytes => "varbytes",
+    }
+}
+
 fn kind_of(k: &str) -> PyResult<FieldKind> {
     Ok(match k {
         "uint" => FieldKind::Uint,
@@ -1689,6 +1706,12 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
     m.add_function(wrap_pyfunction!(register_layer, m)?)?;
     m.add_function(wrap_pyfunction!(bind_layer, m)?)?;
+    m.add_class::<template::Template>()?;
+    m.add_function(wrap_pyfunction!(template::make_template, m)?)?;
+    m.add_function(wrap_pyfunction!(template::rand_value, m)?)?;
+    m.add_function(wrap_pyfunction!(template::set_rand_seed, m)?)?;
+    m.add_function(wrap_pyfunction!(template::field_specs, m)?)?;
+    m.add_function(wrap_pyfunction!(template::corrupt, m)?)?;
     m.add_function(wrap_pyfunction!(capture::capture_available, m)?)?;
     m.add_function(wrap_pyfunction!(capture::capture_check, m)?)?;
     m.add_function(wrap_pyfunction!(capture::list_interfaces, m)?)?;
@@ -1697,6 +1720,8 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(live::sniff_live, m)?)?;
     m.add_class::<live::LiveSniffer>()?;
     m.add_function(wrap_pyfunction!(live::send_frames, m)?)?;
+    m.add_function(wrap_pyfunction!(live::send_template, m)?)?;
+    m.add_function(wrap_pyfunction!(live::send_template_l3, m)?)?;
     m.add_function(wrap_pyfunction!(live::send_datagrams, m)?)?;
     m.add_function(wrap_pyfunction!(live::sr_live, m)?)?;
     m.add(

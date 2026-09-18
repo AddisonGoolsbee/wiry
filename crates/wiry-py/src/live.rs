@@ -591,6 +591,77 @@ pub(crate) fn send_frames(
     }
 }
 
+/// Bounds how much of an unbounded template is ever in memory at once. The
+/// send is still one crossing.
+const SEND_CHUNK: usize = 256;
+
+/// Walks the product and writes it chunk by chunk. Expansion runs with the GIL
+/// released, as the write does, so a send of a huge template never stalls
+/// another Python thread for longer than one chunk.
+fn stream_template(
+    py: Python<'_>,
+    template: &crate::template::Template,
+    count: usize,
+    repeat: bool,
+    mut write: impl FnMut(&[Vec<u8>]) -> PyResult<usize>,
+) -> PyResult<usize> {
+    let total = template.total();
+    let mut sent = 0usize;
+    loop {
+        for _ in 0..count {
+            let mut at = 0u128;
+            while at < total {
+                let chunk = py.allow_threads(|| template.raw_frames(at, SEND_CHUNK))?;
+                at += (chunk.len() as u128).max(1);
+                sent += write(&chunk)?;
+                py.check_signals()?;
+            }
+        }
+        if !repeat {
+            return Ok(sent);
+        }
+        py.check_signals()?;
+    }
+}
+
+/// `sendp` of a template: the description crosses once and the product is
+/// expanded here, so `sendp(Ether()/IP(dst=Net("10.0.0.0/8")))` neither
+/// materialises 16 million frames nor crosses the boundary 16 million times.
+#[pyfunction]
+#[pyo3(signature = (template, iface = None, count = 1, inter = 0.0, repeat = false))]
+pub(crate) fn send_template(
+    py: Python<'_>,
+    template: &crate::template::Template,
+    iface: Option<String>,
+    count: usize,
+    inter: f64,
+    repeat: bool,
+) -> PyResult<usize> {
+    let cfg = live_config(iface, None, false, 65_535);
+    let gap = gap_of(inter)?;
+    let mut h = open_live(&cfg).map_err(to_py_err)?;
+    stream_template(py, template, count, repeat, |chunk| {
+        py.allow_threads(|| one_run(&mut h, chunk, 1, gap))
+    })
+}
+
+/// `send` of a template. The layer-3 path reads every destination before the
+/// first octet of a batch goes out, so a template is checked chunk by chunk.
+#[pyfunction]
+#[pyo3(signature = (template, count = 1, inter = 0.0, repeat = false))]
+pub(crate) fn send_template_l3(
+    py: Python<'_>,
+    template: &crate::template::Template,
+    count: usize,
+    inter: f64,
+    repeat: bool,
+) -> PyResult<usize> {
+    stream_template(py, template, count, repeat, |chunk| {
+        py.allow_threads(|| wiry_capture::send_l3(chunk, 1, inter))
+            .map_err(to_py_err)
+    })
+}
+
 /// Layer 3: the kernel routes and frames each datagram.
 #[pyfunction]
 #[pyo3(signature = (frames, count = 1, inter = 0.0, repeat = false))]

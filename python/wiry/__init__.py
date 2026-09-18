@@ -26,6 +26,10 @@ __all__ = [
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
     "get_if_list", "get_if_addr", "get_working_if", "interfaces", "conf",
     "capture_available", "CaptureUnavailable",
+    "VolatileValue", "RandNum", "RandByte", "RandShort", "RandInt", "RandLong",
+    "RandIP", "RandIP6", "RandMAC", "RandString", "RandBin", "RandChoice",
+    "RandEnumKeys", "Net", "Net6", "fuzz", "corrupt_bytes", "corrupt_bits",
+    "set_rand_seed", "expand",
 ]
 
 _COLUMNAR = ("to_arrow", "to_polars", "to_pandas")
@@ -259,6 +263,9 @@ class _LayerView:
     def __getattr__(self, field: str) -> Any:
         if field.startswith("_"):
             raise AttributeError(field)
+        gen = self._pkt._generator_at(self._idx, field)
+        if gen is not None:
+            return gen
         rust = self._pkt._materialize()
         if field == "options":
             parsed = rust.options(self._idx)
@@ -335,6 +342,77 @@ _VAR_FIELD: dict[str, tuple[str, Any]] = {}
 
 _OPAQUE = ("Raw", "Padding")
 
+# Packets per crossing while walking a template. Big enough that the crossing
+# disappears, small enough that an unbounded template stays lazy.
+_ITER_CHUNK = 256
+
+# Above this a helper that must hand back real packets refuses rather than
+# materialising; sendp streams and has no such limit.
+_MAX_EXPAND = 1 << 20
+
+_FIELD_KINDS: dict[str, dict[str, str]] = {}
+
+
+def _is_plain_field(lname: str, key: str, value: Any) -> bool:
+    """Whether the build path writes this into a fixed slot; the rest are
+    option regions and payloads."""
+    if key == "options" and not _is_bytes(value):
+        return False
+    if key == "load" and lname in _OPAQUE:
+        return False
+    var = _VAR_FIELD.get(lname)
+    return var is None or key != var[0]
+
+
+def _field_kind(layer: str, field: str) -> str:
+    """A field's kind, cached per layer: one crossing, not one per lookup."""
+    kinds = _FIELD_KINDS.get(layer)
+    if kinds is None:
+        try:
+            kinds = {f[0]: f[2] for f in _b.field_specs(layer)}
+        except ValueError:
+            kinds = {}
+        _FIELD_KINDS[layer] = kinds
+    return kinds.get(field, "")
+
+
+def _chunks(tmpl: Any, frames: bool) -> Iterator[list]:
+    fetch = tmpl.frames if frames else tmpl.packets
+    total, at = tmpl.count, 0
+    while at < total:
+        chunk = fetch(at, _ITER_CHUNK)
+        if not chunk:
+            return
+        yield chunk
+        at += len(chunk)
+
+
+def _all_of(tmpl: Any, frames: bool) -> list:
+    n = tmpl.count
+    if n > _MAX_EXPAND:
+        raise ValueError(
+            f"this template is {n} packets, more than the {_MAX_EXPAND} a "
+            "list may hold; iterate it instead, which stays lazy"
+        )
+    return [one for chunk in _chunks(tmpl, frames) for one in chunk]
+
+
+def expand(pkt: Any) -> list:
+    """A template as a list of packets, or ``[pkt]`` for anything else."""
+    tmpl = pkt.template() if isinstance(pkt, Packet) else None
+    if tmpl is None:
+        return [pkt]
+    return [Packet(_rust=r) for r in _all_of(tmpl, False)]
+
+
+def _expand_frames(pkt: Any) -> list:
+    """The same expansion, serialised, without building Python packets."""
+    if not isinstance(pkt, Packet) or pkt._rust is not None or not pkt._stack:
+        return [bytes(pkt)]
+    args = pkt._build_args()
+    tmpl = pkt.template(args)
+    return _all_of(tmpl, True) if tmpl is not None else [pkt._serialize(args)]
+
 
 def _float_padding(stack: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
     """Padding is assembled after every other payload, wherever it was stacked,
@@ -390,7 +468,7 @@ class Packet(metaclass=_PacketMeta):
 
     _name: str | None = None
 
-    __slots__ = ("_stack", "_payload", "_rust", "time", "wirelen")
+    __slots__ = ("_stack", "_payload", "_rust", "time", "wirelen", "sent_time")
 
     def __init__(
         self,
@@ -405,6 +483,7 @@ class Packet(metaclass=_PacketMeta):
         self._rust = _rust
         self.time = time
         self.wirelen = wirelen
+        self.sent_time = None
 
     def __truediv__(self, other: "Packet") -> "Packet":
         """Stack another layer beneath this one."""
@@ -450,18 +529,15 @@ class Packet(metaclass=_PacketMeta):
         ints: list[tuple[int, str, int]] = []
         strs: list[tuple[int, str, str]] = []
         raws: list[tuple[int, str, bytes]] = []
+        gens: list[tuple[int, str, tuple]] = []
         for i, (lname, fields) in enumerate(self._stack):
-            var = _VAR_FIELD.get(lname)
             for k, v in fields.items():
-                # Options are encoded and appended to the header, not written
-                # into a fixed-width field.
-                if k == "options" and not _is_bytes(v):
+                if not _is_plain_field(lname, k, v):
                     continue
-                if k == "load" and lname in ("Raw", "Padding"):
-                    continue
-                if var is not None and k == var[0]:
-                    continue
-                if isinstance(v, (bool, FlagValue)):
+                spec = gen_spec(v, _field_kind(lname, k))
+                if spec is not None:
+                    gens.append((i, k, spec))
+                elif isinstance(v, (bool, FlagValue)):
                     ints.append((i, k, int(v)))
                 elif isinstance(v, int):
                     ints.append((i, k, v))
@@ -473,7 +549,7 @@ class Packet(metaclass=_PacketMeta):
                     raise TypeError(
                         f"unsupported value for field {k!r}: {type(v).__name__}"
                     )
-        return ints, strs, raws
+        return ints, strs, raws, gens
 
     def _opt_blobs(self) -> list[tuple[int, str | None, Any]]:
         """Each layer's option region, as (layer index, name, value) entries.
@@ -509,13 +585,50 @@ class Packet(metaclass=_PacketMeta):
                 out.append((i, str(name), value))
         return out
 
+    def _generator_at(self, layer: int, field: str) -> Any:
+        """A generator field reads back as the generator, not as one draw."""
+        if self._rust is not None or layer >= len(self._stack):
+            return None
+        lname, fields = self._stack[layer]
+        if field not in fields or not _is_plain_field(lname, field, fields[field]):
+            return None
+        return as_generator(fields[field], _field_kind(lname, field))
+
+    def _build_args(self):
+        """The one field split every build path shares."""
+        return ([n for n, _ in self._stack], *self._split_fields())
+
+    def _serialize(self, args) -> bytes:
+        names, ints, strs, raws, _ = args
+        return _b.build_and_serialize(
+            names, ints, strs, raws, self._payload, self._opt_blobs()
+        )
+
+    def template(self, args=None) -> Any:
+        """The expansion this packet describes, or ``None`` if it is one packet."""
+        if self._rust is not None or not self._stack:
+            return None
+        names, ints, strs, raws, gens = args or self._build_args()
+        if not gens:
+            return None
+        return _b.make_template(
+            names, ints, strs, raws, self._payload, self._opt_blobs(), gens
+        )
+
     def _materialize(self):
-        """Build the Rust packet if this is still just a spec."""
+        """Build the Rust packet if this is still just a spec.
+
+        A template is realised afresh and not cached: caching would freeze one
+        draw of its volatile fields as the packet.
+        """
         if self._rust is None:
-            names = [n for n, _ in self._stack]
-            if not names:
+            args = self._build_args()
+            if not args[0]:
                 raise ValueError("empty packet")
-            ints, strs, raws = self._split_fields()
+            tmpl = self.template(args)
+            if tmpl is not None:
+                return tmpl.packet(0)
+            names, ints, strs, raws, _ = args
             self._rust = _b.build_packet(
                 names, ints, strs, raws, self._payload, self._opt_blobs()
             )
@@ -540,11 +653,9 @@ class Packet(metaclass=_PacketMeta):
 
     def __bytes__(self) -> bytes:
         if self._rust is None and self._stack:
-            names = [n for n, _ in self._stack]
-            ints, strs, raws = self._split_fields()
-            return _b.build_and_serialize(
-                names, ints, strs, raws, self._payload, self._opt_blobs()
-            )
+            args = self._build_args()
+            tmpl = self.template(args)
+            return tmpl.frame(0) if tmpl is not None else self._serialize(args)
         return self._materialize().to_bytes()
 
     def build(self) -> bytes:
@@ -605,7 +716,18 @@ class Packet(metaclass=_PacketMeta):
         return view
 
     def __iter__(self) -> Iterator["Packet"]:
-        yield self.copy()
+        """One packet per generator combination, in scapy's order.
+
+        Lazy, and in chunks: `IP(src=Net("10.0.0.0/8"), dst=Net("10.0.0.0/8"))`
+        is 2^48 packets, so `next(iter(pkt))` must not build them all.
+        """
+        tmpl = self.template()
+        if tmpl is None:
+            yield self.copy()
+            return
+        for chunk in _chunks(tmpl, False):
+            for rust in chunk:
+                yield Packet(_rust=rust)
 
     def copy(self) -> "Packet":
         """An independent packet carrying the same layers and values."""
@@ -624,6 +746,9 @@ class Packet(metaclass=_PacketMeta):
         names = self.layers()
         for i, n in enumerate(names):
             if field in _b.layer_fields(n):
+                gen = self._generator_at(i, field)
+                if gen is not None:
+                    return gen
                 value = self._materialize().get_field(i, field)
                 if field in _FLAG_FIELDS:
                     flags = _flag_names(n, field)
@@ -1020,7 +1145,7 @@ class PcapWriter:
         else:
             pkt = list(pkt)
         self._settle({lt for lt in map(_linktype_of, pkt) if lt is not None})
-        self._open().write_records([_record(p) for p in pkt])
+        self._open().write_records([r for p in pkt for r in _records(p)])
 
     def flush(self) -> None:
         if self._w is not None:
@@ -1134,6 +1259,13 @@ def _record(pkt: Any) -> tuple:
     )
 
 
+def _records(pkt: Any) -> list:
+    """One record per frame, so a template writes every packet it declares."""
+    ts = float(getattr(pkt, "time", 0.0) or 0.0)
+    wirelen = int(getattr(pkt, "wirelen", 0) or 0)
+    return [(frame, ts, wirelen) for frame in _expand_frames(pkt)]
+
+
 def wrpcap(filename: Any, pkt: Any, *args: Any, **kargs: Any) -> None:
     """Write packets to a pcap file. A whole capture costs one crossing."""
     with PcapWriter(filename, *args, **kargs) as writer:
@@ -1223,3 +1355,12 @@ def _ls_fields(pkt: Packet, i: int, name: str, verbose: bool) -> Sequence[str]:
     if verbose or pkt._rust is None:
         return _b.layer_fields(name)
     return pkt._rust.field_names(i)
+
+
+# Eager, unlike the capture and columnar facades: `IP(dst=[...])` has to work
+# without the caller touching a name from this module first.
+from .volatile import (  # noqa: E402
+    Net, Net6, RandBin, RandByte, RandChoice, RandEnumKeys, RandIP, RandIP6,
+    RandInt, RandLong, RandMAC, RandNum, RandShort, RandString, VolatileValue,
+    as_generator, corrupt_bits, corrupt_bytes, fuzz, gen_spec, set_rand_seed,
+)
