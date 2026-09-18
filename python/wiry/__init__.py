@@ -73,6 +73,12 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def __dir__() -> list[str]:
+    """Lazily exported names never enter the module globals, so without this
+    they are absent from `dir(wiry)` and invisible to capability probes."""
+    return sorted(set(globals()) | set(__all__))
+
+
 def _is_bytes(x: Any) -> bool:
     return isinstance(x, (bytes, bytearray, memoryview))
 

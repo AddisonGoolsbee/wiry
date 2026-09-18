@@ -103,6 +103,10 @@ def classify_error(exc, code, supported):
     text = f"{type(exc).__name__}: {exc}"
     if type(exc).__name__ == "CaptureUnavailable":
         return "skip", "needs the live feature"
+    # wiry raises NotImplementedError only where DEVIATIONS.md records a
+    # deliberate refusal, so it marks a scope boundary, not a wrong answer.
+    if isinstance(exc, NotImplementedError):
+        return "skip", f"refused by design: {str(exc)[:60] or type(exc).__name__}"
     if isinstance(exc, (PermissionError, OSError)) and any(
         w in str(exc).lower() for w in ("permission", "/dev/bpf", "operation not permitted")
     ):
