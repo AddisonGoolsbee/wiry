@@ -1724,6 +1724,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(live::send_template_l3, m)?)?;
     m.add_function(wrap_pyfunction!(live::send_datagrams, m)?)?;
     m.add_function(wrap_pyfunction!(live::sr_live, m)?)?;
+    m.add_function(wrap_pyfunction!(live::pair_replies, m)?)?;
     m.add(
         "CaptureUnavailable",
         m.py().get_type_bound::<capture::CaptureUnavailable>(),

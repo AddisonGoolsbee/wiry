@@ -10,8 +10,10 @@ import wiry as P
 
 NAMES = [
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
-    "get_if_list", "get_if_addr", "get_working_if", "interfaces", "conf",
-    "capture_available", "CaptureUnavailable",
+    "get_if_list", "get_if_addr", "get_if_hwaddr", "get_working_if",
+    "interfaces", "conf", "capture_available", "CaptureUnavailable",
+    "traceroute", "TracerouteResult", "arping", "srloop", "srploop",
+    "getmacbyip",
 ]
 
 absent = pytest.mark.skipif(
@@ -85,6 +87,29 @@ def test_the_send_helpers_raise(name):
 
 
 @absent
+def test_the_active_tools_raise_and_name_the_build_command():
+    from wiry import ARP, Ether, IP, TCP
+
+    calls = [
+        (P.traceroute, ("10.0.0.1",), {"maxttl": 2}),
+        (P.arping, ("10.0.0.0/30",), {}),
+        (P.srloop, (IP(dst="10.0.0.1") / TCP(),), {"count": 1}),
+        (P.srploop, (Ether() / IP(dst="10.0.0.1") / TCP(),), {"count": 1}),
+        (P.getmacbyip, ("10.0.0.1",), {}),
+    ]
+    for fn, args, kw in calls:
+        with pytest.raises(P.CaptureUnavailable) as exc:
+            fn(*args, **kw)
+        assert "maturin develop" in str(exc.value)
+
+
+@absent
+def test_the_computed_hardware_addresses_need_no_backend():
+    assert P.getmacbyip("224.0.0.1") == "01:00:5e:00:00:01"
+    assert P.getmacbyip("255.255.255.255") == "ff:ff:ff:ff:ff:ff"
+
+
+@absent
 def test_the_interface_helpers_raise():
     with pytest.raises(P.CaptureUnavailable):
         P.get_if_list()
@@ -92,6 +117,8 @@ def test_the_interface_helpers_raise():
         P.get_working_if()
     with pytest.raises(P.CaptureUnavailable):
         P.interfaces()
+    with pytest.raises(P.CaptureUnavailable):
+        P.get_if_hwaddr("eth0")
 
 
 @absent

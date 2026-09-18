@@ -98,8 +98,10 @@ buffers attacker-controlled bytes, so its bounds and its overlap rule are
 stated in [DEVIATIONS.md](DEVIATIONS.md) E18 rather than left to be discovered.
 
 Capture and injection work too: `sniff`, `send`, `sendp`, `sr`, `sr1`, `srp`,
-`srp1` and `AsyncSniffer`, with scapy's arguments and semantics. Two limits, both
-real. They need the `live` cargo feature, which is **off in the first release**,
+`srp1` and `AsyncSniffer`, with scapy's arguments and semantics — and the tools
+built on them: `traceroute`, `arping`, `srloop`, `srploop`, `getmacbyip` and
+`get_if_hwaddr`. Two limits, both real.
+They need the `live` cargo feature, which is **off in the first release**,
 so a plain `pip install` raises `CaptureUnavailable` naming the rebuild command.
 And they are Linux and macOS only.
 

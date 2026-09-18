@@ -68,6 +68,39 @@ def main(veth):
           arp is not None and ARP in arp and arp[ARP].op == 2,
           "no answer" if arp is None else str(arp.layers()))
 
+    # arping over the pair's own /24, where exactly one address answers. This
+    # is where E9's send-time fill earns its keep: a request carrying hwsrc
+    # 00:00:00:00:00:00 and psrc 0.0.0.0 gets no reply from anyone.
+    found, _ = P.arping("10.99.0.0/24", timeout=3, iface=veth, verbose=0)
+    addrs = {r[ARP].psrc for _, r in found}
+    check("arping found the peer and nobody else", addrs == {"10.99.0.2"},
+          str(sorted(addrs)))
+
+    mac = P.getmacbyip("10.99.0.2", iface=veth, timeout=3)
+    check("getmacbyip agrees with the sweep",
+          mac is not None and mac in {r[ARP].hwsrc for _, r in found},
+          str(mac))
+    check("a multicast group needs no request at all",
+          P.getmacbyip("224.0.0.1") == "01:00:5e:00:00:01")
+
+    loop_ans, loop_unans = P.srloop(IP(dst="10.99.0.2") / ICMP(), count=3,
+                                    inter=0.1, timeout=3, iface=veth,
+                                    verbose=0)
+    check("srloop collected three rounds",
+          len(loop_ans) == 3 and not loop_unans,
+          f"{len(loop_ans)} answered, {len(loop_unans)} silent")
+
+    # The peer is one hop away, so it answers the first probe itself and the
+    # rest of the sweep goes unanswered.
+    trace, trace_unans = P.traceroute("10.99.0.2", maxttl=3, dport=9,
+                                      iface=veth, timeout=2, verbose=0)
+    hops = trace.get_trace().get("10.99.0.2", {})
+    check("traceroute reached the peer",
+          any(final for _, final in hops.values()), str(hops))
+    check("the sweep is fully accounted for",
+          len(trace) + len(trace_unans) == 3,
+          f"{len(trace)} + {len(trace_unans)}")
+
     # Stopping a sniffer that will never see traffic must return promptly.
     s2 = P.AsyncSniffer(iface=veth, filter="tcp port 9")
     s2.start()
