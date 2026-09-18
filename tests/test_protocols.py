@@ -357,6 +357,26 @@ def test_sflow_and_bfd_and_hsrp_are_reached_by_port():
         assert pkt.layers()[:4] == ["Ether", "IP", "UDP", name], pkt.layers()
 
 
+def test_a_claimed_port_is_found_on_either_side_of_the_flow():
+    """Both ports are offered, so a reply dissects like the request it answers."""
+    ntp = bytes([0x23, 0x00, 0x06, 0xEC]) + bytes(44)
+    for sport, dport in [(1234, 123), (123, 1234)]:
+        pkt = Ether(udp_frame(ntp, sport=sport, dport=dport))
+        assert pkt.layers()[:4] == ["Ether", "IP", "UDP", "NTP"], (sport, dport)
+
+
+def test_a_claimed_port_whose_guard_refuses_falls_to_raw():
+    """The port admits the match; the guard still decides, in either direction."""
+    body = b"not a BGP message, and not 19 octets of header either"
+    for sport, dport in [(1234, 179), (179, 1234)]:
+        pkt = Ether(tcp_frame(body, sport=sport, dport=dport))
+        assert pkt.layers()[:4] == ["Ether", "IP", "TCP", "Raw"], (sport, dport)
+    flow = bytes([0, 42, 0, 1]) + bytes(20)
+    for sport, dport in [(1234, 2055), (2055, 1234)]:
+        pkt = Ether(udp_frame(flow, sport=sport, dport=dport))
+        assert pkt.layers()[:4] == ["Ether", "IP", "UDP", "Raw"], (sport, dport)
+
+
 def test_quic_needs_its_fixed_bit_and_reads_its_connection_ids():
     """RFC 9000 §17.2."""
     long_hdr = bytes([0xC0, 0, 0, 0, 1, 0x04, 0x11, 0x22, 0x33, 0x44, 0x00]) + bytes(8)

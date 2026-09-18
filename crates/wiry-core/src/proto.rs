@@ -762,6 +762,25 @@ mod tests {
         assert!(BUILTINS.len() <= BUILTIN_COUNT as usize);
     }
 
+    /// `BUILTIN_DESCS` is indexed by id, so the numbering's gaps are slots no
+    /// spec fills. They have to read what the match's `_` arm gave them, and an
+    /// id past the count still has to reach the registry rather than the array.
+    #[test]
+    fn an_unfilled_id_reads_raw_and_one_past_the_count_reaches_the_registry() {
+        for id in (0..BUILTIN_COUNT).map(ProtoId) {
+            if BUILTINS.contains(&id) {
+                continue;
+            }
+            assert_eq!(desc(id).name, "Raw", "id {} is a gap that is not Raw", id.0);
+        }
+        for n in [BUILTIN_COUNT, BUILTIN_COUNT + 500, u16::MAX] {
+            assert_eq!(desc(ProtoId(n)).name, "Raw", "id {n}");
+        }
+        let id = register("GapDemo".into(), vec![uint("a", 0, 8)], 1).unwrap();
+        assert!(id.is_registered());
+        assert_eq!(desc(id).name, "GapDemo");
+    }
+
     #[test]
     fn registration_round_trips_through_name_and_desc() {
         let id = register("RegDemo".into(), vec![uint("a", 0, 8), uint("b", 8, 16)], 3).unwrap();

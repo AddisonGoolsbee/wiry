@@ -518,6 +518,7 @@ def render_dispatch(specs: list[dict]) -> str:
         return arms
 
     tests: list[str] = []
+    gates: list[tuple[str, str]] = []
 
     for kind, (fname, ty) in PARENT_KINDS.items():
         entries = by_kind[kind]
@@ -619,6 +620,27 @@ def render_dispatch(specs: list[dict]) -> str:
             out.append("    }")
             out.append("}")
             out.append("")
+            if is_port:
+                gates.append((fname, f"{kind.upper()}_CLAIMED"))
+    if gates:
+        tests += [
+            "    /// The reverse map is what stacking a layer writes, so a port it",
+            "    /// names that the gate does not claim would build a packet the",
+            "    /// dissector cannot read back.",
+            "    #[test]",
+            "    fn every_bound_port_is_still_claimed() {",
+            "        for id in crate::proto::builtins() {",
+            *[
+                f"            if let Some(v) = super::{fname}_of(id) {{\n"
+                f"                assert!(super::claimed(&super::{bits}, v),"
+                f' "{fname} {{v}}");\n'
+                "            }"
+                for fname, bits in gates
+            ],
+            "        }",
+            "    }",
+            "",
+        ]
     if tests:
         out += [
             "#[cfg(test)]",
