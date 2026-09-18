@@ -7,12 +7,6 @@ use crate::proto::{ipproto, Next, ProtoDesc, ProtoId};
 /// RFC 8200 §4.7: the payload ends here.
 pub const NO_NEXT_HEADER: u8 = 59;
 
-/// Extension headers are not walked (DEVIATIONS.md E6); they dissect as `Raw`.
-const EXT_HOP_BY_HOP: u8 = 0;
-const EXT_ROUTING: u8 = 43;
-const EXT_FRAGMENT: u8 = 44;
-const EXT_DEST_OPTS: u8 = 60;
-
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("version", 0, 4, 6),
     FieldDesc::uint("tc", 4, 8, 0),
@@ -32,17 +26,35 @@ fn header_len(_: &[u8]) -> usize {
     40
 }
 
+/// RFC 8200 §4: a Next Header value names either an extension header or an
+/// upper-layer protocol, and the two share the IANA protocol-number space.
+pub fn next_header(v: u8) -> Next {
+    match v {
+        ipproto::HOPOPT => Next::Proto(ProtoId::HopByHop),
+        ipproto::IPV6_ROUTE => Next::Proto(ProtoId::Routing),
+        ipproto::IPV6_FRAG => Next::Proto(ProtoId::Fragment),
+        ipproto::IPV6_OPTS => Next::Proto(ProtoId::DestOpt),
+        other => super::ipv4::from_ipproto(other),
+    }
+}
+
+/// The inverse. Only a header whose own next-header field is an IPv6 one may
+/// name an extension header, which is why these are not in `ipv4::to_ipproto`.
+pub fn to_next_header(p: ProtoId) -> Option<u8> {
+    Some(match p {
+        ProtoId::HopByHop => ipproto::HOPOPT,
+        ProtoId::Routing => ipproto::IPV6_ROUTE,
+        ProtoId::Fragment => ipproto::IPV6_FRAG,
+        ProtoId::DestOpt => ipproto::IPV6_OPTS,
+        other => return super::ipv4::to_ipproto(other),
+    })
+}
+
 fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 40 {
         return Next::Raw;
     }
-    match hdr[6] {
-        ipproto::TCP => Next::Proto(ProtoId::Tcp),
-        ipproto::UDP => Next::Proto(ProtoId::Udp),
-        ipproto::IPV6_ICMP => Next::Proto(ProtoId::Icmpv6),
-        EXT_HOP_BY_HOP | EXT_ROUTING | EXT_FRAGMENT | EXT_DEST_OPTS => Next::Raw,
-        _ => Next::Raw,
-    }
+    next_header(hdr[6])
 }
 
 /// RFC 8200 §3: Payload Length excludes the fixed 40-octet header.
@@ -54,14 +66,8 @@ fn content_len(hdr: &[u8]) -> usize {
 }
 
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
-    let v = match p {
-        ProtoId::Tcp => ipproto::TCP,
-        ProtoId::Udp => ipproto::UDP,
-        ProtoId::Icmpv6 => ipproto::IPV6_ICMP,
-        _ => return,
-    };
-    if hdr.len() >= 40 {
-        hdr[6] = v;
+    if let (Some(v), Some(b)) = (to_next_header(p), hdr.get_mut(6)) {
+        *b = v;
     }
 }
 
@@ -167,10 +173,13 @@ mod tests {
             (ipproto::UDP, Next::Proto(ProtoId::Udp)),
             (ipproto::IPV6_ICMP, Next::Proto(ProtoId::Icmpv6)),
             (NO_NEXT_HEADER, Next::Raw),
-            (EXT_HOP_BY_HOP, Next::Raw),
-            (EXT_ROUTING, Next::Raw),
-            (EXT_FRAGMENT, Next::Raw),
-            (EXT_DEST_OPTS, Next::Raw),
+            (ipproto::HOPOPT, Next::Proto(ProtoId::HopByHop)),
+            (ipproto::IPV6_ROUTE, Next::Proto(ProtoId::Routing)),
+            (ipproto::IPV6_FRAG, Next::Proto(ProtoId::Fragment)),
+            (ipproto::IPV6_OPTS, Next::Proto(ProtoId::DestOpt)),
+            (ipproto::IPV4, Next::Proto(ProtoId::Ipv4)),
+            (ipproto::IPV6, Next::Proto(ProtoId::Ipv6)),
+            (ipproto::GRE, Next::Proto(ProtoId::Gre)),
             (132, Next::Raw),
         ];
         for &(nh, want) in cases {

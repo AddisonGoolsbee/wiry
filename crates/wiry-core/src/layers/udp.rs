@@ -28,7 +28,14 @@ fn next(hdr: &[u8]) -> Next {
     {
         return Next::Proto(ProtoId::Bootp);
     }
-    Next::Raw
+    // A tunnel's source port is a flow hash (RFC 7348 §5, RFC 8926 §3.3), so
+    // only the destination names the encapsulation.
+    match dport {
+        ports::VXLAN => Next::Proto(ProtoId::Vxlan),
+        ports::GENEVE => Next::Proto(ProtoId::Geneve),
+        ports::GTP_U => Next::Proto(ProtoId::GtpU),
+        _ => Next::Raw,
+    }
 }
 
 /// RFC 768: Length covers the header and its data.
@@ -41,10 +48,24 @@ fn content_len(hdr: &[u8]) -> usize {
 
 /// RFC 951 §3 ports: the default 53/53 would otherwise dissect back as DNS.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
-    if p == ProtoId::Bootp && hdr.len() >= 4 {
+    if hdr.len() < 4 {
+        return;
+    }
+    if p == ProtoId::Bootp {
         hdr[0..2].copy_from_slice(&ports::BOOTPS.to_be_bytes());
         hdr[2..4].copy_from_slice(&ports::BOOTPC.to_be_bytes());
+        return;
     }
+    let dport = match p {
+        ProtoId::Vxlan => ports::VXLAN,
+        ProtoId::Geneve => ports::GENEVE,
+        ProtoId::GtpU => ports::GTP_U,
+        _ => return,
+    };
+    // The source port names nothing, but the default 53 would dissect back as
+    // DNS, so it goes too.
+    hdr[0..2].copy_from_slice(&dport.to_be_bytes());
+    hdr[2..4].copy_from_slice(&dport.to_be_bytes());
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {

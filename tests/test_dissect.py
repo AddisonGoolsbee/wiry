@@ -164,7 +164,7 @@ def test_header_longer_than_the_buffer_claims_is_not_over_read():
 
 
 @pytest.mark.parametrize(
-    "ethertype", [0x8847, 0x88CC, 0x0001, 0xFFFF],
+    "ethertype", [0x88CC, 0x0001, 0xFFFF],
 )
 def test_unimplemented_ethertypes_dissect_to_raw(ethertype):
     data = bytearray(ETHER_IP_TCP)
@@ -172,19 +172,29 @@ def test_unimplemented_ethertypes_dissect_to_raw(ethertype):
     assert Ether(bytes(data)).layers() == ["Ether", "Raw"]
 
 
-@pytest.mark.parametrize("proto", [47, 50, 89, 132])
+@pytest.mark.parametrize("proto", [50, 89, 132])
 def test_unimplemented_ip_protocols_dissect_to_raw(proto):
     data = bytearray(ETHER_IP_TCP)
     data[23] = proto
     assert Ether(bytes(data)).layers() == ["Ether", "IP", "Raw"]
 
 
-@pytest.mark.parametrize("nh", [0, 43, 44, 60])
-def test_ipv6_extension_headers_dissect_to_raw(nh):
+@pytest.mark.parametrize(
+    "nh,layer",
+    [
+        (0, "IPv6ExtHdrHopByHop"),
+        (43, "IPv6ExtHdrRouting"),
+        (44, "IPv6ExtHdrFragment"),
+        (60, "IPv6ExtHdrDestOpt"),
+    ],
+)
+def test_ipv6_extension_headers_are_walked(nh, layer):
     pkt = Ether() / IPv6() / TCP()
     data = bytearray(bytes(pkt))
     data[20] = nh
-    assert Ether(bytes(data)).layers() == ["Ether", "IPv6", "Raw"]
+    # What follows the extension header is TCP's bytes read as one, so only the
+    # shape of the chain down to it is under test here.
+    assert Ether(bytes(data)).layers()[:3] == ["Ether", "IPv6", layer]
 
 
 def test_non_initial_fragment_has_no_transport_layer():

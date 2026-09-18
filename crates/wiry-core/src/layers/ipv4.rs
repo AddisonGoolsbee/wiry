@@ -42,6 +42,53 @@ fn content_len(hdr: &[u8]) -> usize {
     u16::from_be_bytes([hdr[2], hdr[3]]) as usize
 }
 
+/// The protocol numbers both IP versions share. The IPv6 extension headers are
+/// added on top of this by `ipv6::next_header` and `ipv6::to_next_header`;
+/// protocol 0 is HOPOPT, which is IPv6-only and also the value an unbound IPv4
+/// header carries, so reading it here would give every such datagram a header
+/// it does not have.
+pub fn from_ipproto(v: u8) -> Next {
+    match v {
+        ipproto::TCP => Next::Proto(ProtoId::Tcp),
+        ipproto::UDP => Next::Proto(ProtoId::Udp),
+        ipproto::ICMP => Next::Proto(ProtoId::Icmp),
+        ipproto::IPV6_ICMP => Next::Proto(ProtoId::Icmpv6),
+        ipproto::IPV4 => Next::Proto(ProtoId::Ipv4),
+        ipproto::IPV6 => Next::Proto(ProtoId::Ipv6),
+        ipproto::GRE => Next::Proto(ProtoId::Gre),
+        _ => Next::Raw,
+    }
+}
+
+/// The inverse, symmetric with it: the extension headers `from_ipproto` refuses
+/// to read are added back by `ipv6::to_next_header`, for the headers entitled to
+/// name one. RFC 2003 §3 tunnels IPv4 and RFC 4213 §3 tunnels IPv6, whichever
+/// version encloses them.
+pub fn to_ipproto(p: ProtoId) -> Option<u8> {
+    Some(match p {
+        ProtoId::Tcp => ipproto::TCP,
+        ProtoId::Udp => ipproto::UDP,
+        ProtoId::Icmp => ipproto::ICMP,
+        ProtoId::Icmpv6 => ipproto::IPV6_ICMP,
+        ProtoId::Ipv4 => ipproto::IPV4,
+        ProtoId::Ipv6 => ipproto::IPV6,
+        ProtoId::Gre => ipproto::GRE,
+        _ => return None,
+    })
+}
+
+/// RFC 4385 §3: where nothing names the payload's protocol, an IP version in
+/// the first nibble is the only signal, and it is one precisely because a
+/// pseudowire control word is defined never to look like it. `None` means "not
+/// an IP datagram", which each tunnel resolves its own way.
+pub fn from_ip_version(first: Option<&u8>) -> Option<Next> {
+    match first? >> 4 {
+        4 => Some(Next::Proto(ProtoId::Ipv4)),
+        6 => Some(Next::Proto(ProtoId::Ipv6)),
+        _ => None,
+    }
+}
+
 fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 20 {
         return Next::Raw;
@@ -51,23 +98,12 @@ fn next(hdr: &[u8]) -> Next {
     if frag_off != 0 {
         return Next::Raw;
     }
-    match hdr[9] {
-        ipproto::TCP => Next::Proto(ProtoId::Tcp),
-        ipproto::UDP => Next::Proto(ProtoId::Udp),
-        ipproto::ICMP => Next::Proto(ProtoId::Icmp),
-        _ => Next::Raw,
-    }
+    from_ipproto(hdr[9])
 }
 
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
-    let v = match p {
-        ProtoId::Tcp => ipproto::TCP,
-        ProtoId::Udp => ipproto::UDP,
-        ProtoId::Icmp => ipproto::ICMP,
-        _ => return,
-    };
-    if hdr.len() >= 20 {
-        hdr[9] = v;
+    if let (Some(v), Some(b)) = (to_ipproto(p), hdr.get_mut(9)) {
+        *b = v;
     }
 }
 

@@ -14,10 +14,17 @@ Those two lines read a 256 MB capture off disk and pull three fields out of all
 549,726 packets in 295 ms, without building a Python object for a single one of
 them.
 
-**wiry implements 15 protocols. scapy registers 1,746.** If yours is not
+**wiry implements 29 protocols. scapy registers 1,746.** If yours is not
 Ethernet, 802.1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP,
 Loopback or Linux cooked capture, it dissects to `Raw` and round-trips unchanged,
 and you get bytes rather than fields.
+
+The rest are encapsulations, because losing one of those loses every layer under
+it rather than one leaf: the four IPv6 extension headers (hop-by-hop, routing,
+fragment, destination options), GRE, VXLAN, Geneve, IP-in-IP and 6in4, MPLS,
+PPPoE with PPP, GTP-U and ERSPAN. A tunnelled packet dissects through to its
+inner transport, tunnels nest, and `columns()` reaches inside them.
+`DEVIATIONS.md` E6 states exactly where each of those stops.
 
 The method surface is narrower too. `show2`, `sprintf`, `fragment`, `json` and
 `command` are absent. Most of what else scapy's `Packet` carries is its own
@@ -164,21 +171,22 @@ scapy's `Net` address generators, 1 needs gzip input, 1 needs Windows, and 1
 asserts by patching a scapy internal we do not have. Every gap is enumerated in
 [DEVIATIONS.md](DEVIATIONS.md).
 
-281 Rust and 594 Python tests pass, 286 Rust with live capture built in. All
+328 Rust and 654 Python tests pass, 333 Rust with live capture built in. All
 three crates set `#![forbid(unsafe_code)]`, which constrains this code and says
 nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
 compiled in. The dissector carries seven fuzz targets plus seeded property tests
 that run on stable.
 
-Three adversarial reviews went looking for wrong answers, hostile-input
-failures and races in the capture surface. They found fifteen bugs, including a
+Four adversarial reviews went looking for wrong answers, hostile-input
+failures and races in the capture surface. They found twenty bugs, including a
 field write that could corrupt the layer beside it, a reply matcher that paired
-answers with the wrong probe, and an option value that could crash the
-interpreter. All are fixed, with a regression test each.
+answers with the wrong probe, an option value that could crash the interpreter,
+and four length fields that wrapped rather than refusing a region too wide to
+describe. All are fixed, with a regression test each.
 
 ## When not to use wiry
 
-- **You need a protocol outside the fifteen.** scapy has 1,746 and an interactive
+- **You need a protocol outside the twenty-nine.** scapy has 1,746 and an interactive
   shell. It is a more capable tool and will stay one.
 - **You have a few thousand packets.** scapy takes a second. Nothing here matters.
 - **You only want a fast parser and dpkt's API suits you.** dpkt is 2.0x
