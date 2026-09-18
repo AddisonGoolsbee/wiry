@@ -7,6 +7,7 @@ pub mod answers;
 pub mod checksum;
 pub mod compute;
 pub mod field;
+pub mod generate;
 pub mod layers;
 pub mod options;
 pub mod packet;

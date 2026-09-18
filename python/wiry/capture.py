@@ -22,7 +22,7 @@ import threading
 import weakref
 from typing import Any, Callable, Optional
 
-from . import Packet, PacketList
+from . import Packet, PacketList, expand
 from . import _wiry as _b
 from .columnar import _normalize_where
 
@@ -319,12 +319,14 @@ class AsyncSniffer:
 
 
 def _as_list(x: Any) -> list:
-    """Whatever was handed in, as a list of packets."""
-    if isinstance(x, (Packet, bytes, bytearray, memoryview, str)):
+    """Whatever was handed in, as a list of packets. A template expands."""
+    if isinstance(x, (bytes, bytearray, memoryview, str)):
         return [x]
+    if isinstance(x, Packet):
+        return expand(x)
     if isinstance(x, PacketList):
         return list(x)
-    return list(x)
+    return [p for item in x for p in expand(item)]
 
 
 def _octets(pkt: Any) -> bytes:
@@ -423,6 +425,12 @@ def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
     _b.capture_check()
     _refuse_unsupported(realtime, socket)
     gap = _pause(inter)
+    tmpl = x.template() if isinstance(x, Packet) else None
+    if tmpl is not None:
+        _refuse_ipv6([x], [tmpl.frame(0)], "send")
+        sent = _b.send_template_l3(tmpl, _passes(count), gap, bool(loop))
+        _report(sent, verbose)
+        return [x] if return_packets else None
     pkts = _as_list(x)
     frames = [_octets(p) for p in pkts]
     _refuse_ipv6(pkts, frames, "send")
@@ -445,8 +453,15 @@ def sendp(x: Any, inter: float = 0, loop: int = 0, iface: Any = None,
     _refuse_unsupported(realtime, socket)
     gap = _pause(inter)
     name = _iface_name(iface)
-    pkts = _as_list(x)
     mac = _b.interface_mac(name)
+    if isinstance(x, Packet):
+        x = _with_src(x, mac)
+        tmpl = x.template()
+        if tmpl is not None:
+            sent = _b.send_template(tmpl, name, _passes(count), gap, bool(loop))
+            _report(sent, verbose)
+            return [x] if return_packets else None
+    pkts = _as_list(x)
     frames = [_octets(_with_src(p, mac)) for p in pkts]
     sent = _b.send_frames(frames, name, _passes(count), gap, bool(loop))
     _report(sent, verbose)

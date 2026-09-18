@@ -84,6 +84,37 @@ raw(p)                      # checksums and lengths filled in
 p[TCP].dport = 443          # mutate; checksums recompute
 ```
 
+## Many packets from one declaration
+
+A field holding a generator makes the packet a *template*: iterating it yields
+the cartesian product, in scapy's order.
+
+```python
+from wiry import IP, TCP, Net, RandShort, fuzz, raw, set_rand_seed
+
+scan = IP(dst=Net("10.0.0.0/24"))/TCP(dport=[80, 443], sport=RandShort())
+len(list(scan))                      # 512
+
+set_rand_seed(1234)                  # a fuzz run you can repeat
+raw(fuzz(IP()/TCP()))                # random fields, valid lengths and checksums
+```
+
+`sendp(Ether()/scan)` and `wrpcap("scan.pcap", scan)` take the template itself.
+
+`IP(ttl=(5, 10))`, `IP(dst=["a", "b"])`, `IP(dst="10.0.0.0/24")`, `Net`, `Net6`
+and the `Rand*` values are all the same mechanism: **Python describes the
+generator as data and Rust walks the product.** No Python runs per packet, and
+nothing is materialised — `IP(src=Net("10.0.0.0/8"), dst=Net("10.0.0.0/8"))` is
+2^48 packets that iterate lazily rather than filling memory.
+
+`set_rand_seed` has no scapy equivalent: scapy draws from the interpreter's
+`random` in an order its own internals decide, so a fuzz run that found a crash
+cannot be replayed. The guarantee here is exactly this: one process-wide stream,
+so the same seed replays a run that makes the same draws in the same order.
+Draw from two threads at once and they interleave, and neither thread's sequence
+repeats — measured, not assumed. See [DEVIATIONS.md](DEVIATIONS.md) E18 for that
+and for what else a generator still cannot do.
+
 Capture and injection work too: `sniff`, `send`, `sendp`, `sr`, `sr1`, `srp`,
 `srp1` and `AsyncSniffer`, with scapy's arguments and semantics. Two limits, both
 real. They need the `live` cargo feature, which is **off in the first release**,
@@ -157,14 +188,18 @@ Against a real 14,261-packet capture, compared with scapy 2.7.0: all 14,261
 layer chains agree, all 155,501 field comparisons are equal, and every packet
 re-serialises byte-identically.
 
-scapy's own regression suite runs against wiry: **39 pass, 636 skip, 5 fail.**
+scapy's own regression suite runs against wiry: **48 pass, 628 skip, 4 fail.**
 A skip is a scope boundary, most often a layer we do not implement or a test
-whose `~` marker asks for a Linux host, root or tshark. Of the 5 failures, 2 are
-scapy's `Net` address generators, 1 needs gzip input, 1 needs Windows, and 1
-asserts by patching a scapy internal we do not have. Every gap is enumerated in
+whose `~` marker asks for a Linux host, root or tshark. Of the 4 failures, 1
+cannot pass by construction: `Test corrupt_* functions` seeds the interpreter's
+`random` and asserts the exact octets scapy's `corrupt_bytes` returns, so
+passing it means drawing from CPython's PRNG in scapy's own call order — its
+implementation, not its interface, and the thing `set_rand_seed` deliberately
+replaces. The other 3: 1 needs gzip input, 1 needs Windows, and 1 asserts by
+patching a scapy internal we do not have. Every gap is enumerated in
 [DEVIATIONS.md](DEVIATIONS.md).
 
-281 Rust and 594 Python tests pass, 286 Rust with live capture built in. All
+298 Rust and 669 Python tests pass, 303 Rust with live capture built in. All
 three crates set `#![forbid(unsafe_code)]`, which constrains this code and says
 nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
 compiled in. The dissector carries seven fuzz targets plus seeded property tests
