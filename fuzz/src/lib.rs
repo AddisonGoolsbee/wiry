@@ -56,6 +56,7 @@ pub fn exercise(pkt: &mut Packet) {
     }
     let _ = show::summary(pkt);
     let _ = show::show(pkt);
+    let _ = show::session_key(pkt.raw_bytes(), pkt.layers());
     let _ = pkt.to_bytes();
     check_spans(pkt);
     exercise_writes(pkt);

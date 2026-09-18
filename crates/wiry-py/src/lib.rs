@@ -9,12 +9,13 @@
 mod capture;
 mod live;
 mod sniff;
-mod writer;
 mod template;
+mod writer;
 
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PySequence};
+use std::collections::HashMap;
 use std::sync::Arc;
 use wiry_capture::Flow;
 use wiry_core::field::{self, FieldDesc, FieldKind, FieldValue};
@@ -47,6 +48,7 @@ const FRAME: &str = "Frame";
 enum ColSpec {
     Field(ProtoId, FieldRef),
     Options(ProtoId),
+    Present(ProtoId),
     Time,
     Len,
     Num,
@@ -165,13 +167,9 @@ impl Query {
     }
 }
 
-/// Clamped exactly as `Packet::get_desc` clamps, so the bulk and per-packet
-/// paths cannot disagree.
 #[inline]
 fn decode_span(buf: &[u8], s: &LayerSpan, f: &FieldDesc) -> Option<FieldValue> {
-    let a = (s.off as usize).min(buf.len());
-    let b = (a + s.hlen as usize).min(buf.len());
-    let hdr = &buf[a..b];
+    let hdr = s.header(buf);
     f.is_active(hdr).then(|| field::decode(hdr, f))
 }
 
@@ -232,6 +230,9 @@ fn resolve_spec(layer: &str, name: &str) -> PyResult<ColSpec> {
         };
     }
     let id = proto_by_name(layer)?;
+    if name.is_empty() {
+        return Ok(ColSpec::Present(id));
+    }
     if name == "options" && proto::desc(id).parse_options.is_some() {
         return Ok(ColSpec::Options(id));
     }
@@ -288,6 +289,7 @@ pub(crate) fn build_query(
 enum Cell {
     Null,
     Val(FieldValue),
+    Bool(bool),
     Time(f64),
     Opts(Vec<Item>),
 }
@@ -297,6 +299,7 @@ impl Cell {
         Ok(match self {
             Cell::Null => py.None(),
             Cell::Val(v) => value_to_py(py, &v),
+            Cell::Bool(b) => b.into_py(py),
             Cell::Time(t) => t.into_py(py),
             Cell::Opts(items) => options_to_py(py, &items)?.into_py(py),
         })
@@ -901,9 +904,12 @@ impl PyPktList {
         let div = if self.nanos { 1e9 } else { 1e6 };
         let nums = self.nums.as_deref();
         let dissect = !q.is_empty()
-            || resolved
-                .iter()
-                .any(|s| matches!(s, ColSpec::Field(..) | ColSpec::Options(..)));
+            || resolved.iter().any(|s| {
+                matches!(
+                    s,
+                    ColSpec::Field(..) | ColSpec::Options(..) | ColSpec::Present(_)
+                )
+            });
 
         let cols: Vec<Vec<Cell>> = py.allow_threads(|| {
             let mut cols: Vec<Vec<Cell>> = resolved
@@ -928,6 +934,7 @@ impl PyPktList {
                         ColSpec::Num => {
                             Cell::Val(FieldValue::Uint(nums.map_or(row as u64, |n| n[row] as u64)))
                         }
+                        ColSpec::Present(id) => Cell::Bool(spans.iter().any(|s| s.proto == *id)),
                         ColSpec::Field(id, r) => match spans.iter().position(|s| s.proto == *id) {
                             Some(at) => {
                                 decode_at(bytes, &spans, at, r).map_or(Cell::Null, Cell::Val)
@@ -1104,6 +1111,77 @@ impl PyPktList {
         Ok(self.keeping(&idx))
     }
 
+    /// One summary line per packet, in one crossing.
+    fn summaries(&self, py: Python<'_>) -> Vec<String> {
+        let buf = &self.buf;
+        let idx = &self.index;
+        let link = self.link;
+        py.allow_threads(|| {
+            idx.iter()
+                .map(|(off, len, ..)| {
+                    let bytes = &buf[*off..*off + *len as usize];
+                    show::summary_of(&dissect_spans(bytes, link))
+                })
+                .collect()
+        })
+    }
+
+    /// Keys and membership stay in Rust; a view is minted per flow on demand.
+    fn sessions(slf: PyRef<'_, Self>, py: Python<'_>) -> PySessions {
+        let buf = &slf.buf;
+        let idx = &slf.index;
+        let link = slf.link;
+        let (keys, starts, members) = py.allow_threads(|| {
+            let mut at: HashMap<Arc<str>, u32> = HashMap::new();
+            let mut keys: Vec<Arc<str>> = Vec::new();
+            let mut of: Vec<u32> = Vec::with_capacity(idx.len());
+            for (off, len, ..) in idx.iter() {
+                let bytes = &buf[*off..*off + *len as usize];
+                let key = show::session_key(bytes, &dissect_spans(bytes, link));
+                of.push(match at.get(key.as_str()) {
+                    Some(g) => *g,
+                    None => {
+                        let k: Arc<str> = Arc::from(key);
+                        keys.push(Arc::clone(&k));
+                        at.insert(k, keys.len() as u32 - 1);
+                        keys.len() as u32 - 1
+                    }
+                });
+            }
+            // One flow per packet is a capture an attacker can hand us, so the
+            // membership is one pair of flat arrays, not a Vec per flow.
+            let mut starts: Vec<u32> = vec![0; keys.len() + 1];
+            for g in &of {
+                starts[*g as usize + 1] += 1;
+            }
+            for i in 1..starts.len() {
+                starts[i] += starts[i - 1];
+            }
+            let mut fill = starts.clone();
+            let mut members: Vec<u32> = vec![0; of.len()];
+            for (i, g) in of.iter().enumerate() {
+                members[fill[*g as usize] as usize] = i as u32;
+                fill[*g as usize] += 1;
+            }
+            (keys, starts, members)
+        });
+        PySessions {
+            owner: slf.into(),
+            keys,
+            starts,
+            members,
+        }
+    }
+
+    /// The caller supplies the positions, so every one is checked.
+    fn view(&self, keep: Vec<u32>) -> PyResult<PyPktList> {
+        let n = self.index.len() as u32;
+        if keep.iter().any(|&i| i >= n) {
+            return Err(PyIndexError::new_err("packet index out of range"));
+        }
+        Ok(self.keeping(&keep))
+    }
+
     /// Shares the capture buffer: no copy.
     fn head(&self, n: usize) -> PyPktList {
         let k = n.min(self.index.len());
@@ -1152,6 +1230,35 @@ impl PyPktList {
     #[getter]
     fn nanos(&self) -> bool {
         self.nanos
+    }
+}
+
+/// Keys in order of first appearance, and `members[starts[i]..starts[i + 1]]`
+/// for the positions belonging to each.
+#[pyclass(name = "Sessions")]
+pub struct PySessions {
+    owner: Py<PyPktList>,
+    keys: Vec<Arc<str>>,
+    starts: Vec<u32>,
+    members: Vec<u32>,
+}
+
+#[pymethods]
+impl PySessions {
+    fn __len__(&self) -> usize {
+        self.keys.len()
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.keys.iter().map(|k| &**k).collect()
+    }
+
+    fn at(&self, py: Python<'_>, i: usize) -> PyResult<PyPktList> {
+        if i >= self.keys.len() {
+            return Err(PyIndexError::new_err("session index out of range"));
+        }
+        let (a, b) = (self.starts[i] as usize, self.starts[i + 1] as usize);
+        Ok(self.owner.borrow(py).keeping(&self.members[a..b]))
     }
 }
 
@@ -1528,9 +1635,17 @@ fn defragment_frames<'py>(
 #[pyfunction]
 fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
     let id = proto_by_name(name)?;
-    let mut out = proto::all_field_names(id);
+    let mut out = column_fields(name)?;
     out.extend_from_slice(proto::accessor_names(id));
     Ok(out)
+}
+
+/// The names a column can carry: every flat field either layout declares — the
+/// set `FieldRef::resolve` accepts — without the parser-backed accessors, which
+/// have no fixed offset to read from.
+#[pyfunction]
+fn column_fields(name: &str) -> PyResult<Vec<&'static str>> {
+    Ok(proto::all_field_names(proto_by_name(name)?))
 }
 
 /// Least significant first. `None` for any other kind, which is what tells the
@@ -1693,6 +1808,7 @@ fn bind_layer(
 fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPkt>()?;
     m.add_class::<PyPktList>()?;
+    m.add_class::<PySessions>()?;
     m.add_function(wrap_pyfunction!(read_pcap, m)?)?;
     m.add_class::<writer::PyCaptureWriter>()?;
     m.add_function(wrap_pyfunction!(dissect, m)?)?;
@@ -1702,6 +1818,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_packet, m)?)?;
     m.add_function(wrap_pyfunction!(build_and_serialize, m)?)?;
     m.add_function(wrap_pyfunction!(layer_fields, m)?)?;
+    m.add_function(wrap_pyfunction!(column_fields, m)?)?;
     m.add_function(wrap_pyfunction!(flag_names, m)?)?;
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
     m.add_function(wrap_pyfunction!(register_layer, m)?)?;

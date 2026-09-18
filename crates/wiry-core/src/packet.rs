@@ -11,6 +11,23 @@ pub struct LayerSpan {
     pub total: u32,
 }
 
+impl LayerSpan {
+    /// This layer's header, clamped to what the buffer holds. Every read of a
+    /// span-addressed field clamps here, so the bulk and per-packet paths
+    /// cannot disagree about a truncated header.
+    #[inline]
+    pub fn hdr_range(&self, len: usize) -> (usize, usize) {
+        let a = (self.off as usize).min(len);
+        (a, (a + self.hlen as usize).min(len))
+    }
+
+    #[inline]
+    pub fn header<'a>(&self, buf: &'a [u8]) -> &'a [u8] {
+        let (a, b) = self.hdr_range(buf.len());
+        &buf[a..b]
+    }
+}
+
 /// Sized for a tunnelled chain: a VXLAN or ERSPAN frame reaches nine spans with
 /// its `Padding`, and spilling to the heap costs an allocation per packet on
 /// every bulk path.
@@ -156,17 +173,15 @@ impl Packet {
 
     #[inline]
     fn hdr_range(&self, s: &LayerSpan) -> (usize, usize) {
-        let a = (s.off as usize).min(self.buf.len());
-        (a, (a + s.hlen as usize).min(self.buf.len()))
+        s.hdr_range(self.buf.len())
     }
 
     #[inline]
     pub fn header(&self, layer: usize) -> &[u8] {
-        let Some(s) = self.spans.get(layer) else {
-            return &[];
-        };
-        let (a, b) = self.hdr_range(s);
-        &self.buf[a..b]
+        match self.spans.get(layer) {
+            Some(s) => s.header(&self.buf),
+            None => &[],
+        }
     }
 
     /// Everything from this layer to the end of the packet.
@@ -463,12 +478,6 @@ pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
     spans_of(buf, link, true)
 }
 
-fn span_slice<'a>(buf: &'a [u8], s: &LayerSpan) -> &'a [u8] {
-    let a = (s.off as usize).min(buf.len());
-    let b = (a + s.hlen as usize).min(buf.len());
-    &buf[a..b]
-}
-
 /// The one parse of an option region, so a bulk read and a per-packet read
 /// cannot answer differently. DHCP's region is not only its own bytes: RFC 2131
 /// §4.1 lets `sname` and `file` carry options too, and RFC 3396 splits one long
@@ -482,11 +491,11 @@ pub fn options_at(
     let d = desc(s.proto);
     let parse = d.parse_options?;
     let Some(t) = d.opt_table.filter(|_| s.proto == ProtoId::Dhcp) else {
-        return Some(parse(span_slice(buf, s)));
+        return Some(parse(s.header(buf)));
     };
-    let mut tlvs = t.walk_raw(span_slice(buf, s));
+    let mut tlvs = t.walk_raw(s.header(buf));
     if let Some(b) = spans[..layer].iter().rfind(|x| x.proto == ProtoId::Bootp) {
-        let hdr = span_slice(buf, b);
+        let hdr = b.header(buf);
         for (lo, hi) in crate::layers::bootp::overload_regions(&tlvs) {
             if let Some(region) = hdr.get(lo..hi) {
                 tlvs.extend(t.walk_raw(region));
