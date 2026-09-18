@@ -1,0 +1,111 @@
+name = "ICMPv6ND_RA"
+id = "Icmpv6NdRa"
+num = 49
+citation = """
+RFC 4861 §4.2, Router Advertisement: ICMPv6 type 134, code 0, checksum, a
+one-octet current hop limit, the Managed and Other configuration flags, a
+16-bit router lifetime in seconds, a 32-bit reachable time and a 32-bit
+retransmit timer, both in milliseconds, then options (§4.6). The Home Agent bit
+is RFC 6275 §7.1, the two Default Router Preference bits and the Proxy bit are
+RFC 4191 §2.2 and RFC 4389 §4.1.
+"""
+min_len = 16
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "type"
+off = 0
+len = 8
+default = 134
+
+[[fields]]
+name = "code"
+off = 8
+len = 8
+
+[[fields]]
+name = "cksum"
+off = 16
+len = 16
+
+[[fields]]
+name = "chlim"
+off = 32
+len = 8
+
+[[fields]]
+name = "M"
+off = 40
+len = 1
+
+[[fields]]
+name = "O"
+off = 41
+len = 1
+
+[[fields]]
+name = "H"
+off = 42
+len = 1
+
+[[fields]]
+name = "prf"
+off = 43
+len = 2
+
+[[fields]]
+name = "P"
+off = 45
+len = 1
+
+[[fields]]
+name = "res"
+off = 46
+len = 2
+
+[[fields]]
+name = "routerlifetime"
+off = 48
+len = 16
+default = 1800
+
+[[fields]]
+name = "reachabletime"
+off = 64
+len = 32
+
+[[fields]]
+name = "retranstimer"
+off = 96
+len = 32
+
+[[fields]]
+name = "options"
+off = 128
+kind = "var_bytes"
+
+[[parents]]
+from = "icmpv6_type"
+values = [134]
+
+[vector]
+source = "RFC 4861 §4.2 router advertisement: hop limit 64, router lifetime 1800 s, one MTU option of 1500."
+bytes = [
+  0x86, 0x00, 0x00, 0x00,
+  0x40, 0x00, 0x07, 0x08,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x05, 0x01, 0x00, 0x00, 0x00, 0x00, 0x05, 0xdc,
+]
+[vector.fields]
+type = 134
+code = 0
+cksum = 0
+chlim = 64
+M = 0
+O = 0
+routerlifetime = 1800
+reachabletime = 0
+retranstimer = 0

@@ -92,6 +92,10 @@ _FLAG_NAMES: dict[tuple[str, str], tuple[str, ...] | None] = {}
 # Tested first on every field read, so a non-flag field costs one set lookup.
 _FLAG_FIELDS: set[str] = set()
 
+# Layer name -> the field whose read returns its parsed item list. Line-oriented
+# and BER layers answer under their own name rather than "options".
+_PARSED_FIELD: dict[str, str] = {}
+
 
 def _bits_from(text: str, names: Sequence[str]) -> int:
     """Parse a flag string into its bits.
@@ -279,7 +283,7 @@ class _LayerView:
         if gen is not None:
             return gen
         rust = self._pkt._materialize()
-        if field == "options":
+        if field == _PARSED_FIELD.get(self._name, "options"):
             parsed = rust.options(self._idx)
             if parsed is not None:
                 return parsed
@@ -303,7 +307,9 @@ class _LayerView:
 
     def raw_options(self) -> Any:
         """The unparsed option bytes, for layers whose options are parsed."""
-        return self._pkt._materialize().get_field(self._idx, "options")
+        return self._pkt._materialize().get_field(
+            self._idx, _PARSED_FIELD.get(self._name, "options")
+        )
 
     def __setattr__(self, field: str, value: Any) -> None:
         if field.startswith("_"):
@@ -853,6 +859,7 @@ for _n in _b.known_layers():
     globals()[_n] = _LAYERS[_n]
     __all__.append(_n)
     _FLAG_FIELDS.update(f for f in _b.layer_fields(_n) if _b.flag_names(_n, f))
+    _PARSED_FIELD[_n] = _b.parsed_field(_n)
 
 
 def known_layers() -> list[str]:

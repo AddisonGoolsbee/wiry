@@ -1,0 +1,67 @@
+name = "TLS"
+id = "Tls"
+num = 81
+citation = """
+RFC 8446 §5.1 (and RFC 5246 §6.2.1, which is the same shape): a TLS record is a
+one-octet content type (20 change_cipher_spec, 21 alert, 22 handshake,
+23 application_data), a two-octet legacy record version and a two-octet length.
+§4.1.2 gives the ClientHello inside a handshake record: the legacy version, a
+32-octet random, a session id, the cipher suites, the compression methods and
+the extensions, from which §9.2 and RFC 6066 §3 name the server_name
+extension. Only that chain is followed, because the server name is the field
+worth reaching; everything else in the record stays bytes.
+"""
+min_len = 5
+header_len = "hand"
+build_len = 5
+next = "raw"
+parse_options = "hand"
+
+[[fields]]
+name = "type"
+off = 0
+len = 8
+default = 22
+
+[[fields]]
+name = "version"
+off = 8
+len = 16
+default = 0x0303
+
+[[fields]]
+name = "len"
+off = 24
+len = 16
+
+[[fields]]
+name = "options"
+off = 40
+kind = "var_bytes"
+
+[[parents]]
+from = "tcp_port"
+values = [443, 8443, 993, 995, 465, 563, 636, 989, 990, 992, 5061]
+guard = "crate::layers::tls::looks_like"
+bind = 443
+
+[vector]
+source = "RFC 8446 §4.1.2 ClientHello for \"a.io\" in one handshake record, hand-built to the minimum the extension needs."
+bytes = [
+  0x16, 0x03, 0x01, 0x00, 0x40,
+  0x01, 0x00, 0x00, 0x3c, 0x03, 0x03,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00,
+  0x00, 0x02, 0x13, 0x01,
+  0x01, 0x00,
+  0x00, 0x11,
+  0x00, 0x00, 0x00, 0x0d, 0x00, 0x0b, 0x00, 0x00, 0x08,
+  0x61, 0x2e, 0x69, 0x6f, 0x2e, 0x63, 0x6f, 0x6d,
+]
+[vector.fields]
+type = 22
+version = 0x0301
+len = 0x40

@@ -1,0 +1,31 @@
+name = "ESP"
+id = "Esp"
+num = 57
+citation = """
+RFC 4303 §2: the Encapsulating Security Payload header is a 32-bit Security
+Parameters Index and a 32-bit Sequence Number. Everything after them is
+ciphertext under a key this dissector does not have, so it stays opaque.
+"""
+min_len = 8
+header_len = 8
+
+[[fields]]
+name = "spi"
+off = 0
+len = 32
+
+[[fields]]
+name = "seq"
+off = 32
+len = 32
+
+[[parents]]
+from = "ipproto"
+values = [50]
+
+[vector]
+source = "RFC 4303 §2, hand-built: SPI 0x11223344, sequence 1."
+bytes = [0x11, 0x22, 0x33, 0x44, 0x00, 0x00, 0x00, 0x01, 0xaa, 0xbb]
+[vector.fields]
+spi = 0x11223344
+seq = 1

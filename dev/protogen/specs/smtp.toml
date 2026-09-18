@@ -1,0 +1,31 @@
+name = "SMTP"
+id = "Smtp"
+num = 90
+parsed_field = "lines"
+citation = """
+RFC 5321 §4.1: SMTP commands are a verb and optional parameters terminated by
+CR LF; §4.2 replies are a three-digit code, a space or a hyphen, and text.
+Line-oriented (DEVIATIONS T1).
+"""
+min_len = 4
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "lines"
+off = 0
+kind = "var_bytes_to_end"
+
+[[parents]]
+from = "tcp_port"
+values = [25, 587]
+guard = "crate::layers::smtp::looks_like"
+bind = 25
+
+[vector]
+source = "RFC 5321 §4.2 greeting."
+bytes = [
+  0x32, 0x32, 0x30, 0x20, 0x61, 0x2e, 0x69, 0x6f,
+  0x20, 0x45, 0x53, 0x4d, 0x54, 0x50, 0x0d, 0x0a,
+]

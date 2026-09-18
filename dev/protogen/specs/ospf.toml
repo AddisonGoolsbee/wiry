@@ -1,0 +1,78 @@
+name = "OSPF_Hdr"
+id = "Ospf"
+num = 59
+module = "ospf"
+citation = """
+RFC 2328 §A.3.1: every OSPF version 2 packet opens with a one-octet version, a
+one-octet type, a 16-bit packet length, the 32-bit router id, the 32-bit area
+id, a 16-bit checksum, a 16-bit authentication type and 64 bits of
+authentication data. The body that follows is per-type (§A.3.2 onwards) and is
+left opaque.
+"""
+min_len = 24
+header_len = 24
+content_len = "hand"
+
+[[fields]]
+name = "version"
+off = 0
+len = 8
+default = 2
+
+[[fields]]
+name = "type"
+off = 8
+len = 8
+default = 1
+
+[[fields]]
+name = "len"
+off = 16
+len = 16
+default = 24
+
+[[fields]]
+name = "src"
+off = 32
+kind = "ipv4"
+
+[[fields]]
+name = "area"
+off = 64
+kind = "ipv4"
+
+[[fields]]
+name = "chksum"
+off = 96
+len = 16
+
+[[fields]]
+name = "authtype"
+off = 112
+len = 16
+
+[[fields]]
+name = "authdata"
+off = 128
+len = 64
+kind = "bytes"
+
+[[parents]]
+from = "ipproto"
+values = [89]
+
+[vector]
+source = "RFC 2328 §A.3.2 hello, hand-built: router 10.0.0.1, area 0.0.0.0, length 24."
+bytes = [
+  0x02, 0x01, 0x00, 0x18,
+  0x0a, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]
+[vector.fields]
+version = 2
+type = 1
+len = 24
+chksum = 0
+authtype = 0

@@ -1,0 +1,83 @@
+name = "ICMPv6MLQuery"
+id = "Icmpv6MlQuery"
+num = 53
+module = "mld_query"
+citation = """
+RFC 2710 §3, Multicast Listener Query: ICMPv6 type 130, code 0, checksum, a
+16-bit Maximum Response Delay in milliseconds, a 16-bit reserved field and the
+128-bit multicast address. RFC 3810 §5.1 extends the same 24 octets with a
+reserved/S/QRV octet, a QQIC octet, a 16-bit source count and that many source
+addresses; a query of at least 28 octets is a version 2 query, which is why
+those four fields are conditional on the header length.
+"""
+min_len = 24
+header_len = "hand"
+build_len = 24
+next = "end"
+
+[[fields]]
+name = "type"
+off = 0
+len = 8
+default = 130
+
+[[fields]]
+name = "code"
+off = 8
+len = 8
+
+[[fields]]
+name = "cksum"
+off = 16
+len = 16
+
+[[fields]]
+name = "mrd"
+off = 32
+len = 16
+
+[[fields]]
+name = "reserved"
+off = 48
+len = 16
+
+[[fields]]
+name = "mladdr"
+off = 64
+kind = "ipv6"
+
+[[fields]]
+name = "s_qrv"
+off = 192
+len = 8
+when = "is_v2"
+
+[[fields]]
+name = "qqic"
+off = 200
+len = 8
+when = "is_v2"
+
+[[fields]]
+name = "numsrc"
+off = 208
+len = 16
+when = "is_v2"
+
+[[parents]]
+from = "icmpv6_type"
+values = [130]
+
+[vector]
+source = "RFC 2710 §3 general query: maximum response delay 10000 ms, unspecified multicast address."
+bytes = [
+  0x82, 0x00, 0x00, 0x00, 0x27, 0x10, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]
+[vector.fields]
+type = 130
+code = 0
+cksum = 0
+mrd = 10000
+reserved = 0

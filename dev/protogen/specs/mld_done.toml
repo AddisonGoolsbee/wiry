@@ -1,0 +1,60 @@
+name = "ICMPv6MLDone"
+id = "Icmpv6MlDone"
+num = 55
+module = "mld_done"
+citation = """
+RFC 2710 §5, Multicast Listener Done: ICMPv6 type 132, with the same 24-octet
+layout as the Report of §4.
+"""
+min_len = 24
+header_len = 24
+next = "end"
+
+[[fields]]
+name = "type"
+off = 0
+len = 8
+default = 132
+
+[[fields]]
+name = "code"
+off = 8
+len = 8
+
+[[fields]]
+name = "cksum"
+off = 16
+len = 16
+
+[[fields]]
+name = "mrd"
+off = 32
+len = 16
+
+[[fields]]
+name = "reserved"
+off = 48
+len = 16
+
+[[fields]]
+name = "mladdr"
+off = 64
+kind = "ipv6"
+
+[[parents]]
+from = "icmpv6_type"
+values = [132]
+
+[vector]
+source = "RFC 2710 §5 done for ff02::1:ff00:2."
+bytes = [
+  0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00, 0x02,
+]
+[vector.fields]
+type = 132
+code = 0
+cksum = 0
+mrd = 0
+reserved = 0

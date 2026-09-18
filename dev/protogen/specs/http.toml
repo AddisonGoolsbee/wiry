@@ -1,0 +1,38 @@
+name = "HTTP"
+id = "Http"
+num = 82
+parsed_field = "headers"
+citation = """
+RFC 9112 §2.1: an HTTP/1.x message is a start line, then field lines, then an
+empty line, then an optional body. §3 gives the request line (method, request
+target, HTTP version) and §4 the status line (version, status code, reason
+phrase); RFC 9110 §5 gives the field lines, whose names are case-insensitive.
+This is text, not a field table, so the start line and the field lines are
+decoded into one named item list and the body is left as payload
+(DEVIATIONS T1).
+"""
+min_len = 16
+header_len = "hand"
+next = "raw"
+build_len = 0
+parse_options = "hand"
+
+[[fields]]
+name = "headers"
+off = 0
+kind = "var_bytes"
+
+[[parents]]
+from = "tcp_port"
+values = [80, 8080, 8000, 8008, 8888, 3128]
+guard = "crate::layers::http::looks_like"
+bind = 80
+
+[vector]
+source = "RFC 9112 §2.1 request, hand-built."
+bytes = [
+  0x47, 0x45, 0x54, 0x20, 0x2f, 0x20, 0x48, 0x54,
+  0x54, 0x50, 0x2f, 0x31, 0x2e, 0x31, 0x0d, 0x0a,
+  0x48, 0x6f, 0x73, 0x74, 0x3a, 0x20, 0x61, 0x2e,
+  0x69, 0x6f, 0x0d, 0x0a, 0x0d, 0x0a,
+]

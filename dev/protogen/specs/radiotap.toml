@@ -1,0 +1,46 @@
+name = "RadioTap"
+id = "RadioTap"
+num = 37
+citation = """
+The radiotap header, as specified at https://www.radiotap.org/ : an 8-bit
+version (always 0), one pad octet, a 16-bit little-endian length covering the
+whole radiotap header, and a 32-bit little-endian present bitmap which is
+extended by further words while bit 31 is set. The length field, not the
+bitmap, is what bounds the header.
+"""
+min_len = 8
+header_len = "hand"
+build_len = 8
+next = "hand"
+
+[[fields]]
+name = "version"
+off = 0
+len = 8
+
+[[fields]]
+name = "pad"
+off = 8
+len = 8
+
+[[fields]]
+name = "len"
+off = 16
+len = 16
+kind = "le_uint"
+default = 8
+
+[[fields]]
+name = "present"
+off = 32
+len = 32
+kind = "le_uint"
+
+[vector]
+source = "radiotap.org: a header with no present fields, length 8."
+bytes = [0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00]
+[vector.fields]
+version = 0
+pad = 0
+len = 8
+present = 0

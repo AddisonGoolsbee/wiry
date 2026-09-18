@@ -1,0 +1,89 @@
+name = "HSRP"
+id = "Hsrp"
+num = 63
+citation = """
+RFC 2281 §5: a one-octet version, a one-octet opcode, a one-octet state, the
+hello and hold times in seconds, a one-octet priority, a one-octet group, a
+reserved octet, eight octets of authentication data and the four-octet virtual
+IP address.
+"""
+min_len = 20
+header_len = 20
+
+[[fields]]
+name = "version"
+off = 0
+len = 8
+
+[[fields]]
+name = "opcode"
+off = 8
+len = 8
+
+[[fields]]
+name = "state"
+off = 16
+len = 8
+default = 16
+
+[[fields]]
+name = "hellotime"
+off = 24
+len = 8
+default = 3
+
+[[fields]]
+name = "holdtime"
+off = 32
+len = 8
+default = 10
+
+[[fields]]
+name = "priority"
+off = 40
+len = 8
+default = 120
+
+[[fields]]
+name = "group"
+off = 48
+len = 8
+
+[[fields]]
+name = "reserved"
+off = 56
+len = 8
+
+[[fields]]
+name = "auth"
+off = 64
+len = 64
+kind = "bytes"
+default_bytes = [99, 105, 115, 99, 111, 0, 0, 0]
+
+[[fields]]
+name = "virtualIP"
+off = 128
+kind = "ipv4"
+
+[[parents]]
+from = "udp_port"
+values = [1985]
+
+[vector]
+source = "RFC 2281 §5 hello, hand-built: state Active (16), priority 120, group 0, default \"cisco\" authentication, virtual IP 10.0.0.1."
+bytes = [
+  0x00, 0x00, 0x10, 0x03,
+  0x0a, 0x78, 0x00, 0x00,
+  0x63, 0x69, 0x73, 0x63, 0x6f, 0x00, 0x00, 0x00,
+  0x0a, 0x00, 0x00, 0x01,
+]
+[vector.fields]
+version = 0
+opcode = 0
+state = 16
+hellotime = 3
+holdtime = 10
+priority = 120
+group = 0
+reserved = 0

@@ -1,0 +1,51 @@
+name = "RTCP"
+id = "Rtcp"
+num = 74
+citation = """
+RFC 3550 §6.1: every RTCP packet opens with a two-bit version, a padding bit, a
+five-bit item count whose meaning is per packet type, a one-octet packet type
+(200 SR, 201 RR, 202 SDES, 203 BYE, 204 APP) and a 16-bit length in 32-bit
+words minus one. The per-type bodies of §6.4 onwards stay opaque. Like RTP, no
+port is bound by default.
+"""
+min_len = 4
+header_len = 4
+content_len = "hand"
+
+[[fields]]
+name = "version"
+off = 0
+len = 2
+default = 2
+
+[[fields]]
+name = "padding"
+off = 2
+len = 1
+
+[[fields]]
+name = "count"
+off = 3
+len = 5
+
+[[fields]]
+name = "type"
+off = 8
+len = 8
+default = 200
+
+[[fields]]
+name = "length"
+off = 16
+len = 16
+default = 1
+
+[vector]
+source = "RFC 3550 §6.4.2 receiver report with no report blocks: version 2, type 201, length 1."
+bytes = [0x80, 0xc9, 0x00, 0x01, 0x11, 0x22, 0x33, 0x44]
+[vector.fields]
+version = 2
+padding = 0
+count = 0
+type = 201
+length = 1

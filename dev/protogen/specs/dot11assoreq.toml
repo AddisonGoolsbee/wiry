@@ -1,0 +1,37 @@
+name = "Dot11AssoReq"
+id = "Dot11AssoReq"
+num = 43
+citation = """
+IEEE Std 802.11-2020 §9.3.3.5: the Association Request frame body is a 16-bit
+Capability Information field and a 16-bit Listen Interval, little-endian,
+followed by information elements.
+"""
+min_len = 4
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "cap"
+off = 0
+len = 16
+kind = "le_uint"
+
+[[fields]]
+name = "listen_interval"
+off = 16
+len = 16
+kind = "le_uint"
+default = 10
+
+[[fields]]
+name = "options"
+off = 32
+kind = "var_bytes"
+
+[vector]
+source = "IEEE 802.11-2020 §9.3.3.5, hand-built: listen interval 10, SSID element \"wiry\"."
+bytes = [0x01, 0x00, 0x0a, 0x00, 0x00, 0x04, 0x77, 0x69, 0x72, 0x79]
+[vector.fields]
+cap = 1
+listen_interval = 10

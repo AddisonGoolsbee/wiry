@@ -31,8 +31,11 @@ fn header_len(hdr: &[u8]) -> usize {
     (((hdr[12] >> 4) & 0x0f) as usize * 4).max(20)
 }
 
-/// DNS is the one stream protocol wiry dissects; `proto::framing_octets`
-/// accounts for the RFC 1035 §4.2.2 length prefix that frames it.
+/// DNS is framed rather than dispatched on its payload; `proto::framing_octets`
+/// accounts for the RFC 1035 §4.2.2 length prefix that frames it. Every other
+/// application layer is reached through the generated table, which sees the
+/// payload as well as the ports: a segment from the middle of a stream is not
+/// the start of a message, and its guard says so.
 fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 4 {
         return Next::Raw;
@@ -42,14 +45,29 @@ fn next(hdr: &[u8]) -> Next {
     if sport == ports::DNS || dport == ports::DNS {
         return Next::Proto(ProtoId::Dns);
     }
-    Next::Raw
+    let payload = hdr.get(header_len(hdr)..).unwrap_or(&[]);
+    // A bare ACK carries no message to dissect, and the dissection walk would
+    // discard the answer anyway; skipping the lookup keeps the common segment
+    // as cheap as it was before this table existed.
+    if payload.is_empty() {
+        return Next::Raw;
+    }
+    match crate::layers::dispatch::by_tcp_port(sport, dport, payload) {
+        Some(p) => Next::Proto(p),
+        None => Next::Raw,
+    }
 }
 
 /// Without this a built `TCP()/DNS()` would not dissect back as DNS, since the
 /// default ports name no protocol.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
-    if p == ProtoId::Dns && hdr.len() >= 4 {
+    if hdr.len() < 4 {
+        return;
+    }
+    if p == ProtoId::Dns {
         hdr[2..4].copy_from_slice(&ports::DNS.to_be_bytes());
+    } else if let Some(port) = crate::layers::dispatch::by_tcp_port_of(p) {
+        hdr[2..4].copy_from_slice(&port.to_be_bytes());
     }
 }
 

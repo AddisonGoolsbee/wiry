@@ -1,0 +1,125 @@
+name = "SMB2_Header"
+id = "Smb2"
+num = 86
+module = "smb2"
+citation = """
+Microsoft Open Specifications, [MS-SMB2] §2.2.1.2: the SMB2 packet header is a
+four-octet ProtocolId (0xFE 'S' 'M' 'B'), a 16-bit StructureSize of 64, a
+16-bit CreditCharge, a 32-bit Status, a 16-bit Command, a 16-bit
+CreditRequest/CreditResponse, a 32-bit Flags, a 32-bit NextCommand, a 64-bit
+MessageId, a 32-bit Reserved, a 32-bit TreeId, a 64-bit SessionId and a
+16-octet Signature. Every field but ProtocolId is little-endian.
+"""
+min_len = 64
+header_len = 64
+next = "raw"
+
+[[fields]]
+name = "ProtocolId"
+off = 0
+len = 32
+default = 0xfe534d42
+
+[[fields]]
+name = "StructureSize"
+off = 32
+len = 16
+kind = "le_uint"
+default = 64
+
+[[fields]]
+name = "CreditCharge"
+off = 48
+len = 16
+kind = "le_uint"
+
+[[fields]]
+name = "Status"
+off = 64
+len = 32
+kind = "le_uint"
+
+[[fields]]
+name = "Command"
+off = 96
+len = 16
+kind = "le_uint"
+
+[[fields]]
+name = "CreditRequest"
+off = 112
+len = 16
+kind = "le_uint"
+
+[[fields]]
+name = "Flags"
+off = 128
+len = 32
+kind = "le_uint"
+
+[[fields]]
+name = "NextCommand"
+off = 160
+len = 32
+kind = "le_uint"
+
+[[fields]]
+name = "MessageId"
+off = 192
+len = 64
+kind = "le_uint"
+
+[[fields]]
+name = "Reserved"
+off = 256
+len = 32
+kind = "le_uint"
+
+[[fields]]
+name = "TreeId"
+off = 288
+len = 32
+kind = "le_uint"
+
+[[fields]]
+name = "SessionId"
+off = 320
+len = 64
+kind = "le_uint"
+
+[[fields]]
+name = "Signature"
+off = 384
+len = 128
+kind = "bytes"
+
+[[parents]]
+from = "tcp_port"
+values = [445]
+guard = "crate::layers::smb2::looks_like"
+
+[vector]
+source = "[MS-SMB2] §2.2.3 NEGOTIATE request header: command 0, message id 0, structure size 64."
+bytes = [
+  0xfe, 0x53, 0x4d, 0x42, 0x40, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]
+[vector.fields]
+ProtocolId = 0xfe534d42
+StructureSize = 64
+CreditCharge = 0
+Status = 0
+Command = 0
+CreditRequest = 0
+Flags = 0
+NextCommand = 0
+MessageId = 0
+Reserved = 0
+TreeId = 0
+SessionId = 0

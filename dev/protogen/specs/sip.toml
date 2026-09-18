@@ -1,0 +1,43 @@
+name = "SIP"
+id = "Sip"
+num = 88
+parsed_field = "headers"
+citation = """
+RFC 3261 §7: a SIP message is a start line, then header fields, then an empty
+line, then an optional body. §7.1 gives the Request-Line (method, Request-URI,
+SIP-Version) and §7.2 the Status-Line (SIP-Version, Status-Code,
+Reason-Phrase); §7.3 gives the header fields, which have the same shape as
+HTTP's. Text, not a field table (DEVIATIONS T1).
+"""
+min_len = 16
+header_len = "hand"
+build_len = 0
+next = "raw"
+parse_options = "hand"
+
+[[fields]]
+name = "headers"
+off = 0
+kind = "var_bytes"
+
+[[parents]]
+from = "udp_port"
+values = [5060, 5061]
+guard = "crate::layers::sip::looks_like"
+bind = 5060
+
+[[parents]]
+from = "tcp_port"
+values = [5060]
+guard = "crate::layers::sip::looks_like"
+
+[vector]
+source = "RFC 3261 §24.2 style OPTIONS request, cut to the header fields."
+bytes = [
+  0x4f, 0x50, 0x54, 0x49, 0x4f, 0x4e, 0x53, 0x20,
+  0x73, 0x69, 0x70, 0x3a, 0x61, 0x40, 0x62, 0x20,
+  0x53, 0x49, 0x50, 0x2f, 0x32, 0x2e, 0x30, 0x0d,
+  0x0a, 0x43, 0x53, 0x65, 0x71, 0x3a, 0x20, 0x31,
+  0x20, 0x4f, 0x50, 0x54, 0x49, 0x4f, 0x4e, 0x53,
+  0x0d, 0x0a, 0x0d, 0x0a,
+]

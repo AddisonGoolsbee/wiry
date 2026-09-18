@@ -1,0 +1,41 @@
+name = "NBTSession"
+id = "NbtSession"
+num = 71
+citation = """
+RFC 1002 §4.3.1: the NetBIOS session service prefixes each message over TCP
+port 139 with a one-octet type, a one-octet flags field whose low bit extends
+the length, and a 16-bit length. Type 0 is a session message, which over port
+139 carries SMB.
+"""
+min_len = 4
+header_len = 4
+content_len = "hand"
+next = "hand"
+
+[[fields]]
+name = "TYPE"
+off = 0
+len = 8
+
+[[fields]]
+name = "FLAGS"
+off = 8
+len = 8
+
+[[fields]]
+name = "LENGTH"
+off = 16
+len = 16
+
+[[parents]]
+from = "tcp_port"
+values = [139]
+guard = "crate::layers::nbtsession::looks_like"
+
+[vector]
+source = "RFC 1002 §4.3.1 session message of four octets."
+bytes = [0x00, 0x00, 0x00, 0x04, 0xff, 0x53, 0x4d, 0x42]
+[vector.fields]
+TYPE = 0
+FLAGS = 0
+LENGTH = 4

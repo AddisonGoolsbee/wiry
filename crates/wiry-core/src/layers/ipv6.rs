@@ -2,6 +2,7 @@
 //! "Protocol Numbers" registry.
 
 use crate::field::FieldDesc;
+use crate::layers::dispatch;
 use crate::proto::{ipproto, Next, ProtoDesc, ProtoId};
 
 /// RFC 8200 §4.7: the payload ends here.
@@ -46,6 +47,7 @@ pub fn to_next_header(p: ProtoId) -> Option<u8> {
         ProtoId::Routing => ipproto::IPV6_ROUTE,
         ProtoId::Fragment => ipproto::IPV6_FRAG,
         ProtoId::DestOpt => ipproto::IPV6_OPTS,
+        p if dispatch::by_icmpv6_type_of(p).is_some() => ipproto::IPV6_ICMP,
         other => return super::ipv4::to_ipproto(other),
     })
 }
@@ -53,6 +55,14 @@ pub fn to_next_header(p: ProtoId) -> Option<u8> {
 fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 40 {
         return Next::Raw;
+    }
+    // The Neighbor Discovery and MLD messages are whole ICMPv6 messages, type
+    // octet included, so they replace the generic layer rather than nesting
+    // under it.
+    if hdr[6] == ipproto::IPV6_ICMP {
+        if let Some(p) = hdr.get(40).and_then(|t| dispatch::by_icmpv6_type(*t)) {
+            return Next::Proto(p);
+        }
     }
     next_header(hdr[6])
 }
@@ -180,7 +190,7 @@ mod tests {
             (ipproto::IPV4, Next::Proto(ProtoId::Ipv4)),
             (ipproto::IPV6, Next::Proto(ProtoId::Ipv6)),
             (ipproto::GRE, Next::Proto(ProtoId::Gre)),
-            (132, Next::Raw),
+            (132, Next::Proto(ProtoId::Sctp)),
         ];
         for &(nh, want) in cases {
             h[6] = nh;

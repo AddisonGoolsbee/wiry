@@ -56,7 +56,10 @@ pub fn from_ipproto(v: u8) -> Next {
         ipproto::IPV4 => Next::Proto(ProtoId::Ipv4),
         ipproto::IPV6 => Next::Proto(ProtoId::Ipv6),
         ipproto::GRE => Next::Proto(ProtoId::Gre),
-        _ => Next::Raw,
+        n => match crate::layers::dispatch::by_ipproto(n) {
+            Some(p) => Next::Proto(p),
+            None => Next::Raw,
+        },
     }
 }
 
@@ -73,7 +76,7 @@ pub fn to_ipproto(p: ProtoId) -> Option<u8> {
         ProtoId::Ipv4 => ipproto::IPV4,
         ProtoId::Ipv6 => ipproto::IPV6,
         ProtoId::Gre => ipproto::GRE,
-        _ => return None,
+        _ => return crate::layers::dispatch::by_ipproto_of(p),
     })
 }
 

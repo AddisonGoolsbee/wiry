@@ -1,0 +1,53 @@
+name = "ICMPv6ND_RS"
+id = "Icmpv6NdRs"
+num = 48
+citation = """
+RFC 4861 §4.1, Router Solicitation: ICMPv6 type 133, code 0, checksum, a
+reserved 32-bit field, then Neighbor Discovery options (§4.6).
+"""
+min_len = 8
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "type"
+off = 0
+len = 8
+default = 133
+
+[[fields]]
+name = "code"
+off = 8
+len = 8
+
+[[fields]]
+name = "cksum"
+off = 16
+len = 16
+
+[[fields]]
+name = "res"
+off = 32
+len = 32
+
+[[fields]]
+name = "options"
+off = 64
+kind = "var_bytes"
+
+[[parents]]
+from = "icmpv6_type"
+values = [133]
+
+[vector]
+source = "RFC 4861 §4.1 router solicitation with a source link-layer address option."
+bytes = [
+  0x85, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x01, 0x01, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+]
+[vector.fields]
+type = 133
+code = 0
+cksum = 0
+res = 0

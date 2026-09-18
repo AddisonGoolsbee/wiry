@@ -17,7 +17,8 @@ fn header_len(_: &[u8]) -> usize {
 }
 
 /// The IANA registry, shared by every layer whose next-header field is an
-/// EtherType.
+/// EtherType, SNAP included (RFC 1042): under OUI 0x000000 its protocol id is
+/// one.
 pub fn from_ethertype(t: u16) -> Next {
     match t {
         ethertype::IPV4 => Next::Proto(ProtoId::Ipv4),
@@ -29,7 +30,10 @@ pub fn from_ethertype(t: u16) -> Next {
         ethertype::PPPOE_DISCOVERY => Next::Proto(ProtoId::PppoeDisc),
         ethertype::PPPOE_SESSION => Next::Proto(ProtoId::Pppoe),
         ethertype::PPP_LINK => Next::Proto(ProtoId::Ppp),
-        _ => Next::Raw,
+        _ => match crate::layers::dispatch::by_ethertype(t) {
+            Some(p) => Next::Proto(p),
+            None => Next::Raw,
+        },
     }
 }
 
@@ -46,7 +50,9 @@ pub fn to_ethertype(p: ProtoId) -> Option<u16> {
         ProtoId::PppoeDisc => ethertype::PPPOE_DISCOVERY,
         ProtoId::Pppoe => ethertype::PPPOE_SESSION,
         ProtoId::Ppp => ethertype::PPP_LINK,
-        _ => return None,
+        // An 802.3 length cannot be written here: it is the payload's size,
+        // which nothing knows while the header is being bound.
+        _ => return crate::layers::dispatch::by_ethertype_of(p),
     })
 }
 
@@ -62,7 +68,13 @@ fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 14 {
         return Next::Raw;
     }
-    from_ethertype(u16::from_be_bytes([hdr[12], hdr[13]]))
+    let t = u16::from_be_bytes([hdr[12], hdr[13]]);
+    // IEEE 802.3 clause 3.2.6: at or below 1500 the field is a length and an
+    // 802.2 LLC header follows.
+    if t <= 1500 {
+        return Next::Proto(ProtoId::Llc);
+    }
+    from_ethertype(t)
 }
 
 fn bind_next(hdr: &mut [u8], p: ProtoId) {

@@ -233,7 +233,9 @@ fn resolve_spec(layer: &str, name: &str) -> PyResult<ColSpec> {
     if name.is_empty() {
         return Ok(ColSpec::Present(id));
     }
-    if name == "options" && proto::desc(id).parse_options.is_some() {
+    // Line-oriented and BER-encoded layers name their parsed region something
+    // other than "options"; `parsed_field_name` is the one authority on which.
+    if name == proto::parsed_field_name(id) && proto::desc(id).parse_options.is_some() {
         return Ok(ColSpec::Options(id));
     }
     let r = FieldRef::resolve(id, name)
@@ -856,7 +858,8 @@ impl PyPktList {
         let idx = self.index.clone();
         let link = self.link;
         let fname = field.to_string();
-        let parses_options = field == "options" && proto::desc(id).parse_options.is_some();
+        let parses_options =
+            field == proto::parsed_field_name(id) && proto::desc(id).parse_options.is_some();
 
         let collected: Vec<Cell> = py.allow_threads(move || {
             idx.iter()
@@ -1632,6 +1635,12 @@ fn defragment_frames<'py>(
     Ok((whole, done, missing))
 }
 
+/// The field name whose read returns this layer's parsed item list.
+#[pyfunction]
+fn parsed_field(name: &str) -> PyResult<&'static str> {
+    Ok(proto::parsed_field_name(proto_by_name(name)?))
+}
+
 #[pyfunction]
 fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
     let id = proto_by_name(name)?;
@@ -1819,6 +1828,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_and_serialize, m)?)?;
     m.add_function(wrap_pyfunction!(layer_fields, m)?)?;
     m.add_function(wrap_pyfunction!(column_fields, m)?)?;
+    m.add_function(wrap_pyfunction!(parsed_field, m)?)?;
     m.add_function(wrap_pyfunction!(flag_names, m)?)?;
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
     m.add_function(wrap_pyfunction!(register_layer, m)?)?;

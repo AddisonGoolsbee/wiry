@@ -1,0 +1,67 @@
+name = "NetflowHeaderV9"
+id = "NetflowV9"
+num = 76
+module = "netflow9"
+citation = """
+RFC 3954 §5.1: a 16-bit version (9), a 16-bit count of FlowSets, the 32-bit
+system uptime in milliseconds, the 32-bit UNIX export time, a 32-bit sequence
+number and a 32-bit source id. The FlowSets that follow need the template the
+exporter sent earlier to be read, which is per-session state this dissector
+does not keep, so they stay in the payload (DEVIATIONS P6).
+"""
+min_len = 20
+header_len = 20
+
+[[fields]]
+name = "version"
+off = 0
+len = 16
+default = 9
+
+[[fields]]
+name = "count"
+off = 16
+len = 16
+
+[[fields]]
+name = "sysUptime"
+off = 32
+len = 32
+
+[[fields]]
+name = "unixSecs"
+off = 64
+len = 32
+
+[[fields]]
+name = "sequenceNumber"
+off = 96
+len = 32
+
+[[fields]]
+name = "SourceID"
+off = 128
+len = 32
+
+[[parents]]
+from = "udp_port"
+values = [2055, 9995, 9996]
+guard = "crate::layers::netflow9::looks_like"
+bind = 2055
+
+[vector]
+source = "RFC 3954 §5.1 export header, hand-built: version 9, one FlowSet, uptime 1000 ms."
+bytes = [
+  0x00, 0x09, 0x00, 0x01,
+  0x00, 0x00, 0x03, 0xe8,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x00,
+]
+[vector.fields]
+version = 9
+count = 1
+sysUptime = 1000
+unixSecs = 0
+sequenceNumber = 1
+SourceID = 0

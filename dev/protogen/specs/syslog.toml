@@ -1,0 +1,37 @@
+name = "Syslog"
+id = "Syslog"
+num = 69
+parsed_field = "headers"
+citation = """
+RFC 5424 §6: a syslog message is a PRI in angle brackets, a version digit, then
+space-separated timestamp, hostname, app-name, procid and msgid, then
+structured data and the message. RFC 3164 §4.1 is the older form: the same PRI,
+then a timestamp and hostname in a fixed textual shape. Facility and severity
+are PRI divided by and modulo 8 (RFC 5424 §6.2.1). It is text, not a field
+table (DEVIATIONS T1).
+"""
+min_len = 3
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "headers"
+off = 0
+kind = "var_bytes_to_end"
+
+[[parents]]
+from = "udp_port"
+values = [514]
+
+[vector]
+source = "RFC 5424 §6.5 Example 1: PRI 34 (facility 4, severity 2), version 1."
+bytes = [
+  0x3c, 0x33, 0x34, 0x3e, 0x31, 0x20, 0x32, 0x30,
+  0x30, 0x33, 0x2d, 0x31, 0x30, 0x2d, 0x31, 0x31,
+  0x54, 0x32, 0x32, 0x3a, 0x31, 0x34, 0x3a, 0x31,
+  0x35, 0x2e, 0x30, 0x30, 0x33, 0x5a, 0x20, 0x68,
+  0x6f, 0x73, 0x74, 0x20, 0x73, 0x75, 0x20, 0x2d,
+  0x20, 0x49, 0x44, 0x34, 0x37, 0x20, 0x2d, 0x20,
+  0x6d, 0x73, 0x67,
+]

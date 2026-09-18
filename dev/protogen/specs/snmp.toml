@@ -1,0 +1,36 @@
+name = "SNMP"
+id = "Snmp"
+num = 67
+parsed_field = "vars"
+citation = """
+RFC 1157 §4.1 (SNMPv1) and RFC 3416 §3 (SNMPv2c): an SNMP message is a BER
+SEQUENCE of a version INTEGER, a community OCTET STRING and a context-tagged
+PDU, and the PDU is a SEQUENCE of request-id, error-status, error-index and a
+SEQUENCE of variable bindings, each an OID and its value. Encoding rules are
+ITU-T X.690 §8. The message has no fixed offsets at all, so there is no field
+table: the whole message is decoded into a named item list (DEVIATIONS T2).
+"""
+min_len = 2
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "vars"
+off = 0
+kind = "var_bytes_to_end"
+
+[[parents]]
+from = "udp_port"
+values = [161, 162]
+bind = 161
+
+[vector]
+source = "RFC 1157 §4.1 GetRequest, community \"public\", request-id 1, one varbind for 1.3.6.1.2.1.1.1.0."
+bytes = [
+  0x30, 0x26, 0x02, 0x01, 0x00, 0x04, 0x06, 0x70,
+  0x75, 0x62, 0x6c, 0x69, 0x63, 0xa0, 0x19, 0x02,
+  0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00,
+  0x30, 0x0e, 0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06,
+  0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x05, 0x00,
+]

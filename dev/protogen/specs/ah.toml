@@ -1,0 +1,60 @@
+name = "AH"
+id = "Ah"
+num = 58
+citation = """
+RFC 4302 §2: an Authentication Header is a one-octet Next Header, a one-octet
+Payload Length giving the header size in 32-bit words minus two, a reserved
+16-bit field, a 32-bit Security Parameters Index, a 32-bit Sequence Number and
+a variable Integrity Check Value. Next Header values come from the IANA
+"Protocol Numbers" registry, so the protocol the header covers is dissected
+after it.
+"""
+min_len = 12
+header_len = "hand"
+build_len = 12
+next = "hand"
+
+[[fields]]
+name = "nh"
+off = 0
+len = 8
+
+[[fields]]
+name = "payloadlen"
+off = 8
+len = 8
+default = 4
+
+[[fields]]
+name = "reserved"
+off = 16
+len = 16
+
+[[fields]]
+name = "spi"
+off = 32
+len = 32
+
+[[fields]]
+name = "seq"
+off = 64
+len = 32
+
+[[parents]]
+from = "ipproto"
+values = [51]
+
+[vector]
+source = "RFC 4302 §2, hand-built: next header TCP (6), payload length 4 giving a 24-octet header, 12 octets of ICV."
+bytes = [
+  0x06, 0x04, 0x00, 0x00,
+  0x11, 0x22, 0x33, 0x44,
+  0x00, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]
+[vector.fields]
+nh = 6
+payloadlen = 4
+reserved = 0
+spi = 0x11223344
+seq = 1

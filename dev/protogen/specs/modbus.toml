@@ -1,0 +1,61 @@
+name = "ModbusADU"
+id = "Modbus"
+num = 85
+module = "modbus"
+citation = """
+Modbus Organization, "MODBUS Messaging on TCP/IP Implementation Guide" v1.0b
+§4.1: the MBAP header is a 16-bit transaction identifier, a 16-bit protocol
+identifier that is zero for Modbus, a 16-bit length counting the unit
+identifier and everything after it, and a one-octet unit identifier. The
+function code is the first octet of the PDU that follows and is named here
+because it is what a filter asks for.
+"""
+min_len = 8
+header_len = 8
+next = "raw"
+content_len = "hand"
+
+[[fields]]
+name = "transId"
+off = 0
+len = 16
+
+[[fields]]
+name = "protoId"
+off = 16
+len = 16
+
+[[fields]]
+name = "len"
+off = 32
+len = 16
+default = 2
+
+[[fields]]
+name = "unitId"
+off = 48
+len = 8
+
+[[fields]]
+name = "funcCode"
+off = 56
+len = 8
+default = 3
+
+[[parents]]
+from = "tcp_port"
+values = [502]
+guard = "crate::layers::modbus::looks_like"
+
+[vector]
+source = "Modbus TCP read holding registers: transaction 1, protocol 0, length 6, unit 1, function 3, address 0, count 1."
+bytes = [
+  0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x01, 0x03,
+  0x00, 0x00, 0x00, 0x01,
+]
+[vector.fields]
+transId = 1
+protoId = 0
+len = 6
+unitId = 1
+funcCode = 3

@@ -1,0 +1,32 @@
+name = "LLDPDU"
+id = "Lldp"
+num = 35
+citation = """
+IEEE Std 802.1AB-2016 §8.1: an LLDPDU is a sequence of TLVs, each opening with
+a 7-bit type and a 9-bit length in one 16-bit word, ending at the End Of LLDPDU
+TLV (type 0). §8.5 gives the mandatory Chassis ID, Port ID and Time To Live
+TLVs and the optional ones. EtherType 0x88CC is the IEEE 802.1AB assignment.
+"""
+min_len = 2
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+parsed_field = "options"
+
+[[fields]]
+name = "options"
+off = 0
+kind = "var_bytes_to_end"
+
+[[parents]]
+from = "ethertype"
+values = [0x88cc]
+
+[vector]
+source = "IEEE 802.1AB §8.5 minimal LLDPDU: chassis id (subtype 4, MAC), port id (subtype 3, MAC), TTL 120, End."
+bytes = [
+  0x02, 0x07, 0x04, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+  0x04, 0x07, 0x03, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+  0x06, 0x02, 0x00, 0x78,
+  0x00, 0x00,
+]

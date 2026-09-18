@@ -1,0 +1,65 @@
+name = "DHCP6"
+id = "Dhcp6"
+num = 66
+citation = """
+RFC 8415 §8: a client/server message is a one-octet message type and a 24-bit
+transaction id, followed by options. §9 gives the Relay-forward (12) and
+Relay-reply (13) messages instead a one-octet hop count and two 128-bit
+addresses, which is why those three fields are conditional. §21.1: an option is
+a 16-bit code and a 16-bit length that counts only the option data. Message
+types and option codes from the IANA "Dynamic Host Configuration Protocol for
+IPv6 (DHCPv6)" registry.
+"""
+min_len = 4
+header_len = "rest"
+build_len = 4
+next = "end"
+parse_options = "hand"
+
+[[fields]]
+name = "msgtype"
+off = 0
+len = 8
+default = 1
+
+[[fields]]
+name = "trid"
+off = 8
+len = 24
+when = "is_client_server"
+
+[[fields]]
+name = "hopcount"
+off = 8
+len = 8
+when = "is_relay"
+
+[[fields]]
+name = "linkaddr"
+off = 16
+kind = "ipv6"
+when = "is_relay"
+
+[[fields]]
+name = "peeraddr"
+off = 144
+kind = "ipv6"
+when = "is_relay"
+
+[[fields]]
+name = "options"
+off = 32
+kind = "var_bytes"
+overlaps = true
+
+[[parents]]
+from = "udp_port"
+values = [546, 547]
+bind = 547
+
+[vector]
+source = "RFC 8415 §16.1 Solicit, transaction id 0x0a0b0c, carrying one Elapsed Time option (code 8)."
+bytes = [0x01, 0x0a, 0x0b, 0x0c, 0x00, 0x08, 0x00, 0x02, 0x00, 0x00]
+[vector.fields]
+msgtype = 1
+trid = 0x0a0b0c

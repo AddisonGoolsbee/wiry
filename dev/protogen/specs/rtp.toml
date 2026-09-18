@@ -1,0 +1,77 @@
+name = "RTP"
+id = "Rtp"
+num = 73
+citation = """
+RFC 3550 §5.1: a two-bit version, a padding bit, an extension bit, a four-bit
+CSRC count, a marker bit, a seven-bit payload type, a 16-bit sequence number, a
+32-bit timestamp, a 32-bit synchronisation source identifier, then that many
+32-bit contributing source identifiers. RTP is negotiated out of band, so no
+port is bound to it by default (DEVIATIONS P5).
+"""
+min_len = 12
+header_len = "hand"
+build_len = 12
+
+[[fields]]
+name = "version"
+off = 0
+len = 2
+default = 2
+
+[[fields]]
+name = "padding"
+off = 2
+len = 1
+
+[[fields]]
+name = "extension"
+off = 3
+len = 1
+
+[[fields]]
+name = "numsync"
+off = 4
+len = 4
+
+[[fields]]
+name = "marker"
+off = 8
+len = 1
+
+[[fields]]
+name = "payload"
+off = 9
+len = 7
+
+[[fields]]
+name = "sequence"
+off = 16
+len = 16
+
+[[fields]]
+name = "timestamp"
+off = 32
+len = 32
+
+[[fields]]
+name = "sourcesync"
+off = 64
+len = 32
+
+[vector]
+source = "RFC 3550 §5.1, hand-built: version 2, payload type 0 (PCMU), sequence 1, SSRC 0x11223344."
+bytes = [
+  0x80, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0xa0,
+  0x11, 0x22, 0x33, 0x44,
+]
+[vector.fields]
+version = 2
+padding = 0
+extension = 0
+numsync = 0
+marker = 0
+payload = 0
+sequence = 1
+timestamp = 160
+sourcesync = 0x11223344

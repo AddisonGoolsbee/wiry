@@ -31,10 +31,19 @@ fn next(hdr: &[u8]) -> Next {
     // A tunnel's source port is a flow hash (RFC 7348 §5, RFC 8926 §3.3), so
     // only the destination names the encapsulation.
     match dport {
-        ports::VXLAN => Next::Proto(ProtoId::Vxlan),
-        ports::GENEVE => Next::Proto(ProtoId::Geneve),
-        ports::GTP_U => Next::Proto(ProtoId::GtpU),
-        _ => Next::Raw,
+        ports::VXLAN => return Next::Proto(ProtoId::Vxlan),
+        ports::GENEVE => return Next::Proto(ProtoId::Geneve),
+        ports::GTP_U => return Next::Proto(ProtoId::GtpU),
+        _ => {}
+    }
+    // RFC 6762 §18 and RFC 4795 §2: mDNS and LLMNR carry RFC 1035 messages, so
+    // they are the DNS layer reached on another port, not a layer of their own.
+    if matches!(sport, ports::MDNS | ports::LLMNR) || matches!(dport, ports::MDNS | ports::LLMNR) {
+        return Next::Proto(ProtoId::Dns);
+    }
+    match crate::layers::dispatch::by_udp_port(sport, dport, hdr.get(8..).unwrap_or(&[])) {
+        Some(p) => Next::Proto(p),
+        None => Next::Raw,
     }
 }
 
@@ -60,7 +69,10 @@ fn bind_next(hdr: &mut [u8], p: ProtoId) {
         ProtoId::Vxlan => ports::VXLAN,
         ProtoId::Geneve => ports::GENEVE,
         ProtoId::GtpU => ports::GTP_U,
-        _ => return,
+        _ => match crate::layers::dispatch::by_udp_port_of(p) {
+            Some(port) => port,
+            None => return,
+        },
     };
     // The source port names nothing, but the default 53 would dissect back as
     // DNS, so it goes too.

@@ -1,0 +1,47 @@
+name = "RIP"
+id = "Rip"
+num = 60
+citation = """
+RFC 1058 §3.1 and RFC 2453 §3.6: a RIP message is a one-octet command, a
+one-octet version and two octets that must be zero, followed by up to 25
+twenty-octet route entries. The entries themselves are a fixed-size array
+rather than a header, so they are left in the payload — see DEVIATIONS P3.
+"""
+min_len = 4
+header_len = 4
+
+[[fields]]
+name = "cmd"
+off = 0
+len = 8
+default = 1
+
+[[fields]]
+name = "version"
+off = 8
+len = 8
+default = 2
+
+[[fields]]
+name = "null"
+off = 16
+len = 16
+
+[[parents]]
+from = "udp_port"
+values = [520]
+
+[vector]
+source = "RFC 2453 §3.9.1 request for the whole table: command 1, version 2, one entry with address family 0 and metric 16."
+bytes = [
+  0x01, 0x02, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x10,
+]
+[vector.fields]
+cmd = 1
+version = 2
+null = 0
