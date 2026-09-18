@@ -31,23 +31,7 @@ pub static FIELDS_V2: &[FieldDesc] = &[
 /// Values below 1536 are not EtherTypes but the LINUX_SLL_P_* selectors for
 /// 802.2/802.3 framing, which this build does not dissect.
 fn proto_next(v: u16) -> Next {
-    match v {
-        ethertype::IPV4 => Next::Proto(ProtoId::Ipv4),
-        ethertype::IPV6 => Next::Proto(ProtoId::Ipv6),
-        ethertype::ARP => Next::Proto(ProtoId::Arp),
-        ethertype::DOT1Q => Next::Proto(ProtoId::Dot1Q),
-        _ => Next::Raw,
-    }
-}
-
-fn ethertype_of(p: ProtoId) -> Option<u16> {
-    match p {
-        ProtoId::Ipv4 => Some(ethertype::IPV4),
-        ProtoId::Ipv6 => Some(ethertype::IPV6),
-        ProtoId::Arp => Some(ethertype::ARP),
-        ProtoId::Dot1Q => Some(ethertype::DOT1Q),
-        _ => None,
-    }
+    super::ether::from_ethertype(v)
 }
 
 fn header_len(_: &[u8]) -> usize {
@@ -62,9 +46,7 @@ fn next(hdr: &[u8]) -> Next {
 }
 
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
-    if let (Some(t), true) = (ethertype_of(p), hdr.len() >= 16) {
-        hdr[14..16].copy_from_slice(&t.to_be_bytes());
-    }
+    super::ether::bind_ethertype(hdr, 14, super::ether::to_ethertype(p));
 }
 
 fn header_len_v2(_: &[u8]) -> usize {
@@ -79,9 +61,7 @@ fn next_v2(hdr: &[u8]) -> Next {
 }
 
 fn bind_next_v2(hdr: &mut [u8], p: ProtoId) {
-    if let (Some(t), true) = (ethertype_of(p), hdr.len() >= 20) {
-        hdr[0..2].copy_from_slice(&t.to_be_bytes());
-    }
+    super::ether::bind_ethertype(hdr, 0, super::ether::to_ethertype(p));
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {

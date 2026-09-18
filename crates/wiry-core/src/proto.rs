@@ -27,6 +27,20 @@ impl ProtoId {
     pub const Null: ProtoId = ProtoId(14);
     pub const LinuxSll: ProtoId = ProtoId(15);
     pub const LinuxSll2: ProtoId = ProtoId(16);
+    pub const HopByHop: ProtoId = ProtoId(17);
+    pub const Routing: ProtoId = ProtoId(18);
+    pub const Fragment: ProtoId = ProtoId(19);
+    pub const DestOpt: ProtoId = ProtoId(20);
+    pub const Gre: ProtoId = ProtoId(21);
+    pub const Vxlan: ProtoId = ProtoId(22);
+    pub const Geneve: ProtoId = ProtoId(23);
+    pub const Mpls: ProtoId = ProtoId(24);
+    pub const PppoeDisc: ProtoId = ProtoId(25);
+    pub const Pppoe: ProtoId = ProtoId(26);
+    pub const Ppp: ProtoId = ProtoId(27);
+    pub const GtpU: ProtoId = ProtoId(28);
+    pub const ErspanII: ProtoId = ProtoId(29);
+    pub const ErspanIII: ProtoId = ProtoId(30);
 
     pub fn name(self) -> &'static str {
         desc(self).name
@@ -69,7 +83,7 @@ pub struct ProtoDesc {
     pub content_len: Option<fn(&[u8]) -> usize>,
 }
 
-pub const BUILTIN_COUNT: u16 = 17;
+pub const BUILTIN_COUNT: u16 = 31;
 
 const BUILTINS: &[ProtoId] = &[
     ProtoId::Ether,
@@ -89,7 +103,27 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::LinuxSll2,
     ProtoId::Raw,
     ProtoId::Padding,
+    ProtoId::HopByHop,
+    ProtoId::Routing,
+    ProtoId::Fragment,
+    ProtoId::DestOpt,
+    ProtoId::Gre,
+    ProtoId::Vxlan,
+    ProtoId::Geneve,
+    ProtoId::Mpls,
+    ProtoId::PppoeDisc,
+    ProtoId::Pppoe,
+    ProtoId::Ppp,
+    ProtoId::GtpU,
+    ProtoId::ErspanII,
+    ProtoId::ErspanIII,
 ];
+
+/// Every built-in id, so the fuzz and robustness suites cannot fall behind the
+/// layer list by being a second copy of it.
+pub fn builtins() -> impl Iterator<Item = ProtoId> {
+    (0..BUILTIN_COUNT).map(ProtoId)
+}
 
 #[inline]
 pub fn desc(id: ProtoId) -> &'static ProtoDesc {
@@ -119,6 +153,20 @@ fn builtin_desc(id: ProtoId) -> &'static ProtoDesc {
         ProtoId::Null => &null::DESC,
         ProtoId::LinuxSll => &linux_sll::DESC,
         ProtoId::LinuxSll2 => &linux_sll::DESC_V2,
+        ProtoId::HopByHop => &ipv6_ext::HOP_BY_HOP_DESC,
+        ProtoId::Routing => &ipv6_ext::ROUTING_DESC,
+        ProtoId::Fragment => &ipv6_ext::FRAGMENT_DESC,
+        ProtoId::DestOpt => &ipv6_ext::DEST_OPT_DESC,
+        ProtoId::Gre => &gre::DESC,
+        ProtoId::Vxlan => &vxlan::DESC,
+        ProtoId::Geneve => &geneve::DESC,
+        ProtoId::Mpls => &mpls::DESC,
+        ProtoId::PppoeDisc => &pppoe::DISC_DESC,
+        ProtoId::Pppoe => &pppoe::DESC,
+        ProtoId::Ppp => &pppoe::PPP_DESC,
+        ProtoId::GtpU => &gtp::DESC,
+        ProtoId::ErspanII => &erspan::DESC_II,
+        ProtoId::ErspanIII => &erspan::DESC_III,
         _ => &raw::DESC,
     }
 }
@@ -246,9 +294,9 @@ fn registered() -> impl DoubleEndedIterator<Item = &'static ProtoDesc> {
     REGISTRY[..n].iter().filter_map(|slot| slot.get().copied())
 }
 
-/// `dissect_spans` raises this to `min_len`, which registration pins to the
-/// declared field width.
-fn fixed_len(_: &[u8]) -> usize {
+/// `dissect_spans` raises this to `min_len`, so a header of one fixed width
+/// needs no function of its own.
+pub fn fixed_len(_: &[u8]) -> usize {
     0
 }
 
@@ -257,8 +305,13 @@ fn rest_len(hdr: &[u8]) -> usize {
     hdr.len()
 }
 
-fn registered_next(_: &[u8]) -> Next {
+pub fn raw_next(_: &[u8]) -> Next {
     Next::Raw
+}
+
+/// A tunnel whose payload is a whole frame, whatever its own header said.
+pub fn frame_next(_: &[u8]) -> Next {
+    Next::Proto(ProtoId::Ether)
 }
 
 /// `build_len` is the width of the fixed part in bytes.
@@ -292,7 +345,7 @@ pub fn register(
         fields: Box::leak(fields.into_boxed_slice()),
         min_len: build_len,
         header_len: if var_tail { rest_len } else { fixed_len },
-        next: registered_next,
+        next: raw_next,
         build_len,
         parse_options: None,
         opt_table: None,
@@ -406,6 +459,16 @@ pub mod ethertype {
     /// Loopback; carries no payload, so it is the default for a frame with
     /// nothing stacked under it.
     pub const LOOP: u16 = 0x9000;
+    /// RFC 1701 §3: Transparent Ethernet Bridging, how a tunnel says its
+    /// payload is a whole frame rather than a datagram.
+    pub const TEB: u16 = 0x6558;
+    pub const PPP_LINK: u16 = 0x880B;
+    pub const MPLS_UNICAST: u16 = 0x8847;
+    pub const MPLS_MULTICAST: u16 = 0x8848;
+    pub const PPPOE_DISCOVERY: u16 = 0x8863;
+    pub const PPPOE_SESSION: u16 = 0x8864;
+    pub const ERSPAN_II: u16 = 0x88BE;
+    pub const ERSPAN_III: u16 = 0x22EB;
 }
 
 /// IANA "Protocol Numbers" registry.
@@ -414,12 +477,24 @@ pub mod ipproto {
     pub const TCP: u8 = 6;
     pub const UDP: u8 = 17;
     pub const IPV6_ICMP: u8 = 58;
+    /// RFC 8200 §4: the extension headers this build walks.
+    pub const HOPOPT: u8 = 0;
+    pub const IPV6_ROUTE: u8 = 43;
+    pub const IPV6_FRAG: u8 = 44;
+    pub const IPV6_OPTS: u8 = 60;
+    /// RFC 2003 §3 and RFC 4213 §3: an IP datagram as the payload of another.
+    pub const IPV4: u8 = 4;
+    pub const IPV6: u8 = 41;
+    pub const GRE: u8 = 47;
 }
 
 pub mod ports {
     pub const DNS: u16 = 53;
     pub const BOOTPS: u16 = 67;
     pub const BOOTPC: u16 = 68;
+    pub const GTP_U: u16 = 2152;
+    pub const VXLAN: u16 = 4789;
+    pub const GENEVE: u16 = 6081;
 }
 
 #[cfg(test)]
@@ -434,8 +509,22 @@ mod tests {
     fn builtin_ids_keep_their_numbering() {
         assert_eq!(ProtoId::Raw.0, 0);
         assert_eq!(ProtoId::Tcp.0, 7);
-        assert_eq!(ProtoId::LinuxSll2.0, BUILTIN_COUNT - 1);
+        assert_eq!(ProtoId::ErspanIII.0, BUILTIN_COUNT - 1);
         assert_eq!(desc(ProtoId::Tcp).name, "TCP");
+    }
+
+    /// The id list, `BUILTINS` and the dispatch match are three hand-kept
+    /// tables: an id missing from any of them fails silently, as `Raw` or as a
+    /// layer `by_name` cannot see.
+    #[test]
+    fn every_builtin_id_is_listed_and_dispatched() {
+        for id in builtins() {
+            let d = desc(id);
+            assert_eq!(d.id, id, "{} dispatches to {}", id.0, d.name);
+            assert!(BUILTINS.contains(&id), "{} missing from BUILTINS", d.name);
+            assert_eq!(by_name(d.name), Some(id), "{} not found by name", d.name);
+        }
+        assert_eq!(BUILTINS.len(), BUILTIN_COUNT as usize);
     }
 
     #[test]

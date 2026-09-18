@@ -6,7 +6,7 @@
 //! layer starts at the TCI and is 4 bytes long: TCI plus inner EtherType.
 
 use crate::field::FieldDesc;
-use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
+use crate::proto::{Next, ProtoDesc, ProtoId};
 
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("prio", 0, 3, 0),
@@ -23,27 +23,11 @@ fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 4 {
         return Next::Raw;
     }
-    match u16::from_be_bytes([hdr[2], hdr[3]]) {
-        ethertype::IPV4 => Next::Proto(ProtoId::Ipv4),
-        ethertype::IPV6 => Next::Proto(ProtoId::Ipv6),
-        ethertype::ARP => Next::Proto(ProtoId::Arp),
-        // QinQ: a tag inside a tag.
-        ethertype::DOT1Q => Next::Proto(ProtoId::Dot1Q),
-        _ => Next::Raw,
-    }
+    super::ether::from_ethertype(u16::from_be_bytes([hdr[2], hdr[3]]))
 }
 
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
-    let t = match p {
-        ProtoId::Ipv4 => ethertype::IPV4,
-        ProtoId::Ipv6 => ethertype::IPV6,
-        ProtoId::Arp => ethertype::ARP,
-        ProtoId::Dot1Q => ethertype::DOT1Q,
-        _ => return,
-    };
-    if hdr.len() >= 4 {
-        hdr[2..4].copy_from_slice(&t.to_be_bytes());
-    }
+    super::ether::bind_ethertype(hdr, 2, super::ether::to_ethertype(p));
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
@@ -123,7 +107,9 @@ mod tests {
         assert_eq!(next(&hdr([0x86, 0xdd])), Next::Proto(ProtoId::Ipv6));
         assert_eq!(next(&hdr([0x08, 0x06])), Next::Proto(ProtoId::Arp));
         assert_eq!(next(&hdr([0x81, 0x00])), Next::Proto(ProtoId::Dot1Q));
-        assert_eq!(next(&hdr([0x88, 0x47])), Next::Raw);
+        assert_eq!(next(&hdr([0x88, 0x47])), Next::Proto(ProtoId::Mpls));
+        assert_eq!(next(&hdr([0x88, 0x64])), Next::Proto(ProtoId::Pppoe));
+        assert_eq!(next(&hdr([0x12, 0x34])), Next::Raw);
     }
 
     #[test]

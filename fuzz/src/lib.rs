@@ -7,22 +7,11 @@ use wiry_core::packet::Packet;
 use wiry_core::proto::{self, ProtoId};
 use wiry_core::{parse, show};
 
-pub const ALL_PROTOS: [ProtoId; 14] = [
-    ProtoId::Raw,
-    ProtoId::Padding,
-    ProtoId::Ether,
-    ProtoId::Dot1Q,
-    ProtoId::Arp,
-    ProtoId::Ipv4,
-    ProtoId::Ipv6,
-    ProtoId::Tcp,
-    ProtoId::Udp,
-    ProtoId::Icmp,
-    ProtoId::Icmpv6,
-    ProtoId::Dns,
-    ProtoId::Bootp,
-    ProtoId::Dhcp,
-];
+/// Every built-in layer, derived from the registry rather than re-listed. As a
+/// hand-kept copy this list had silently fallen three layers behind.
+pub fn all_protos() -> Vec<ProtoId> {
+    proto::builtins().collect()
+}
 
 /// Spans must stay inside the buffer and must not run backwards.
 pub fn check_spans(pkt: &Packet) {

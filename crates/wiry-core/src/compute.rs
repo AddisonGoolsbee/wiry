@@ -11,14 +11,21 @@ pub fn recompute(pkt: &mut Packet) {
     let clipped = is_clipped(pkt);
     // Innermost first: transport checksums need a settled payload.
     for i in (0..n).rev() {
+        // A length in units larger than an octet is no more recomputable from a
+        // clipped capture than any other: rewriting one would replace what the
+        // wire said with the shorter count the truncated buffer happens to back.
+        if !clipped {
+            fix_tail_len(pkt, i);
+            fix_unit_hlen(pkt, i);
+        }
         match pkt.spans[i].proto {
             ProtoId::Ipv4 => fix_ipv4(pkt, i, clipped),
-            ProtoId::Ipv6 => fix_ipv6(pkt, i, clipped),
             ProtoId::Udp => fix_udp(pkt, i, clipped),
             ProtoId::Tcp if !clipped => fix_tcp(pkt, i),
-            ProtoId::Icmp if !clipped => fix_icmp(pkt, i),
+            ProtoId::Icmp if !clipped => fix_bare_checksum(pkt, i, 2, 4),
             ProtoId::Icmpv6 if !clipped => fix_icmpv6(pkt, i),
             ProtoId::Dns if !clipped && pkt.framing(i) > 0 => fix_dns_length(pkt, i),
+            ProtoId::Gre if !clipped => fix_gre(pkt, i),
             _ => {}
         }
     }
@@ -28,8 +35,9 @@ pub fn recompute(pkt: &mut Packet) {
 /// apart from one the wire gave.
 fn len_field(proto: ProtoId) -> Option<&'static str> {
     match proto {
-        ProtoId::Ipv4 | ProtoId::Udp => Some("len"),
+        ProtoId::Ipv4 | ProtoId::Udp | ProtoId::Pppoe | ProtoId::PppoeDisc => Some("len"),
         ProtoId::Ipv6 => Some("plen"),
+        ProtoId::GtpU => Some("length"),
         _ => None,
     }
 }
@@ -64,11 +72,31 @@ fn content_end(pkt: &Packet) -> usize {
         .map_or(pkt.buf.len(), |s| (s.off as usize).min(pkt.buf.len()))
 }
 
-/// Every length recomputed here is sixteen bits wide (RFC 791 §3.1, RFC 8200
-/// §3, RFC 768), as is the one in TCP's and UDP's pseudo-header, so a larger
-/// frame has no representation and emitting it modulo 65536 would be a lie.
+/// A length no field in the packet can hold. Emitting one modulo the field's
+/// width moves the payload under a header that claims to be somewhere else,
+/// which nothing downstream can detect, so the packet is refused instead.
 pub fn oversize(pkt: &Packet) -> Option<String> {
-    if pkt.len() <= u16::MAX as usize || is_clipped(pkt) {
+    if is_clipped(pkt) {
+        return None;
+    }
+    // A header whose own length is counted in units, where the count has far
+    // fewer than sixteen bits: 260 octets of Geneve options already overflow.
+    for (i, s) in pkt.spans.iter().enumerate() {
+        let Some((name, unit, fixed, max)) = unit_hlen(s.proto) else {
+            continue;
+        };
+        let hlen = s.hlen as usize;
+        if hlen > fixed + max * unit && !pkt.is_pinned(i, name) {
+            return Some(format!(
+                "{}.{name} cannot describe a {hlen}-byte header",
+                s.proto.name()
+            ));
+        }
+    }
+    // Every other length recomputed here is sixteen bits wide (RFC 791 §3.1,
+    // RFC 8200 §3, RFC 768, RFC 2516 §4, TS 29.281 §5.1), as is the one in
+    // TCP's and UDP's pseudo-header.
+    if pkt.len() <= u16::MAX as usize {
         return None;
     }
     let end = content_end(pkt);
@@ -81,6 +109,8 @@ pub fn oversize(pkt: &Packet) -> Option<String> {
             ProtoId::Tcp => ("the TCP pseudo-header length", n),
             // RFC 1035 §4.2.2.
             ProtoId::Dns if pkt.framing(i) > 0 => ("DNS.length", n.saturating_sub(pkt.framing(i))),
+            ProtoId::Pppoe | ProtoId::PppoeDisc => ("PPPoE.len", n.saturating_sub(6)),
+            ProtoId::GtpU => ("GTP_U_Header.length", n.saturating_sub(8)),
             _ => continue,
         };
         if n > u16::MAX as usize {
@@ -117,15 +147,6 @@ fn fix_ipv4(pkt: &mut Packet, i: usize, clipped: bool) {
     put16(&mut pkt.buf, off + 10, 0);
     let c = ck::ones_complement(&pkt.buf[off..off + hlen]);
     put16(&mut pkt.buf, off + 10, c);
-}
-
-fn fix_ipv6(pkt: &mut Packet, i: usize, clipped: bool) {
-    let (off, _, end) = span_bounds(pkt, i);
-    if clipped || off + 40 > end || pkt.is_pinned(i, "plen") {
-        return;
-    }
-    // RFC 8200 §3: excludes the fixed 40-octet header.
-    put16(&mut pkt.buf, off + 4, (end - off - 40) as u16);
 }
 
 fn enclosing_addrs(pkt: &Packet, i: usize) -> Option<(Vec<u8>, Vec<u8>, bool)> {
@@ -206,17 +227,6 @@ fn fix_tcp(pkt: &mut Packet, i: usize) {
     put16(&mut pkt.buf, off + 16, c);
 }
 
-fn fix_icmp(pkt: &mut Packet, i: usize) {
-    let (off, _, end) = span_bounds(pkt, i);
-    if off + 4 > end || pkt.is_pinned(i, "chksum") {
-        return;
-    }
-    // RFC 792: no pseudo-header.
-    put16(&mut pkt.buf, off + 2, 0);
-    let c = ck::ones_complement(&pkt.buf[off..end]);
-    put16(&mut pkt.buf, off + 2, c);
-}
-
 /// RFC 1035 §4.2.2. A segment may carry more messages than wiry dissects, so a
 /// prefix already framing a shorter one is describing bytes this layer does not
 /// own and is left as the sender wrote it.
@@ -250,6 +260,86 @@ fn fix_icmpv6(pkt: &mut Packet, i: usize) {
     put16(&mut pkt.buf, off + 2, c);
 }
 
+/// Where a header counts its own length in units larger than an octet: the
+/// field, the unit, the fixed part the count excludes, and the largest count
+/// the field's bits can hold.
+fn unit_hlen(proto: ProtoId) -> Option<(&'static str, usize, usize, usize)> {
+    match proto {
+        // RFC 8200 §4.3: eight bits of 8-octet units beyond the first eight.
+        ProtoId::HopByHop | ProtoId::DestOpt | ProtoId::Routing => Some(("len", 8, 8, 255)),
+        // RFC 8926 §3.1: six bits of 4-octet units of the option block alone.
+        ProtoId::Geneve => Some(("optionlen", 4, 8, 63)),
+        _ => None,
+    }
+}
+
+/// A count of units cannot describe a region that does not fill whole units, so
+/// such a region is left alone rather than rounded to one the bytes do not back.
+/// A region too wide for the count is left alone too, and `oversize` refuses the
+/// packet: writing the count modulo its width would move the payload silently.
+fn fix_unit_hlen(pkt: &mut Packet, i: usize) {
+    let Some((name, unit, fixed, max)) = unit_hlen(pkt.spans[i].proto) else {
+        return;
+    };
+    let (off, hlen, _) = span_bounds(pkt, i);
+    if hlen < fixed || off >= pkt.buf.len() || pkt.is_pinned(i, name) {
+        return;
+    }
+    let extra = hlen - fixed;
+    if extra % unit != 0 || extra / unit > max {
+        return;
+    }
+    let n = (extra / unit) as u8;
+    match pkt.spans[i].proto {
+        ProtoId::Geneve => pkt.buf[off] = (pkt.buf[off] & 0xc0) | n,
+        _ => pkt.buf[off + 1] = n,
+    }
+}
+
+/// A length field naming the bytes that follow a fixed-width header: the field's
+/// octet offset and the width it excludes. RFC 8200 §3, RFC 2516 §4,
+/// TS 29.281 §5.1.
+fn tail_len(proto: ProtoId) -> Option<(usize, usize)> {
+    match proto {
+        ProtoId::Ipv6 => Some((4, 40)),
+        ProtoId::Pppoe | ProtoId::PppoeDisc => Some((4, 6)),
+        ProtoId::GtpU => Some((2, 8)),
+        _ => None,
+    }
+}
+
+fn fix_tail_len(pkt: &mut Packet, i: usize) {
+    let Some((at, fixed)) = tail_len(pkt.spans[i].proto) else {
+        return;
+    };
+    let (off, _, end) = span_bounds(pkt, i);
+    let name = len_field(pkt.spans[i].proto).unwrap_or("len");
+    if off + fixed > end || pkt.is_pinned(i, name) {
+        return;
+    }
+    put16(&mut pkt.buf, off + at, (end - off - fixed) as u16);
+}
+
+/// One's complement over the header and its payload, with no pseudo-header:
+/// RFC 792 for ICMP, RFC 2784 §2.5 for GRE.
+fn fix_bare_checksum(pkt: &mut Packet, i: usize, at: usize, min: usize) {
+    let (off, _, end) = span_bounds(pkt, i);
+    if off + min > end || pkt.is_pinned(i, "chksum") {
+        return;
+    }
+    put16(&mut pkt.buf, off + at, 0);
+    let c = ck::ones_complement(&pkt.buf[off..end]);
+    put16(&mut pkt.buf, off + at, c);
+}
+
+/// RFC 2784 §2.5: the field exists only where the Checksum Present bit is set.
+fn fix_gre(pkt: &mut Packet, i: usize) {
+    let off = pkt.spans[i].off as usize;
+    if pkt.buf.get(off).is_some_and(|b| b & 0x80 != 0) {
+        fix_bare_checksum(pkt, i, 4, 8);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,19 +358,35 @@ mod tests {
             (ProtoId::Icmpv6, "cksum"),
             // Over a stream only.
             (ProtoId::Dns, "length"),
+            // fix_unit_hlen: a count of units, not octets.
+            (ProtoId::HopByHop, "len"),
+            (ProtoId::Routing, "len"),
+            (ProtoId::DestOpt, "len"),
+            (ProtoId::Geneve, "optionlen"),
+            // fix_tail_len: octets following a fixed-width header.
+            (ProtoId::Pppoe, "len"),
+            (ProtoId::PppoeDisc, "len"),
+            (ProtoId::GtpU, "length"),
+            (ProtoId::Gre, "chksum"),
         ];
+        let mut missing = Vec::new();
         for id in (0..crate::proto::BUILTIN_COUNT).map(ProtoId) {
             for framed in [false, true] {
                 for f in crate::proto::fields_of(id, framed) {
-                    assert!(
-                        !f.computed || HANDLED.contains(&(id, f.name)),
-                        "{}.{} is derived but nothing recomputes it",
-                        id.name(),
-                        f.name
-                    );
+                    if f.computed && !HANDLED.contains(&(id, f.name)) {
+                        let entry = format!("{}.{}", id.name(), f.name);
+                        if !missing.contains(&entry) {
+                            missing.push(entry);
+                        }
+                    }
                 }
             }
         }
+        assert!(
+            missing.is_empty(),
+            "derived but nothing recomputes them: {}",
+            missing.join(", ")
+        );
         for (id, name) in HANDLED {
             assert!(
                 crate::proto::field_of(*id, name).is_some_and(|f| f.computed),

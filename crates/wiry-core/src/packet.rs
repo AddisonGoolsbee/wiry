@@ -11,7 +11,10 @@ pub struct LayerSpan {
     pub total: u32,
 }
 
-pub type Spans = SmallVec<[LayerSpan; 8]>;
+/// Sized for a tunnelled chain: a VXLAN or ERSPAN frame reaches nine spans with
+/// its `Padding`, and spilling to the heap costs an allocation per packet on
+/// every bulk path.
+pub type Spans = SmallVec<[LayerSpan; 16]>;
 
 /// Bounds the dissection walk on malformed input.
 const MAX_LAYERS: usize = 32;

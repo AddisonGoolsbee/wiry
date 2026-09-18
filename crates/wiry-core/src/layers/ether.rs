@@ -16,30 +16,57 @@ fn header_len(_: &[u8]) -> usize {
     14
 }
 
-fn next(hdr: &[u8]) -> Next {
-    if hdr.len() < 14 {
-        return Next::Raw;
-    }
-    match u16::from_be_bytes([hdr[12], hdr[13]]) {
+/// The IANA registry, shared by every layer whose next-header field is an
+/// EtherType.
+pub fn from_ethertype(t: u16) -> Next {
+    match t {
         ethertype::IPV4 => Next::Proto(ProtoId::Ipv4),
         ethertype::IPV6 => Next::Proto(ProtoId::Ipv6),
         ethertype::ARP => Next::Proto(ProtoId::Arp),
         ethertype::DOT1Q => Next::Proto(ProtoId::Dot1Q),
+        ethertype::TEB => Next::Proto(ProtoId::Ether),
+        ethertype::MPLS_UNICAST | ethertype::MPLS_MULTICAST => Next::Proto(ProtoId::Mpls),
+        ethertype::PPPOE_DISCOVERY => Next::Proto(ProtoId::PppoeDisc),
+        ethertype::PPPOE_SESSION => Next::Proto(ProtoId::Pppoe),
+        ethertype::PPP_LINK => Next::Proto(ProtoId::Ppp),
         _ => Next::Raw,
     }
 }
 
-fn bind_next(hdr: &mut [u8], p: ProtoId) {
-    let t = match p {
+/// The inverse, minus `Ether`: Transparent Ethernet Bridging says a *tunnel*
+/// carries a whole frame, so only a tunnel writes it (`gre`, `geneve`). A link
+/// layer that stacked it would claim to carry itself.
+pub fn to_ethertype(p: ProtoId) -> Option<u16> {
+    Some(match p {
         ProtoId::Ipv4 => ethertype::IPV4,
         ProtoId::Ipv6 => ethertype::IPV6,
         ProtoId::Arp => ethertype::ARP,
         ProtoId::Dot1Q => ethertype::DOT1Q,
-        _ => return,
-    };
-    if hdr.len() >= 14 {
-        hdr[12..14].copy_from_slice(&t.to_be_bytes());
+        ProtoId::Mpls => ethertype::MPLS_UNICAST,
+        ProtoId::PppoeDisc => ethertype::PPPOE_DISCOVERY,
+        ProtoId::Pppoe => ethertype::PPPOE_SESSION,
+        ProtoId::Ppp => ethertype::PPP_LINK,
+        _ => return None,
+    })
+}
+
+/// Writes an EtherType at `at`, which is where every layer that carries one
+/// differs.
+pub fn bind_ethertype(hdr: &mut [u8], at: usize, t: Option<u16>) {
+    if let (Some(t), Some(dst)) = (t, hdr.get_mut(at..at + 2)) {
+        dst.copy_from_slice(&t.to_be_bytes());
     }
+}
+
+fn next(hdr: &[u8]) -> Next {
+    if hdr.len() < 14 {
+        return Next::Raw;
+    }
+    from_ethertype(u16::from_be_bytes([hdr[12], hdr[13]]))
+}
+
+fn bind_next(hdr: &mut [u8], p: ProtoId) {
+    bind_ethertype(hdr, 12, to_ethertype(p));
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {

@@ -71,25 +71,11 @@ fn within<F: FnOnce() + Send + 'static>(limit: Duration, what: &'static str, f: 
     }
 }
 
-const ENTRY_POINTS: [ProtoId; 17] = [
-    ProtoId::Raw,
-    ProtoId::Padding,
-    ProtoId::Ether,
-    ProtoId::Dot1Q,
-    ProtoId::Arp,
-    ProtoId::Ipv4,
-    ProtoId::Ipv6,
-    ProtoId::Tcp,
-    ProtoId::Udp,
-    ProtoId::Icmp,
-    ProtoId::Icmpv6,
-    ProtoId::Dns,
-    ProtoId::Bootp,
-    ProtoId::Dhcp,
-    ProtoId::Null,
-    ProtoId::LinuxSll,
-    ProtoId::LinuxSll2,
-];
+/// Every built-in layer, derived from the registry rather than re-listed: a
+/// second copy silently falls behind the first (the fuzz list already had).
+fn entry_points() -> Vec<ProtoId> {
+    wiry_core::proto::builtins().collect()
+}
 
 /// Spans must stay inside the buffer and must not run backwards.
 fn check_spans(pkt: &Packet, what: &str) {
@@ -390,7 +376,8 @@ fn random_bytes_dissect_at_every_entry_point() {
             _ => rng.below(1600),
         };
         let data = rng.bytes(len);
-        let link = ENTRY_POINTS[rng.below(ENTRY_POINTS.len())];
+        let eps = entry_points();
+        let link = eps[rng.below(eps.len())];
         let mut pkt = Packet::dissect(data, link);
         exercise(&mut pkt, &format!("random #{i} at {link:?}"));
     }
@@ -496,7 +483,8 @@ fn truncated_and_mutated_input_round_trips_to_a_fixed_point() {
             let at = rng.below(data.len());
             data[at] = rng.byte();
         }
-        let link = ENTRY_POINTS[rng.below(ENTRY_POINTS.len())];
+        let eps = entry_points();
+        let link = eps[rng.below(eps.len())];
 
         let mut first = Packet::dissect(data, link);
         first.mark_all_dirty();
@@ -523,7 +511,8 @@ fn random_input_round_trips_to_a_fixed_point() {
     let mut rng = Rng::new(SEED ^ 0xfeed);
     for i in 0..4000 {
         let data = rng.bytes_below(400);
-        let link = ENTRY_POINTS[rng.below(ENTRY_POINTS.len())];
+        let eps = entry_points();
+        let link = eps[rng.below(eps.len())];
         let mut first = Packet::dissect(data, link);
         first.mark_all_dirty();
         let bytes = first.to_bytes().to_vec();
