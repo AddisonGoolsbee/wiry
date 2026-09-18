@@ -22,7 +22,7 @@ use wiry_core::pcap;
 use wiry_core::proto::{self, ProtoId};
 use wiry_core::show;
 
-fn proto_by_name(name: &str) -> PyResult<ProtoId> {
+pub(crate) fn proto_by_name(name: &str) -> PyResult<ProtoId> {
     proto::by_name(name).ok_or_else(|| PyValueError::new_err(format!("unknown layer {name:?}")))
 }
 
@@ -1374,6 +1374,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(live::send_frames, m)?)?;
     m.add_function(wrap_pyfunction!(live::send_datagrams, m)?)?;
     m.add_function(wrap_pyfunction!(live::sr_live, m)?)?;
+    m.add_function(wrap_pyfunction!(live::pair_replies, m)?)?;
     m.add(
         "CaptureUnavailable",
         m.py().get_type_bound::<capture::CaptureUnavailable>(),

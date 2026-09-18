@@ -279,9 +279,27 @@ fn sent_kind(buf: &[u8], spans: &[LayerSpan]) -> ReplyKind {
 }
 
 pub fn answers(sent: &ReplyKey, recv_buf: &[u8], recv_spans: &[LayerSpan]) -> bool {
+    answers_matching(sent, recv_buf, recv_spans, true)
+}
+
+/// [`answers`] with the address pinning made optional, which is scapy's
+/// `conf.checkIPaddr`. With `check_addr` false only the protocol identity is
+/// left — ports, echo id and seq, DNS id, the quoted header past its addresses
+/// — which is what a DHCP exchange needs, where the server answers from an
+/// address the client could not have predicted. It is strictly looser, and the
+/// table's warning about silent mispairing applies with full force.
+pub fn answers_matching(
+    sent: &ReplyKey,
+    recv_buf: &[u8],
+    recv_spans: &[LayerSpan],
+    check_addr: bool,
+) -> bool {
     match sent.kind {
         ReplyKind::Arp { pdst } => arp_answers(pdst, recv_buf, recv_spans),
-        _ => direct_answer(sent, recv_buf, recv_spans) || quoted_back(sent, recv_buf, recv_spans),
+        _ => {
+            direct_answer(sent, recv_buf, recv_spans, check_addr)
+                || quoted_back(sent, recv_buf, recv_spans, check_addr)
+        }
     }
 }
 
@@ -301,14 +319,15 @@ pub fn ack_consistent(sent: &ReplyKey, recv_buf: &[u8], recv_spans: &[LayerSpan]
     Some(be32(h, 8)? == expect_ack)
 }
 
-fn swapped(sent: &ReplyKey, pair: &Pair) -> bool {
-    pair.v6 == sent.v6 && pair.src == sent.dst && pair.dst == sent.src
+fn swapped(sent: &ReplyKey, pair: &Pair, check_addr: bool) -> bool {
+    pair.v6 == sent.v6 && (!check_addr || (pair.src == sent.dst && pair.dst == sent.src))
 }
 
-fn direct_answer(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan]) -> bool {
+fn direct_answer(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan], check_addr: bool) -> bool {
     let Some(pair) = ip_pair(buf, spans) else {
         return false;
     };
+    let swapped = |p: &Pair| swapped(sent, p, check_addr);
     match sent.kind {
         ReplyKind::IcmpEcho { id, seq } => {
             let Some(s) = find(spans, ProtoId::Icmp) else {
@@ -319,7 +338,7 @@ fn direct_answer(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan]) -> bool {
                 && be16(h, 4) == Some(id)
                 && be16(h, 6) == Some(seq)
                 && !sent.v6
-                && swapped(sent, &pair)
+                && swapped(&pair)
         }
         ReplyKind::Icmpv6Echo { id, seq } => {
             let Some(s) = find(spans, ProtoId::Icmpv6) else {
@@ -330,21 +349,21 @@ fn direct_answer(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan]) -> bool {
                 && be16(b, 4) == Some(id)
                 && be16(b, 6) == Some(seq)
                 && sent.v6
-                && swapped(sent, &pair)
+                && swapped(&pair)
         }
         ReplyKind::Tcp { sport, dport, .. } => {
             let Some(s) = find(spans, ProtoId::Tcp) else {
                 return false;
             };
             let h = hdr(buf, s);
-            swapped(sent, &pair) && be16(h, 0) == Some(dport) && be16(h, 2) == Some(sport)
+            swapped(&pair) && be16(h, 0) == Some(dport) && be16(h, 2) == Some(sport)
         }
         ReplyKind::Udp { sport, dport, dns } => {
             let Some(s) = find(spans, ProtoId::Udp) else {
                 return false;
             };
             let h = hdr(buf, s);
-            if !(swapped(sent, &pair) && be16(h, 0) == Some(dport) && be16(h, 2) == Some(sport)) {
+            if !(swapped(&pair) && be16(h, 0) == Some(dport) && be16(h, 2) == Some(sport)) {
                 return false;
             }
             match dns {
@@ -373,7 +392,7 @@ const ECHO_REPLY_V6: u8 = 129;
 /// How traceroute works: the reply is an error from a router that never saw
 /// the datagram's payload, so the quoted header is the only thing tying the
 /// two together.
-fn quoted_back(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan]) -> bool {
+fn quoted_back(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan], check_addr: bool) -> bool {
     let Some(q) = sent.quote else {
         return false;
     };
@@ -392,7 +411,7 @@ fn quoted_back(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan]) -> bool {
     // The addresses first: the id and the eight octets are both constant
     // across a batch of wiry's own probes, so on their own they pair a reply
     // with whichever probe happens to come first.
-    if four(h, 12) != Some(q.src) || four(h, 16) != Some(q.dst) {
+    if check_addr && (four(h, 12) != Some(q.src) || four(h, 16) != Some(q.dst)) {
         return false;
     }
     if h.get(9) != Some(&q.proto) || be16(h, 4) != Some(q.ip_id) {
@@ -836,6 +855,54 @@ mod tests {
             reply_key(six.raw_bytes(), six.layers()).is_none(),
             "IPv6 carrying neither a transport this knows nor an echo request"
         );
+    }
+
+    #[test]
+    fn without_the_address_check_the_protocol_identity_is_all_that_is_left() {
+        let loose = |sent: &ReplyKey, buf: Vec<u8>| {
+            let p = Packet::dissect(buf, ProtoId::Ipv4);
+            answers_matching(sent, p.raw_bytes(), p.layers(), false)
+        };
+        // The DHCP shape: a reply from an address the sender could not predict.
+        let sent = ip4_key(17, 1, &udp(68, 67, b"boot"));
+        let elsewhere = ip4(17, 2, C, B, &udp(67, 68, b"offer"));
+        assert!(!replies(&sent, elsewhere.clone(), ProtoId::Ipv4));
+        assert!(loose(&sent, elsewhere));
+        // Still not a free pass: the ports have to be the swapped pair.
+        assert!(!loose(&sent, ip4(17, 2, C, B, &udp(67, 69, b"offer"))));
+
+        let ping = ip4_key(1, 5, &echo(types::ECHO_REQUEST, 0xbeef, 7));
+        assert!(loose(
+            &ping,
+            ip4(1, 9, C, C, &echo(types::ECHO_REPLY, 0xbeef, 7))
+        ));
+        assert!(!loose(
+            &ping,
+            ip4(1, 9, C, C, &echo(types::ECHO_REPLY, 0xbeef, 8))
+        ));
+
+        // An IPv4 reply never answers an IPv6 request, address check or not:
+        // the families are not the same conversation.
+        let six = key(ip6(58, A6, B6, &echo(128, 1, 1)), ProtoId::Ipv6);
+        assert!(!loose(&six, ip4(1, 9, B, A, &echo(0, 1, 1))));
+    }
+
+    #[test]
+    fn without_the_address_check_a_quote_is_matched_on_its_contents_alone() {
+        let probe = udp(33434, 33435, b"hop");
+        let sent = ip4_key(17, 0xabcd, &probe);
+        let strangers = ip4(17, 0xabcd, C, B, &probe);
+        let err = ip4(1, 1, C, A, &icmp_error(types::TIME_EXCEEDED, &strangers));
+        let p = Packet::dissect(err, ProtoId::Ipv4);
+        assert!(!answers(&sent, p.raw_bytes(), p.layers()));
+        assert!(answers_matching(&sent, p.raw_bytes(), p.layers(), false));
+        // The IP id, the protocol and the first eight octets still have to agree.
+        let other = ip4(17, 0xabce, C, B, &probe);
+        let q = Packet::dissect(
+            ip4(1, 1, C, A, &icmp_error(types::TIME_EXCEEDED, &other)),
+            ProtoId::Ipv4,
+        );
+        assert!(!answers_matching(&sent, q.raw_bytes(), q.layers(), false));
     }
 
     #[test]

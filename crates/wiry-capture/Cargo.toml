@@ -16,6 +16,10 @@ wiry-core = { path = "../wiry-core", version = "0.1.0" }
 # edition 2024, so a 2.6 would break this workspace's MSRV on `cargo update`.
 pcap = { version = "=2.5.0", optional = true }
 socket2 = { version = "0.6", features = ["all"], optional = true }
+# getifaddrs/AF_LINK, which this crate cannot reach itself: forbid(unsafe_code).
+# Pinned for the same reason pcap is: it declares no MSRV of its own, so a minor
+# bump of it or of its nix dependency could quietly raise this workspace's.
+mac_address = { version = "=1.1.8", optional = true }
 
 [features]
-live = ["dep:pcap", "dep:socket2"]
+live = ["dep:pcap", "dep:socket2", "dep:mac_address"]

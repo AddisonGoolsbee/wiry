@@ -19,7 +19,25 @@ and free of the background traffic that makes interface tests flaky.
 
 `run` sends a crafted frame on one end and captures it on the other, asserting
 byte-identical receipt, then exercises `sr1`, `AsyncSniffer` start/stop, and a BPF
-filter that must exclude the test's own frames.
+filter that must exclude the test's own frames. It then runs the active tools
+over the pair, where exactly one address exists to answer: `arping` must find the
+peer and nobody else, `getmacbyip` must agree with it, `srloop` must collect every
+round, and `traceroute` must reach a peer one hop away.
+
+## Any host with a network: the active tools
+
+`traceroute`, `arping`, `getmacbyip` and `srloop` against real routers and real
+hosts. Everything these tools are *made* of — the TTL sweep, the trace grouping
+and its presentation, the CIDR expansion, the multicast mapping — is in
+`tests/test_tools.py` and needs no privileges; this is only whether the wire
+agrees.
+
+    sudo .venv/bin/python dev/live/tools_check.py [target] [--net 10.0.0.0/24]
+
+`target` defaults to 1.1.1.1 and the sweep to the /24 around the outgoing
+interface's address. Unlike the namespace harness this depends on the network it
+is run on: a LAN where nothing answers ARP, or a path that drops ICMP, will fail
+honestly rather than silently.
 
 ## macOS: loopback
 

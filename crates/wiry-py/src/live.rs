@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use wiry_capture::{open_live, CaptureBuf, Flow, Handle, LiveConfig, PacketMeta, Record};
-use wiry_core::answers::{answers, reply_key, ReplyKey};
+use wiry_core::answers::{answers_matching, reply_key, ReplyKey};
 use wiry_core::packet::dissect_spans;
 use wiry_core::pcap;
 use wiry_core::proto::ProtoId;
@@ -623,6 +623,8 @@ struct Exchange {
     scratch: Vec<u8>,
     link: ProtoId,
     multi: bool,
+    /// scapy's `conf.checkIPaddr`.
+    check_addr: bool,
 }
 
 impl Exchange {
@@ -646,7 +648,7 @@ impl Exchange {
             if !self.multi && self.got[i] {
                 continue;
             }
-            if !answers(k, &self.scratch, &spans) {
+            if !answers_matching(k, &self.scratch, &spans, self.check_addr) {
                 continue;
             }
             let at = *kept.get_or_insert_with(|| {
@@ -688,13 +690,65 @@ impl Exchange {
 /// sent indices nothing answered.
 type Exchanged = (PyPktList, Vec<(usize, usize)>, Vec<usize>);
 
+/// The same pairing with no capture behind it: see [`pair_replies`].
+type Paired = (Vec<(usize, usize)>, Vec<usize>);
+
+/// `sr`'s pairing with the wire replaced by a list of frames: the same
+/// `Exchange`, the same `answers`, no socket and no privilege.
+///
+/// This is what makes `traceroute` testable without root. The tool is a TTL
+/// sweep plus arithmetic over whatever `sr` paired, so driving the real pairing
+/// from canned packets leaves only the socket itself untested offline. Needs no
+/// `live` feature: nothing here opens anything.
+#[pyfunction]
+#[pyo3(signature = (sent, received, link = "IP", multi = false, check_addr = true))]
+pub(crate) fn pair_replies(
+    sent: Vec<Vec<u8>>,
+    received: Vec<Vec<u8>>,
+    link: &str,
+    multi: bool,
+    check_addr: bool,
+) -> PyResult<Paired> {
+    let link = crate::proto_by_name(link)?;
+    let mut ex = Exchange {
+        keys: sent
+            .iter()
+            .map(|f| reply_key(f, &dissect_spans(f, link)))
+            .collect(),
+        got: vec![false; sent.len()],
+        pairs: Vec::new(),
+        // Matched frames are stored and then thrown away: only the pairing is
+        // asked for, so a discarded buffer's link type changes nothing.
+        out: CaptureBuf::new(pcap::linktype::IPV4, 262_144),
+        scratch: Vec::new(),
+        link,
+        multi,
+        check_addr,
+    };
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
+    for (at, frame) in received.into_iter().enumerate() {
+        let meta = PacketMeta {
+            ts_sec: 0,
+            ts_frac: 0,
+            caplen: frame.len() as u32,
+            origlen: frame.len() as u32,
+        };
+        let before = ex.pairs.len();
+        ex.scratch = frame;
+        ex.offer(&meta);
+        pairs.extend(ex.pairs[before..].iter().map(|&(i, _)| (i, at)));
+    }
+    Ok((pairs, ex.pending()))
+}
+
 /// Send and collect the answers. The receive capture opens before anything is
 /// sent, or a reply that comes back at wire speed is already gone.
 #[allow(clippy::too_many_arguments)]
 #[pyfunction]
 #[pyo3(signature = (
     frames, iface = None, l2 = true, filter = None, timeout = None, retry = 0,
-    multi = false, inter = 0.0, promisc = true, snaplen = 262_144
+    multi = false, inter = 0.0, promisc = true, snaplen = 262_144,
+    check_addr = true
 ))]
 pub(crate) fn sr_live(
     py: Python<'_>,
@@ -708,6 +762,7 @@ pub(crate) fn sr_live(
     inter: f64,
     promisc: bool,
     snaplen: u32,
+    check_addr: bool,
 ) -> PyResult<Exchanged> {
     let cfg = live_config(iface, filter, promisc, snaplen);
     let gap = gap_of(inter)?;
@@ -727,6 +782,7 @@ pub(crate) fn sr_live(
         scratch: Vec::new(),
         link,
         multi,
+        check_addr,
     };
 
     for _ in 0..=retry {
@@ -826,6 +882,7 @@ mod tests {
             scratch: Vec::new(),
             link: ProtoId::Ipv4,
             multi,
+            check_addr: true,
         }
     }
 
@@ -870,6 +927,45 @@ mod tests {
         offer(&mut ex, ip4(9, B, A, &echo(0, 0x2222, 1)));
         assert_eq!(ex.pairs, vec![(1, 0)]);
         assert_eq!(ex.pending(), vec![0]);
+    }
+
+    /// RFC 792: type, code, checksum, four unused octets, then the datagram
+    /// that provoked the error.
+    fn time_exceeded(from: [u8; 4], quoted: &[u8]) -> Vec<u8> {
+        let mut v = vec![11, 0, 0, 0, 0, 0, 0, 0];
+        v.extend_from_slice(quoted);
+        ip4(0xffff, from, A, &v)
+    }
+
+    /// The invariant `traceroute` rests on. A sweep's probes differ only in
+    /// their TTL and IP id, and the TTL is not part of the reply key, so the id
+    /// is the whole of what tells one hop's error from another's.
+    #[test]
+    fn a_ttl_sweep_pairs_every_error_with_the_probe_that_provoked_it() {
+        let probes: Vec<Vec<u8>> = (1..=4u16)
+            .map(|ttl| ip4(ttl, A, B, &echo(8, 0x1234, 1)))
+            .collect();
+        let mut ex = exchange(&probes, false);
+        for (i, ttl) in [3usize, 0, 2, 1].into_iter().zip([4u16, 1, 3, 2]) {
+            let hop = [192, 0, 2, ttl as u8];
+            offer(&mut ex, time_exceeded(hop, &probes[i]));
+        }
+        assert_eq!(ex.pairs, vec![(3, 0), (0, 1), (2, 2), (1, 3)]);
+        assert!(ex.settled());
+    }
+
+    #[test]
+    fn the_address_check_is_what_conf_checkipaddr_turns_off() {
+        let req = ip4(7, A, B, &echo(8, 0x1234, 1));
+        let from_elsewhere = ip4(9, [10, 0, 0, 9], A, &echo(0, 0x1234, 1));
+        let mut strict = exchange(std::slice::from_ref(&req), false);
+        offer(&mut strict, from_elsewhere.clone());
+        assert!(strict.pairs.is_empty());
+
+        let mut loose = exchange(&[req], false);
+        loose.check_addr = false;
+        offer(&mut loose, from_elsewhere);
+        assert_eq!(loose.pairs, vec![(0, 0)]);
     }
 
     #[test]

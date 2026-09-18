@@ -112,12 +112,27 @@ pub fn ipv4_dst(f: &[u8]) -> Option<[u8; 4]> {
     Some([f[16], f[17], f[18], f[19]])
 }
 
-/// The interface's hardware address, for filling an unset `Ether.src` at send
-/// time. `pcap::Device` carries none, and sysfs is the answer only on Linux:
-/// everywhere else this admits it does not know rather than pulling in another
-/// dependency, so `None` is an ordinary outcome that every caller handles.
+/// The interface's hardware address, for filling an unset `Ether.src` or
+/// `ARP.hwsrc` at send time.
+///
+/// `pcap::Device` carries none. With the `live` feature this asks getifaddrs
+/// through `mac_address`, which is every platform a capture runs on; without it
+/// sysfs still answers on Linux. An interface with no hardware address of its
+/// own — a loopback, a tunnel — yields `None`, and so does every caller's
+/// ordinary "not known here".
 pub fn interface_mac(name: &str) -> Option<[u8; 6]> {
-    if !cfg!(target_os = "linux") || name.is_empty() || name.contains(['/', '\\']) {
+    if name.is_empty() || name.contains(['/', '\\']) {
+        return None;
+    }
+    #[cfg(feature = "live")]
+    if let Ok(Some(m)) = mac_address::mac_address_by_name(name) {
+        return Some(m.bytes());
+    }
+    sysfs_mac(name)
+}
+
+fn sysfs_mac(name: &str) -> Option<[u8; 6]> {
+    if !cfg!(target_os = "linux") {
         return None;
     }
     let text = std::fs::read_to_string(format!("/sys/class/net/{name}/address")).ok()?;
@@ -286,6 +301,19 @@ mod live_tests {
         assert!(f.matches(&eth_ip_tcp()));
         let udp = compile_filter(ETHERNET, "udp", 65535).unwrap();
         assert!(!udp.matches(&eth_ip_tcp()));
+    }
+
+    #[test]
+    fn a_hardware_address_is_readable_for_at_least_one_real_interface() {
+        let ifs = list_interfaces().unwrap_or_default();
+        let real = ifs.iter().any(|i| !i.loopback && !i.addresses.is_empty());
+        let known = ifs
+            .iter()
+            .any(|i| interface_mac(&i.name).is_some_and(|m| m != [0; 6]));
+        assert!(
+            !real || known,
+            "an interface carrying addresses, yet no hardware address anywhere"
+        );
     }
 
     #[test]

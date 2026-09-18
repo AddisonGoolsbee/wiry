@@ -30,7 +30,7 @@ CaptureUnavailable = _b.CaptureUnavailable
 
 __all__ = [
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
-    "get_if_list", "get_if_addr", "get_working_if", "conf",
+    "get_if_list", "get_if_addr", "get_if_hwaddr", "get_working_if", "conf",
     "capture_available", "CaptureUnavailable",
 ]
 
@@ -85,7 +85,7 @@ def _live_args(
     stop_filter: Optional[Callable] = None,
     offline: Any = None,
     quiet: bool = False,
-    promisc: bool = True,
+    promisc: Any = None,
     snaplen: int = 262144,
     where: Any = None,
 ) -> dict:
@@ -101,7 +101,7 @@ def _live_args(
         layer=None,
         conds=_normalize_where(where),
         timeout=None if timeout is None else float(timeout),
-        promisc=bool(promisc),
+        promisc=conf.sniff_promisc if promisc is None else bool(promisc),
         snaplen=int(snaplen),
         prn=_printing(prn, quiet),
         lfilter=lfilter,
@@ -122,7 +122,7 @@ def sniff(
     stop_filter: Optional[Callable] = None,
     offline: Any = None,
     quiet: bool = False,
-    promisc: bool = True,
+    promisc: Any = None,
     snaplen: int = 262144,
     where: Any = None,
 ) -> PacketList:
@@ -135,7 +135,7 @@ def sniff(
     built as a Python object.
 
     ``iface``, ``promisc`` and ``snaplen`` are ignored when ``offline`` is given,
-    as scapy ignores them.
+    as scapy ignores them. ``promisc=None`` reads ``conf.sniff_promisc``.
     """
     if offline is None:
         _b.capture_check()
@@ -373,22 +373,40 @@ def _pause(inter: Any) -> float:
     return v
 
 
-def _with_src(pkt: Any, mac: Optional[str]) -> Any:
-    """Fill an unset ``Ether.src`` from the outgoing interface (E9).
+def _with_src(pkt: Any, mac: Optional[str], ip: Optional[str] = None) -> Any:
+    """Fill unset source addresses from the outgoing interface (E9).
 
     At send time only, and on a copy: ``bytes(Ether())`` stays reproducible and
-    the build path stays free of the host it happens to run on. ``mac`` is
-    ``None`` wherever the address cannot be read, which is every platform but
-    Linux, and that is an ordinary outcome.
+    the build path stays free of the host it happens to run on. ``Ether.src``
+    and ``ARP.hwsrc`` take the hardware address, ``ARP.psrc`` the interface's
+    IPv4 address. Either may be ``None`` where the host will not say, and the
+    field is then left alone, which is an ordinary outcome.
+
+    A dissected packet has no field spec to fill, so it goes out as captured.
     """
-    if mac is None or not isinstance(pkt, Packet) or not pkt._stack:
+    if not isinstance(pkt, Packet) or not pkt._stack:
         return pkt
-    name, fields = pkt._stack[0]
-    if name != "Ether" or fields.get("src"):
+    wanted = {"Ether": (("src", mac),), "ARP": (("hwsrc", mac), ("psrc", ip))}
+    todo = [
+        (i, field, value)
+        for i, (name, fields) in enumerate(pkt._stack)
+        for field, value in wanted.get(name, ())
+        if value and not fields.get(field)
+    ]
+    if not todo:
         return pkt
     stack = [(n, dict(f)) for n, f in pkt._stack]
-    stack[0][1]["src"] = mac
+    for i, field, value in todo:
+        stack[i][1][field] = value
     return Packet(_stack=stack, _payload=pkt._payload)
+
+
+def _local_addrs(iface: str) -> tuple:
+    """The interface's hardware and IPv4 addresses, each ``None`` where the
+    host does not report one. ``0.0.0.0`` is ``get_if_addr``'s way of saying it
+    found nothing, and filling ``psrc`` with it is no better than leaving it."""
+    ip = get_if_addr(iface)
+    return _b.interface_mac(iface), None if ip == "0.0.0.0" else ip
 
 
 def _report(sent: int, verbose: Optional[int]) -> None:
@@ -446,8 +464,8 @@ def sendp(x: Any, inter: float = 0, loop: int = 0, iface: Any = None,
     gap = _pause(inter)
     name = _iface_name(iface)
     pkts = _as_list(x)
-    mac = _b.interface_mac(name)
-    frames = [_octets(_with_src(p, mac)) for p in pkts]
+    mac, ip = _local_addrs(name)
+    frames = [_octets(_with_src(p, mac, ip)) for p in pkts]
     sent = _b.send_frames(frames, name, _passes(count), gap, bool(loop))
     _report(sent, verbose)
     return pkts if return_packets else None
@@ -476,16 +494,17 @@ def _exchange(x: Any, l2: bool, iface: Any, filter: Optional[str],
     pkts = _as_list(x)
     name = _iface_name(iface)
     if l2:
-        mac = _b.interface_mac(name)
-        frames = [_octets(_with_src(p, mac)) for p in pkts]
+        mac, ip = _local_addrs(name)
+        frames = [_octets(_with_src(p, mac, ip)) for p in pkts]
     else:
         frames = [_octets(p) for p in pkts]
         _refuse_ipv6(pkts, frames, what)
     recv, pairs, unans = _b.sr_live(
         frames, name, l2, filter,
-        None if timeout is None else float(timeout),
-        int(retry), bool(multi), gap,
-        True if promisc is None else bool(promisc),
+        timeout=None if timeout is None else float(timeout),
+        retry=int(retry), multi=bool(multi), inter=gap,
+        promisc=conf.promisc if promisc is None else bool(promisc),
+        check_addr=bool(conf.checkIPaddr),
     )
     got = PacketList(recv)
     answered = [(pkts[i], got[j]) for i, j in pairs]
@@ -562,6 +581,21 @@ def get_if_addr(iface: Any) -> str:
     return "0.0.0.0"
 
 
+def get_if_hwaddr(iface: Any) -> str:
+    """The interface's hardware address, as ``aa:bb:cc:dd:ee:ff``.
+
+    Read through getifaddrs, so it works wherever a capture does. An interface
+    that has no hardware address of its own — a loopback, a tunnel — raises
+    rather than returning a plausible-looking zero.
+    """
+    _b.capture_check()
+    name = _iface_name(iface)
+    mac = _b.interface_mac(name)
+    if mac is None:
+        raise ValueError(f"{name} has no hardware address")
+    return mac
+
+
 def get_working_if() -> str:
     """The interface libpcap would pick by default."""
     return _b.default_interface()
@@ -572,15 +606,85 @@ def interfaces() -> list:
     return list(_b.list_interfaces())
 
 
-class _Conf:
-    """A deliberately small stand-in for scapy's ``conf``: the interface the
-    capture API defaults to, and the verbosity the send helpers read."""
+class _Route:
+    """Which interface a packet would leave by, and with what source address.
 
-    __slots__ = ("verb", "_iface")
+    **This is not the kernel's routing table.** wiry reads no route from the
+    OS: every entry is a host route synthesised from the interface list, there
+    are no gateways and no netmasks worth the name, and ``route()`` answers the
+    loopback interface for a loopback destination and ``conf.iface`` for
+    everything else. It is enough to tell a script which interface and source
+    address it is about to use, and it must not be used to *make* a routing
+    decision. ``resync()`` drops the cache.
+    """
+
+    __slots__ = ("_table",)
+
+    def __init__(self) -> None:
+        self._table: Optional[list] = None
+
+    def resync(self) -> None:
+        self._table = None
+
+    @property
+    def routes(self) -> list:
+        """One entry per interface address, in scapy's six-tuple shape:
+        ``(network, netmask, gateway, iface, outgoing_ip, metric)``. The
+        netmask is always a host mask and the gateway always ``0.0.0.0``,
+        because neither is read from anywhere."""
+        if self._table is None:
+            self._table = [
+                (addr, "255.255.255.255", "0.0.0.0", i["name"], addr, 0)
+                for i in _b.list_interfaces()
+                for addr in i["addresses"]
+                if ":" not in addr
+            ]
+        return list(self._table)
+
+    def _loopback(self) -> Optional[str]:
+        for i in _b.list_interfaces():
+            if i["loopback"]:
+                return i["name"]
+        return None
+
+    def route(self, dst: Any = None, verbose: Any = None) -> tuple:
+        """``(iface, outgoing_ip, gateway)`` for a destination."""
+        name = None
+        if dst is not None and str(dst).split("/")[0].startswith("127."):
+            name = self._loopback()
+        name = name or conf.iface
+        return (name, get_if_addr(name), "0.0.0.0")
+
+    def __repr__(self) -> str:
+        rows = "".join(
+            f"\n  {net:<18}{iface:<12}{out}" for net, _, _, iface, out, _ in self.routes
+        )
+        return f"<route: interface addresses only, no kernel table>{rows}"
+
+
+class _Conf:
+    """A small stand-in for scapy's ``conf``, carrying the knobs scripts read.
+
+    Every attribute here does something. There is no spare surface to set: a
+    name this does not have raises ``AttributeError`` rather than being
+    absorbed, and a knob whose only honest value is the one it already has
+    refuses the others by name. A setting that silently did nothing would be
+    worse than a missing one.
+    """
+
+    __slots__ = ("verb", "promisc", "sniff_promisc", "checkIPaddr",
+                 "_iface", "_route")
 
     def __init__(self) -> None:
         self.verb = 2
+        # promisc is the sr family's default, sniff_promisc is sniff's.
+        self.promisc = True
+        self.sniff_promisc = True
+        # False drops the address pinning in answers.rs: what DHCP needs, and a
+        # looser match everywhere else.
+        self.checkIPaddr = True
         self._iface: Optional[str] = None
+        self._route: Optional[_Route] = None
 
     @property
     def iface(self) -> str:
@@ -593,8 +697,64 @@ class _Conf:
     def iface(self, value: Any) -> None:
         self._iface = None if value is None else str(value)
 
+    @property
+    def route(self) -> _Route:
+        if self._route is None:
+            self._route = _Route()
+        return self._route
+
+    @property
+    def use_pcap(self) -> bool:
+        """Reports rather than chooses: libpcap is the only backend wiry has,
+        and this is False only in a build without the ``live`` feature."""
+        return capture_available()
+
+    @use_pcap.setter
+    def use_pcap(self, value: Any) -> None:
+        if bool(value) != capture_available():
+            raise NotImplementedError(
+                "conf.use_pcap cannot be changed: libpcap is the only capture "
+                "backend wiry has, and this build "
+                + ("has it" if capture_available()
+                   else "was built without the live feature")
+            )
+
+    @property
+    def l3socket(self) -> None:
+        """``None``, and only ``None``. wiry has no socket objects to swap: the
+        layer-3 path is a raw socket opened per call in Rust, which is also why
+        ``send(socket=...)`` is refused."""
+        return None
+
+    @l3socket.setter
+    def l3socket(self, value: Any) -> None:
+        if value is not None:
+            raise NotImplementedError(
+                "conf.l3socket cannot be replaced: wiry has no socket class to "
+                "swap in, and the send path opens its own socket per call"
+            )
+
+    @property
+    def l2socket(self) -> None:
+        """``None``, and only ``None``. See ``l3socket``: the layer-2 path is a
+        libpcap handle opened per call."""
+        return None
+
+    @l2socket.setter
+    def l2socket(self, value: Any) -> None:
+        if value is not None:
+            raise NotImplementedError(
+                "conf.l2socket cannot be replaced: wiry has no socket class to "
+                "swap in, and the send path opens its own handle per call"
+            )
+
+    # scapy's own spelling of the same two.
+    L3socket = l3socket
+    L2socket = l2socket
+
     def __repr__(self) -> str:
-        return f"<conf iface={self._iface!r} verb={self.verb}>"
+        return (f"<conf iface={self._iface!r} verb={self.verb} "
+                f"promisc={self.promisc} checkIPaddr={self.checkIPaddr}>")
 
 
 conf = _Conf()

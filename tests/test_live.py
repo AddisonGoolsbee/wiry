@@ -116,6 +116,40 @@ def test_no_interface_address_is_an_ordinary_outcome():
     assert C._with_src(b"\x00" * 14, "aa:bb:cc:dd:ee:ff") == b"\x00" * 14
 
 
+def test_an_arp_request_is_filled_in_at_send_time_too():
+    # E9: without this an arping asks on behalf of 00:00:00:00:00:00 and
+    # 0.0.0.0, which is the one function where it actually breaks.
+    from wiry import ARP, Ether
+
+    pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst="10.0.0.9")
+    filled = C._with_src(pkt, "aa:bb:cc:dd:ee:ff", "10.0.0.5")
+    assert filled[ARP].hwsrc == "aa:bb:cc:dd:ee:ff"
+    assert filled[ARP].psrc == "10.0.0.5"
+    assert filled[Ether].src == "aa:bb:cc:dd:ee:ff"
+    # Construction stays reproducible and the caller's packet untouched.
+    assert pkt[ARP].hwsrc == "00:00:00:00:00:00"
+    assert pkt[ARP].psrc == "0.0.0.0"
+    assert bytes(Ether() / ARP()) == bytes(Ether() / ARP())
+
+
+def test_an_arp_request_that_says_who_it_is_is_left_alone():
+    from wiry import ARP, Ether
+
+    pkt = Ether() / ARP(hwsrc="02:00:00:00:00:09", psrc="10.0.0.7",
+                        pdst="10.0.0.9")
+    filled = C._with_src(pkt, "aa:bb:cc:dd:ee:ff", "10.0.0.5")
+    assert filled[ARP].hwsrc == "02:00:00:00:00:09"
+    assert filled[ARP].psrc == "10.0.0.7"
+
+
+def test_an_unknown_interface_address_leaves_the_arp_field_alone():
+    from wiry import ARP, Ether
+
+    pkt = Ether() / ARP(pdst="10.0.0.9")
+    assert C._with_src(pkt, None, None) is pkt
+    assert C._with_src(pkt, "aa:bb:cc:dd:ee:ff", None)[ARP].psrc == "0.0.0.0"
+
+
 def test_the_interface_address_is_unknown_off_linux_and_never_a_path():
     import sys
 
