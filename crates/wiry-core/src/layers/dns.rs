@@ -1,34 +1,42 @@
 //! RFC 1035 §4.1.1 header; sections stay `Raw` and are decoded by
-//! [`parse_records`]. DEVIATIONS.md E8.
+//! [`parse_records`]. RDATA layouts: RFC 1035 §3.3, RFC 2782 (SRV),
+//! RFC 6891 (OPT), RFC 4034 (DS, RRSIG, NSEC, DNSKEY), RFC 5155 (NSEC3),
+//! RFC 8659 (CAA). DEVIATIONS.md E8.
 
 use crate::field::FieldDesc;
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
-/// RFC 1035 §4.2.2: the length prefix exists only over TCP, which stays `Raw`,
-/// so the field is present for the interface but can never apply.
-fn over_tcp(_: &[u8]) -> bool {
-    false
+/// The header is the same twelve octets either way; over a stream RFC 1035
+/// §4.2.2 puts a length in front of it. One macro so the two layouts cannot
+/// drift apart.
+macro_rules! header_fields {
+    ($at:expr $(, $pre:expr)?) => {
+        &[
+            $($pre,)?
+            FieldDesc::uint("id", $at, 16, 0),
+            FieldDesc::uint("qr", $at + 16, 1, 0),
+            FieldDesc::uint("opcode", $at + 17, 4, 0),
+            FieldDesc::uint("aa", $at + 21, 1, 0),
+            FieldDesc::uint("tc", $at + 22, 1, 0),
+            FieldDesc::uint("rd", $at + 23, 1, 1),
+            FieldDesc::uint("ra", $at + 24, 1, 0),
+            // RFC 1035 Z became AD and CD in RFC 4035.
+            FieldDesc::uint("z", $at + 25, 1, 0),
+            FieldDesc::uint("ad", $at + 26, 1, 0),
+            FieldDesc::uint("cd", $at + 27, 1, 0),
+            FieldDesc::uint("rcode", $at + 28, 4, 0),
+            FieldDesc::uint("qdcount", $at + 32, 16, 1),
+            FieldDesc::uint("ancount", $at + 48, 16, 0),
+            FieldDesc::uint("nscount", $at + 64, 16, 0),
+            FieldDesc::uint("arcount", $at + 80, 16, 0),
+        ]
+    };
 }
 
-pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("length", 0, 16, 0).when(over_tcp),
-    FieldDesc::uint("id", 0, 16, 0),
-    FieldDesc::uint("qr", 16, 1, 0),
-    FieldDesc::uint("opcode", 17, 4, 0),
-    FieldDesc::uint("aa", 21, 1, 0),
-    FieldDesc::uint("tc", 22, 1, 0),
-    FieldDesc::uint("rd", 23, 1, 1),
-    FieldDesc::uint("ra", 24, 1, 0),
-    // RFC 1035 Z became AD and CD in RFC 4035.
-    FieldDesc::uint("z", 25, 1, 0),
-    FieldDesc::uint("ad", 26, 1, 0),
-    FieldDesc::uint("cd", 27, 1, 0),
-    FieldDesc::uint("rcode", 28, 4, 0),
-    FieldDesc::uint("qdcount", 32, 16, 1),
-    FieldDesc::uint("ancount", 48, 16, 0),
-    FieldDesc::uint("nscount", 64, 16, 0),
-    FieldDesc::uint("arcount", 80, 16, 0),
-];
+pub static FIELDS: &[FieldDesc] = header_fields!(0);
+
+/// RFC 1035 §4.2.2.
+pub static TCP_FIELDS: &[FieldDesc] = header_fields!(16, FieldDesc::computed_uint("length", 0, 16));
 
 fn header_len(_: &[u8]) -> usize {
     12
@@ -70,9 +78,32 @@ pub mod rtype {
     pub const RRSIG: u16 = 46;
     pub const NSEC: u16 = 47;
     pub const DNSKEY: u16 = 48;
+    pub const NSEC3: u16 = 50;
+    pub const NSEC3PARAM: u16 = 51;
     pub const AXFR: u16 = 252;
     pub const ANY: u16 = 255;
     pub const CAA: u16 = 257;
+}
+
+/// IANA "DNS EDNS0 Option Codes (OPT)" registry.
+pub fn ednsopt_name(code: u16) -> &'static str {
+    match code {
+        1 => "LLQ",
+        2 => "UL",
+        3 => "NSID",
+        5 => "DAU",
+        6 => "DHU",
+        7 => "N3U",
+        8 => "edns-client-subnet",
+        9 => "EDNS-EXPIRE",
+        10 => "COOKIE",
+        11 => "edns-tcp-keepalive",
+        12 => "Padding",
+        13 => "CHAIN",
+        14 => "edns-key-tag",
+        15 => "Extended-DNS-Error",
+        _ => "UNKNOWN",
+    }
 }
 
 pub fn rtype_name(t: u16) -> &'static str {
@@ -91,6 +122,8 @@ pub fn rtype_name(t: u16) -> &'static str {
         rtype::RRSIG => "RRSIG",
         rtype::NSEC => "NSEC",
         rtype::DNSKEY => "DNSKEY",
+        rtype::NSEC3 => "NSEC3",
+        rtype::NSEC3PARAM => "NSEC3PARAM",
         rtype::AXFR => "AXFR",
         rtype::ANY => "ANY",
         rtype::CAA => "CAA",
@@ -116,6 +149,24 @@ pub struct ResourceRecord {
     pub rdata: RData,
 }
 
+/// RFC 6891 §6.1.2.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdnsOption {
+    pub code: u16,
+    pub data: Vec<u8>,
+}
+
+/// RFC 6891 §6.1.3: the OPT pseudo-record reuses CLASS and TTL for the fields
+/// that would not fit in the twelve-octet header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Edns {
+    pub udpsize: u16,
+    pub ext_rcode: u8,
+    pub version: u8,
+    pub dnssec_ok: bool,
+    pub z: u16,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RData {
     A([u8; 4]),
@@ -135,6 +186,59 @@ pub enum RData {
         retry: u32,
         expire: u32,
         minimum: u32,
+    },
+    Srv {
+        priority: u16,
+        weight: u16,
+        port: u16,
+        target: String,
+    },
+    Caa {
+        flags: u8,
+        tag: String,
+        value: String,
+    },
+    Opt(Vec<EdnsOption>),
+    Ds {
+        keytag: u16,
+        algorithm: u8,
+        digest_type: u8,
+        digest: Vec<u8>,
+    },
+    Rrsig {
+        type_covered: u16,
+        algorithm: u8,
+        labels: u8,
+        original_ttl: u32,
+        expiration: u32,
+        inception: u32,
+        keytag: u16,
+        signer: String,
+        signature: Vec<u8>,
+    },
+    Nsec {
+        next: String,
+        types: Vec<u16>,
+    },
+    Nsec3 {
+        hash_alg: u8,
+        flags: u8,
+        iterations: u16,
+        salt: Vec<u8>,
+        next_hashed: Vec<u8>,
+        types: Vec<u16>,
+    },
+    Nsec3Param {
+        hash_alg: u8,
+        flags: u8,
+        iterations: u16,
+        salt: Vec<u8>,
+    },
+    Dnskey {
+        flags: u16,
+        protocol: u8,
+        algorithm: u8,
+        key: Vec<u8>,
     },
     Other(Vec<u8>),
 }
@@ -166,6 +270,9 @@ pub const MAX_DECODED_NAME_BYTES: usize = 256 * 1024;
 /// N empty strings. The bytes are bounded by RDLENGTH; the per-string overhead
 /// is not, and left uncharged it amplified 17 MB of input into 656 MB. Charge
 /// each string its header as well as its length.
+/// A signature, a digest or a public key is another unbounded allocation, and a
+/// type bit map turns 34 octets into 256 of them, so every owned byte a record
+/// type decodes to is charged, not only its names.
 pub fn decoded_name_bytes(rr: &ResourceRecord) -> usize {
     rr.rrname.len()
         + match &rr.rdata {
@@ -176,8 +283,49 @@ pub fn decoded_name_bytes(rr: &ResourceRecord) -> usize {
                 .iter()
                 .map(|t| t.len() + std::mem::size_of::<String>())
                 .sum(),
-            _ => 0,
+            RData::Srv { target, .. } => target.len(),
+            RData::Caa { tag, value, .. } => tag.len() + value.len(),
+            RData::Opt(opts) => opts
+                .iter()
+                .map(|o| o.data.len() + std::mem::size_of::<EdnsOption>())
+                .sum(),
+            RData::Ds { digest, .. } => digest.len(),
+            RData::Rrsig {
+                signer, signature, ..
+            } => signer.len() + signature.len(),
+            RData::Nsec { next, types } => next.len() + 2 * types.len(),
+            RData::Nsec3 {
+                salt,
+                next_hashed,
+                types,
+                ..
+            } => salt.len() + next_hashed.len() + 2 * types.len(),
+            RData::Nsec3Param { salt, .. } => salt.len(),
+            RData::Dnskey { key, .. } => key.len(),
+            RData::A(_) | RData::Aaaa(_) | RData::Other(_) => 0,
         }
+}
+
+impl ResourceRecord {
+    /// RFC 6891 §6.1.3.
+    pub fn edns(&self) -> Option<Edns> {
+        if self.rtype != rtype::OPT {
+            return None;
+        }
+        Some(Edns {
+            udpsize: self.rclass,
+            ext_rcode: (self.ttl >> 24) as u8,
+            version: (self.ttl >> 16) as u8,
+            dnssec_ok: self.ttl & 0x8000 != 0,
+            z: (self.ttl & 0x7fff) as u16,
+        })
+    }
+}
+
+/// RFC 6891 §6.1.3: the header's four-bit RCODE is the low half of a twelve-bit
+/// code whose upper eight bits the OPT record carries.
+pub fn extended_rcode(header_rcode: u8, ext: u8) -> u16 {
+    ((ext as u16) << 4) | (header_rcode & 0x0f) as u16
 }
 
 fn be16(b: &[u8], off: usize) -> Option<u16> {
@@ -233,12 +381,29 @@ fn read_name(msg: &[u8], pos: usize) -> Option<(String, usize)> {
         }
     }
 
-    let name = labels
-        .iter()
-        .map(|l| String::from_utf8_lossy(l))
-        .collect::<Vec<_>>()
-        .join(".");
-    Some((name, end?))
+    Some((render(&labels), end?))
+}
+
+/// RFC 1035 §5.1 presentation form: every label is closed by a dot, so the root
+/// is "." and a fully qualified name ends in one. A dot or a backslash inside a
+/// label is escaped, since RFC 4343 §2.1 allows both and neither separates
+/// labels.
+fn render(labels: &[&[u8]]) -> String {
+    let mut out = String::with_capacity(labels.iter().map(|l| l.len() + 1).sum());
+    if labels.is_empty() {
+        out.push('.');
+        return out;
+    }
+    for l in labels {
+        for c in String::from_utf8_lossy(l).chars() {
+            if c == '.' || c == '\\' {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out.push('.');
+    }
+    out
 }
 
 /// A name reaching past its own RDATA means a malformed RDLENGTH.
@@ -313,8 +478,174 @@ fn decode_rdata(msg: &[u8], rtype: u16, start: usize, end: usize) -> RData {
         },
         rtype::TXT => decode_txt(raw).map_or_else(other, RData::Txt),
         rtype::SOA => decode_soa(msg, start, end).unwrap_or_else(other),
+        rtype::SRV => decode_srv(msg, start, end).unwrap_or_else(other),
+        rtype::CAA => decode_caa(raw).unwrap_or_else(other),
+        rtype::OPT => decode_opt(raw).map_or_else(other, RData::Opt),
+        rtype::DS => decode_ds(raw).unwrap_or_else(other),
+        rtype::RRSIG => decode_rrsig(msg, start, end).unwrap_or_else(other),
+        rtype::NSEC => decode_nsec(msg, start, end).unwrap_or_else(other),
+        rtype::NSEC3 => decode_nsec3(raw).unwrap_or_else(other),
+        rtype::NSEC3PARAM => decode_nsec3param(raw).unwrap_or_else(other),
+        rtype::DNSKEY => decode_dnskey(raw).unwrap_or_else(other),
         _ => other(),
     }
+}
+
+/// RFC 2782.
+fn decode_srv(msg: &[u8], start: usize, end: usize) -> Option<RData> {
+    if start + 6 > end {
+        return None;
+    }
+    let (target, _) = read_name_within(msg, start + 6, end)?;
+    Some(RData::Srv {
+        priority: be16(msg, start)?,
+        weight: be16(msg, start + 2)?,
+        port: be16(msg, start + 4)?,
+        target,
+    })
+}
+
+/// RFC 8659 §4.1.
+fn decode_caa(raw: &[u8]) -> Option<RData> {
+    let flags = *raw.first()?;
+    let taglen = *raw.get(1)? as usize;
+    let tag = raw.get(2..2 + taglen)?;
+    let value = raw.get(2 + taglen..)?;
+    Some(RData::Caa {
+        flags,
+        tag: String::from_utf8_lossy(tag).into_owned(),
+        value: String::from_utf8_lossy(value).into_owned(),
+    })
+}
+
+/// RFC 6891 §6.1.2.
+fn decode_opt(raw: &[u8]) -> Option<Vec<EdnsOption>> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i + 4 <= raw.len() {
+        let len = be16(raw, i + 2)? as usize;
+        let start = i + 4;
+        let stop = start.checked_add(len)?;
+        out.push(EdnsOption {
+            code: be16(raw, i)?,
+            data: raw.get(start..stop)?.to_vec(),
+        });
+        i = stop;
+    }
+    (i == raw.len()).then_some(out)
+}
+
+/// RFC 4034 §5.1.
+fn decode_ds(raw: &[u8]) -> Option<RData> {
+    Some(RData::Ds {
+        keytag: be16(raw, 0)?,
+        algorithm: *raw.get(2)?,
+        digest_type: *raw.get(3)?,
+        digest: raw.get(4..)?.to_vec(),
+    })
+}
+
+/// RFC 4034 §2.1.
+fn decode_dnskey(raw: &[u8]) -> Option<RData> {
+    Some(RData::Dnskey {
+        flags: be16(raw, 0)?,
+        protocol: *raw.get(2)?,
+        algorithm: *raw.get(3)?,
+        key: raw.get(4..)?.to_vec(),
+    })
+}
+
+/// RFC 4034 §3.1. The signer's name is never compressed there, but reading it
+/// with the general walker costs nothing and stays bounded either way.
+fn decode_rrsig(msg: &[u8], start: usize, end: usize) -> Option<RData> {
+    if start + 18 > end {
+        return None;
+    }
+    let (signer, pos) = read_name_within(msg, start + 18, end)?;
+    Some(RData::Rrsig {
+        type_covered: be16(msg, start)?,
+        algorithm: *msg.get(start + 2)?,
+        labels: *msg.get(start + 3)?,
+        original_ttl: be32(msg, start + 4)?,
+        expiration: be32(msg, start + 8)?,
+        inception: be32(msg, start + 12)?,
+        keytag: be16(msg, start + 16)?,
+        signer,
+        signature: msg.get(pos..end)?.to_vec(),
+    })
+}
+
+/// RFC 4034 §4.1.
+fn decode_nsec(msg: &[u8], start: usize, end: usize) -> Option<RData> {
+    let (next, pos) = read_name_within(msg, start, end)?;
+    Some(RData::Nsec {
+        next,
+        types: decode_type_bitmap(msg.get(pos..end)?)?,
+    })
+}
+
+/// The four fields and the salt RFC 5155 §3.2 and §4.2 share, plus the offset
+/// just past them.
+fn nsec3_prefix(raw: &[u8]) -> Option<(u8, u8, u16, &[u8], usize)> {
+    let saltlen = *raw.get(4)? as usize;
+    let salt = raw.get(5..5 + saltlen)?;
+    Some((raw[0], raw[1], be16(raw, 2)?, salt, 5 + saltlen))
+}
+
+/// RFC 5155 §3.2.
+fn decode_nsec3(raw: &[u8]) -> Option<RData> {
+    let (hash_alg, flags, iterations, salt, pos) = nsec3_prefix(raw)?;
+    let hashlen = *raw.get(pos)? as usize;
+    let at = pos + 1;
+    let next_hashed = raw.get(at..at + hashlen)?;
+    Some(RData::Nsec3 {
+        hash_alg,
+        flags,
+        iterations,
+        salt: salt.to_vec(),
+        next_hashed: next_hashed.to_vec(),
+        types: decode_type_bitmap(raw.get(at + hashlen..)?)?,
+    })
+}
+
+/// RFC 5155 §4.2.
+fn decode_nsec3param(raw: &[u8]) -> Option<RData> {
+    let (hash_alg, flags, iterations, salt, pos) = nsec3_prefix(raw)?;
+    if pos != raw.len() {
+        return None;
+    }
+    Some(RData::Nsec3Param {
+        hash_alg,
+        flags,
+        iterations,
+        salt: salt.to_vec(),
+    })
+}
+
+/// RFC 4034 §4.1.2: windows of 256 types each, a window number and a bitmap of
+/// one to thirty-two octets. Every block advances at least three octets, so the
+/// walk is finite on any input.
+fn decode_type_bitmap(raw: &[u8]) -> Option<Vec<u16>> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i + 2 <= raw.len() {
+        let window = raw[i] as u16;
+        let len = raw[i + 1] as usize;
+        if len == 0 || len > 32 {
+            return None;
+        }
+        let stop = i + 2 + len;
+        let bits = raw.get(i + 2..stop)?;
+        for (k, b) in bits.iter().enumerate() {
+            for bit in 0..8u16 {
+                if b & (0x80 >> bit) != 0 {
+                    out.push((window << 8) | (k as u16 * 8 + bit));
+                }
+            }
+        }
+        i = stop;
+    }
+    (i == raw.len()).then_some(out)
 }
 
 /// RFC 1035 §3.3.14: one or more length-prefixed <character-string>s.
@@ -510,6 +841,122 @@ mod tests {
         assert_eq!(p.get(d, "id").unwrap(), FieldValue::Uint(0xabcd));
     }
 
+    /// RFC 9293 §3.1 header with both ports 53, then RFC 1035 §4.2.2 framing.
+    fn tcp_dns(msg: &[u8], claimed: u16) -> Vec<u8> {
+        let mut v = vec![0x00, 0x35, 0x00, 0x35];
+        v.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 0]);
+        v.extend_from_slice(&[0x50, 0x10, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        v.extend_from_slice(&claimed.to_be_bytes());
+        v.extend_from_slice(msg);
+        v
+    }
+
+    #[test]
+    fn the_stream_length_prefix_is_a_field_and_the_header_follows_it() {
+        let msg = query();
+        let p = Packet::dissect(tcp_dns(&msg, msg.len() as u16), ProtoId::Tcp);
+        let d = p.find_layer(ProtoId::Dns).expect("dns over tcp");
+        assert_eq!(p.header(d).len(), 14);
+        assert_eq!(p.framing(d), 2);
+        assert_eq!(p.get(d, "length").unwrap(), FieldValue::Uint(23));
+        assert_eq!(p.get(d, "id").unwrap(), FieldValue::Uint(0xabcd));
+        assert_eq!(p.get(d, "rd").unwrap(), FieldValue::Uint(1));
+        assert_eq!(p.get(d, "qdcount").unwrap(), FieldValue::Uint(1));
+
+        let mut udp = vec![0x30, 0x39, 0x00, 0x35, 0x00, 0x00, 0x00, 0x00];
+        udp.extend_from_slice(&msg);
+        let u = Packet::dissect(udp, ProtoId::Udp);
+        let ud = u.find_layer(ProtoId::Dns).unwrap();
+        assert_eq!(u.header(ud).len(), 12);
+        assert_eq!(u.get(ud, "length"), None);
+        assert_eq!(u.get(ud, "id").unwrap(), FieldValue::Uint(0xabcd));
+    }
+
+    #[test]
+    fn records_are_read_past_the_stream_prefix() {
+        let mut msg = header(1, 1, 0, 0);
+        msg.extend_from_slice(&question(&name(&["example", "com"]), rtype::A, 1));
+        msg.extend_from_slice(&record(&[0xc0, 0x0c], rtype::A, 1, 60, &[93, 184, 216, 34]));
+        let p = Packet::dissect(tcp_dns(&msg, msg.len() as u16), ProtoId::Tcp);
+        let d = p.find_layer(ProtoId::Dns).unwrap();
+        // Compression counts from the message, not from the prefix: reading
+        // from the wrong origin decodes 0xc00c as the two octets before it.
+        let r = parse_records(p.framed_body(d));
+        assert_eq!(r.qd[0].qname, "example.com.");
+        assert_eq!(r.an[0].rrname, "example.com.");
+        assert_eq!(r.an[0].rdata, RData::A([93, 184, 216, 34]));
+    }
+
+    #[test]
+    fn a_stream_message_round_trips_and_its_length_is_recomputed() {
+        let msg = query();
+        let wire = tcp_dns(&msg, msg.len() as u16);
+        let mut p = Packet::dissect(wire.clone(), ProtoId::Tcp);
+        assert_eq!(p.to_bytes(), &wire[..]);
+
+        // A prefix over-claiming the segment is corrected once anything is
+        // written; one under-claiming it is a second message's framing.
+        let mut bad = Packet::dissect(tcp_dns(&msg, 9999), ProtoId::Tcp);
+        let d = bad.find_layer(ProtoId::Dns).unwrap();
+        assert!(bad.set_uint(d, "id", 1));
+        let _ = bad.to_bytes();
+        assert_eq!(bad.get(d, "length").unwrap(), FieldValue::Uint(23));
+
+        let mut pinned = Packet::dissect(tcp_dns(&msg, 23), ProtoId::Tcp);
+        assert!(pinned.set_uint(d, "length", 4));
+        let _ = pinned.to_bytes();
+        assert_eq!(pinned.get(d, "length").unwrap(), FieldValue::Uint(4));
+    }
+
+    /// A segment holding two messages dissects the first and leaves the rest as
+    /// payload, so recomputing the prefix over all of it would relabel the
+    /// second message as part of the first.
+    #[test]
+    fn a_second_message_in_the_segment_keeps_its_own_framing() {
+        let msg = query();
+        let mut two = msg.clone();
+        two.extend_from_slice(&(msg.len() as u16).to_be_bytes());
+        two.extend_from_slice(&msg);
+        let wire = tcp_dns(&two, msg.len() as u16);
+
+        let mut p = Packet::dissect(wire.clone(), ProtoId::Tcp);
+        assert_eq!(p.to_bytes(), &wire[..]);
+
+        // A write anywhere in the packet runs the whole recompute pass.
+        let mut p = Packet::dissect(wire.clone(), ProtoId::Tcp);
+        let ip = p.find_layer(ProtoId::Tcp).unwrap();
+        assert!(p.set_uint(ip, "window", 4096));
+        let d = p.find_layer(ProtoId::Dns).unwrap();
+        let out = p.to_bytes().to_vec();
+        assert_eq!(p.get(d, "length").unwrap(), FieldValue::Uint(23));
+        assert_eq!(&out[out.len() - two.len()..], &two[..]);
+    }
+
+    #[test]
+    fn a_stream_message_builds_with_room_for_its_prefix() {
+        let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Tcp, ProtoId::Dns]);
+        assert_eq!(p.header(2).len(), 14);
+        assert_eq!(p.get(1, "dport").unwrap(), FieldValue::Uint(53));
+        let bytes = p.to_bytes().to_vec();
+        assert_eq!(bytes.len(), 20 + 20 + 14);
+
+        let back = Packet::dissect(bytes, ProtoId::Ipv4);
+        let got: Vec<_> = back.layers().iter().map(|s| s.proto).collect();
+        assert_eq!(got, vec![ProtoId::Ipv4, ProtoId::Tcp, ProtoId::Dns]);
+        assert_eq!(back.get(2, "length").unwrap(), FieldValue::Uint(12));
+        assert_eq!(back.get(2, "qdcount").unwrap(), FieldValue::Uint(1));
+    }
+
+    #[test]
+    fn a_stream_message_too_short_for_the_prefix_stays_raw() {
+        let msg = query();
+        for n in 0..14usize {
+            let p = Packet::dissect(tcp_dns(&msg[..n.min(msg.len())], 0), ProtoId::Tcp);
+            let d = p.find_layer(ProtoId::Dns);
+            assert_eq!(d.is_some(), n >= 14 - 2, "{n} octets");
+        }
+    }
+
     #[test]
     fn build_defaults_match_a_recursive_query() {
         let p = Packet::build(&[ProtoId::Dns]);
@@ -565,7 +1012,7 @@ mod tests {
         ];
         let r = parse_records(&msg);
         assert_eq!(r.qd.len(), 1);
-        assert_eq!(r.qd[0].qname, "example.com");
+        assert_eq!(r.qd[0].qname, "example.com.");
         assert_eq!(r.qd[0].qtype, rtype::A);
         assert_eq!(r.qd[0].qclass, 1);
         assert!(r.an.is_empty() && r.ns.is_empty() && r.ar.is_empty());
@@ -583,7 +1030,7 @@ mod tests {
         assert_eq!(r.qd.len(), 1);
         assert_eq!(r.an.len(), 1);
         let a = &r.an[0];
-        assert_eq!(a.rrname, "example.com");
+        assert_eq!(a.rrname, "example.com.");
         assert_eq!(a.rtype, rtype::A);
         assert_eq!(a.rclass, 1);
         assert_eq!(a.ttl, 300);
@@ -597,7 +1044,7 @@ mod tests {
         msg.extend_from_slice(&question(&name(&["example", "com"]), rtype::A, 1));
         msg.extend_from_slice(&record(&[0xc0, 0x0c], rtype::A, 1, 60, &[93, 184, 216, 34]));
         let r = parse_records(&msg);
-        assert_eq!(r.qd[0].qname, "example.com");
+        assert_eq!(r.qd[0].qname, "example.com.");
         assert_eq!(r.an[0].rrname, r.qd[0].qname);
         assert_eq!(r.an[0].ttl, 60);
         assert_eq!(r.an[0].rdata, RData::A([93, 184, 216, 34]));
@@ -607,7 +1054,7 @@ mod tests {
         let nm = [0x03, b'w', b'w', b'w', 0xc0, 0x0c];
         msg2.extend_from_slice(&record(&nm, rtype::A, 1, 60, &[1, 2, 3, 4]));
         let r2 = parse_records(&msg2);
-        assert_eq!(r2.an[0].rrname, "www.example.com");
+        assert_eq!(r2.an[0].rrname, "www.example.com.");
     }
 
     #[test]
@@ -633,7 +1080,7 @@ mod tests {
         }
         assert_eq!(
             read_name(&chain, 16 + 2 * 9),
-            Some(("a".to_string(), 16 + 2 * 9 + 2))
+            Some(("a.".to_string(), 16 + 2 * 9 + 2))
         );
         assert_eq!(read_name(&chain, 16 + 2 * 99), None);
     }
@@ -678,8 +1125,8 @@ mod tests {
         msg.extend_from_slice(&record(&name(&["example", "com"]), rtype::AAAA, 1, 60, &v6));
         let r = parse_records(&msg);
         assert_eq!(r.an.len(), 2);
-        assert_eq!(r.an[0].rrname, "www.example.com");
-        assert_eq!(r.an[0].rdata, RData::Name("example.com".to_string()));
+        assert_eq!(r.an[0].rrname, "www.example.com.");
+        assert_eq!(r.an[0].rdata, RData::Name("example.com.".to_string()));
         assert_eq!(r.an[0].ttl, 3600);
         assert_eq!(r.an[1].rdata, RData::Aaaa(v6));
     }
@@ -700,7 +1147,7 @@ mod tests {
             r.an[0].rdata,
             RData::Mx {
                 pref: 10,
-                exchange: "mail.example.com".to_string(),
+                exchange: "mail.example.com.".to_string(),
             }
         );
         assert_eq!(
@@ -726,12 +1173,12 @@ mod tests {
         let r = parse_records(&msg);
         assert!(r.an.is_empty());
         assert_eq!(r.ns.len(), 1);
-        assert_eq!(r.ns[0].rrname, "example.com");
+        assert_eq!(r.ns[0].rrname, "example.com.");
         assert_eq!(
             r.ns[0].rdata,
             RData::Soa {
-                mname: "ns1.example.com".to_string(),
-                rname: "hostmaster.example.com".to_string(),
+                mname: "ns1.example.com.".to_string(),
+                rname: "hostmaster.example.com.".to_string(),
                 serial: 2024010101,
                 refresh: 7200,
                 retry: 3600,
@@ -776,8 +1223,8 @@ mod tests {
         assert_eq!(r.an.len(), 1);
         assert_eq!(r.ns.len(), 1);
         assert_eq!(r.ar.len(), 2);
-        assert_eq!(r.an[0].rdata, RData::Name("ptr.example.com".to_string()));
-        assert_eq!(r.ns[0].rdata, RData::Name("ns1.example.com".to_string()));
+        assert_eq!(r.an[0].rdata, RData::Name("ptr.example.com.".to_string()));
+        assert_eq!(r.ns[0].rdata, RData::Name("ns1.example.com.".to_string()));
         assert_eq!(r.ar[0].rdata, RData::A([192, 0, 2, 1]));
         assert_eq!(r.ar[1].rdata, RData::Other(b"\x02hi".to_vec()));
     }
@@ -815,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn root_name_renders_as_the_empty_string() {
+    fn root_name_renders_as_a_lone_dot() {
         let msg = {
             let mut m = header(1, 0, 0, 0);
             m.extend_from_slice(&[0x00, 0x00, 0x02, 0x00, 0x01]);
@@ -823,7 +1270,7 @@ mod tests {
         };
         let r = parse_records(&msg);
         assert_eq!(r.qd.len(), 1);
-        assert_eq!(r.qd[0].qname, "");
+        assert_eq!(r.qd[0].qname, ".");
         assert_eq!(r.qd[0].qtype, rtype::NS);
     }
 
@@ -915,6 +1362,284 @@ mod tests {
                 .map(decoded_name_bytes)
                 .sum::<usize>();
         assert!(decoded * 1000 < MAX_DECODED_NAME_BYTES);
+    }
+
+    #[test]
+    fn a_dot_inside_a_label_is_escaped_not_read_as_a_separator() {
+        // RFC 4343 §2.1: "a.b" is one label, "a" then "b" is two.
+        let mut one = header(2, 0, 0, 0);
+        one.extend_from_slice(&question(b"\x03a.b\x03com\x00", rtype::A, 1));
+        one.extend_from_slice(&question(&name(&["a", "b", "com"]), rtype::A, 1));
+        let r = parse_records(&one);
+        assert_eq!(r.qd[0].qname, "a\\.b.com.");
+        assert_eq!(r.qd[1].qname, "a.b.com.");
+        assert_ne!(r.qd[0].qname, r.qd[1].qname);
+
+        let mut back = header(1, 0, 0, 0);
+        back.extend_from_slice(&question(b"\x03a\\b\x00", rtype::A, 1));
+        assert_eq!(parse_records(&back).qd[0].qname, "a\\\\b.");
+    }
+
+    #[test]
+    fn decodes_an_opt_pseudo_record() {
+        // RFC 6891 §6.1.2: root name, class is the UDP payload size, TTL holds
+        // the extended RCODE, version and DO bit.
+        let mut rdata = Vec::new();
+        rdata.extend_from_slice(&10u16.to_be_bytes());
+        rdata.extend_from_slice(&8u16.to_be_bytes());
+        rdata.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        rdata.extend_from_slice(&3u16.to_be_bytes());
+        rdata.extend_from_slice(&2u16.to_be_bytes());
+        rdata.extend_from_slice(b"hi");
+
+        let mut msg = header(0, 0, 0, 1);
+        msg.extend_from_slice(&record(&[0x00], rtype::OPT, 4096, 0x0100_8000, &rdata));
+        let r = parse_records(&msg);
+        let opt = &r.ar[0];
+        assert_eq!(opt.rrname, ".");
+        assert_eq!(
+            opt.rdata,
+            RData::Opt(vec![
+                EdnsOption {
+                    code: 10,
+                    data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+                },
+                EdnsOption {
+                    code: 3,
+                    data: b"hi".to_vec(),
+                },
+            ])
+        );
+        let e = opt.edns().expect("OPT carries EDNS fields");
+        assert_eq!(e.udpsize, 4096);
+        assert_eq!(e.ext_rcode, 1);
+        assert_eq!(e.version, 0);
+        assert!(e.dnssec_ok);
+        assert_eq!(e.z, 0);
+        assert_eq!(extended_rcode(3, e.ext_rcode), 0x13);
+        assert_eq!(ednsopt_name(10), "COOKIE");
+        assert_eq!(ednsopt_name(0), "UNKNOWN");
+
+        let mut bare = header(0, 0, 0, 1);
+        bare.extend_from_slice(&record(&[0x00], rtype::OPT, 1232, 0, &[]));
+        assert_eq!(parse_records(&bare).ar[0].rdata, RData::Opt(vec![]));
+        assert!(!parse_records(&bare).ar[0].edns().unwrap().dnssec_ok);
+
+        let mut bad = header(0, 0, 0, 1);
+        bad.extend_from_slice(&record(&[0x00], rtype::OPT, 512, 0, &[0, 3, 0, 9, 1]));
+        assert!(matches!(parse_records(&bad).ar[0].rdata, RData::Other(_)));
+        assert!(parse_records(&header(0, 0, 0, 0)).ar.is_empty());
+    }
+
+    /// RFC 4034 §4.1.2 type bit maps: window 0, two octets, A and NS set.
+    const NSEC_TYPES: &[u8] = &[0x00, 0x02, 0x60, 0x00];
+
+    #[test]
+    fn decodes_the_dnssec_record_types() {
+        let mut ds = 12345u16.to_be_bytes().to_vec();
+        ds.extend_from_slice(&[8, 2]);
+        ds.extend_from_slice(&[0xab; 32]);
+
+        let mut key = 257u16.to_be_bytes().to_vec();
+        key.extend_from_slice(&[3, 8]);
+        key.extend_from_slice(b"public key bytes");
+
+        let mut sig = Vec::new();
+        sig.extend_from_slice(&rtype::A.to_be_bytes());
+        sig.extend_from_slice(&[8, 2]);
+        sig.extend_from_slice(&3600u32.to_be_bytes());
+        sig.extend_from_slice(&1700000000u32.to_be_bytes());
+        sig.extend_from_slice(&1690000000u32.to_be_bytes());
+        sig.extend_from_slice(&12345u16.to_be_bytes());
+        sig.extend_from_slice(&name(&["example", "com"]));
+        sig.extend_from_slice(b"SIGNATURE");
+
+        let mut nsec = name(&["next", "example", "com"]);
+        nsec.extend_from_slice(NSEC_TYPES);
+
+        let mut nsec3 = vec![1, 0];
+        nsec3.extend_from_slice(&12u16.to_be_bytes());
+        nsec3.push(4);
+        nsec3.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        nsec3.push(5);
+        nsec3.extend_from_slice(b"HASHD");
+        nsec3.extend_from_slice(NSEC_TYPES);
+
+        let mut param = vec![1, 0];
+        param.extend_from_slice(&12u16.to_be_bytes());
+        param.push(4);
+        param.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+
+        let zone = name(&["example", "com"]);
+        let mut msg = header(0, 6, 0, 0);
+        msg.extend_from_slice(&record(&zone, rtype::DS, 1, 3600, &ds));
+        msg.extend_from_slice(&record(&zone, rtype::DNSKEY, 1, 3600, &key));
+        msg.extend_from_slice(&record(&zone, rtype::RRSIG, 1, 3600, &sig));
+        msg.extend_from_slice(&record(&zone, rtype::NSEC, 1, 3600, &nsec));
+        msg.extend_from_slice(&record(&zone, rtype::NSEC3, 1, 3600, &nsec3));
+        msg.extend_from_slice(&record(&zone, rtype::NSEC3PARAM, 1, 3600, &param));
+
+        let r = parse_records(&msg);
+        assert_eq!(r.an.len(), 6);
+        assert_eq!(
+            r.an[0].rdata,
+            RData::Ds {
+                keytag: 12345,
+                algorithm: 8,
+                digest_type: 2,
+                digest: vec![0xab; 32],
+            }
+        );
+        assert_eq!(
+            r.an[1].rdata,
+            RData::Dnskey {
+                flags: 257,
+                protocol: 3,
+                algorithm: 8,
+                key: b"public key bytes".to_vec(),
+            }
+        );
+        assert_eq!(
+            r.an[2].rdata,
+            RData::Rrsig {
+                type_covered: rtype::A,
+                algorithm: 8,
+                labels: 2,
+                original_ttl: 3600,
+                expiration: 1700000000,
+                inception: 1690000000,
+                keytag: 12345,
+                signer: "example.com.".to_string(),
+                signature: b"SIGNATURE".to_vec(),
+            }
+        );
+        assert_eq!(
+            r.an[3].rdata,
+            RData::Nsec {
+                next: "next.example.com.".to_string(),
+                types: vec![rtype::A, rtype::NS],
+            }
+        );
+        assert_eq!(
+            r.an[4].rdata,
+            RData::Nsec3 {
+                hash_alg: 1,
+                flags: 0,
+                iterations: 12,
+                salt: vec![0xde, 0xad, 0xbe, 0xef],
+                next_hashed: b"HASHD".to_vec(),
+                types: vec![rtype::A, rtype::NS],
+            }
+        );
+        assert_eq!(
+            r.an[5].rdata,
+            RData::Nsec3Param {
+                hash_alg: 1,
+                flags: 0,
+                iterations: 12,
+                salt: vec![0xde, 0xad, 0xbe, 0xef],
+            }
+        );
+    }
+
+    #[test]
+    fn decodes_srv_and_caa() {
+        let mut srv = Vec::new();
+        srv.extend_from_slice(&10u16.to_be_bytes());
+        srv.extend_from_slice(&5u16.to_be_bytes());
+        srv.extend_from_slice(&443u16.to_be_bytes());
+        srv.extend_from_slice(&name(&["host", "example", "com"]));
+
+        let caa = b"\x00\x05issueca.example.net".to_vec();
+
+        let mut msg = header(0, 2, 0, 0);
+        msg.extend_from_slice(&record(&name(&["example", "com"]), rtype::SRV, 1, 60, &srv));
+        msg.extend_from_slice(&record(&name(&["example", "com"]), rtype::CAA, 1, 60, &caa));
+        let r = parse_records(&msg);
+        assert_eq!(
+            r.an[0].rdata,
+            RData::Srv {
+                priority: 10,
+                weight: 5,
+                port: 443,
+                target: "host.example.com.".to_string(),
+            }
+        );
+        assert_eq!(
+            r.an[1].rdata,
+            RData::Caa {
+                flags: 0,
+                tag: "issue".to_string(),
+                value: "ca.example.net".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn a_malformed_dnssec_record_keeps_its_raw_rdata() {
+        let zone = name(&["example", "com"]);
+        let mut msg = header(0, 5, 0, 0);
+        // Each one is too short for its own fixed part, or has a bit map block
+        // longer than the 32 octets RFC 4034 §4.1.2 allows.
+        msg.extend_from_slice(&record(&zone, rtype::DS, 1, 60, &[1, 2, 3]));
+        msg.extend_from_slice(&record(&zone, rtype::DNSKEY, 1, 60, &[1, 2]));
+        msg.extend_from_slice(&record(&zone, rtype::RRSIG, 1, 60, &[0; 10]));
+        msg.extend_from_slice(&record(&zone, rtype::NSEC3, 1, 60, &[1, 0, 0, 12, 9, 1]));
+        let mut wide = name(&["x"]);
+        wide.extend_from_slice(&[0x00, 0x40]);
+        wide.extend_from_slice(&[0xff; 64]);
+        msg.extend_from_slice(&record(&zone, rtype::NSEC, 1, 60, &wide));
+
+        let r = parse_records(&msg);
+        assert_eq!(r.an.len(), 5);
+        for rr in &r.an {
+            assert!(
+                matches!(rr.rdata, RData::Other(_)),
+                "{} decoded {:?}",
+                rtype_name(rr.rtype),
+                rr.rdata
+            );
+        }
+    }
+
+    #[test]
+    fn the_budget_charges_what_the_new_record_types_allocate() {
+        let full: Vec<u8> = (0..=255u16)
+            .flat_map(|w| [w as u8, 32].into_iter().chain([0xffu8; 32]))
+            .collect();
+        let mut nsec = name(&["a"]);
+        nsec.extend_from_slice(&full);
+
+        // 8,704 octets of bit map decode to 65,536 type numbers: a 15x
+        // amplification, so eight records outrun the whole budget.
+        let n = 8u16;
+        let mut msg = header(0, n, 0, 0);
+        for _ in 0..n {
+            msg.extend_from_slice(&record(&[0], rtype::NSEC, 1, 0, &nsec));
+        }
+        let r = parse_records(&msg);
+        let decoded: usize = r.an.iter().map(decoded_name_bytes).sum();
+        assert!(decoded <= MAX_DECODED_NAME_BYTES, "decoded {decoded} bytes");
+        assert!(r.an.len() < n as usize, "the budget stopped nothing");
+        assert_eq!(
+            r.an[0].rdata,
+            RData::Nsec {
+                next: "a.".to_string(),
+                types: (0..=0xffffu32).map(|t| t as u16).collect(),
+            }
+        );
+
+        let mut sig = vec![0u8; 18];
+        sig.push(0);
+        sig.extend_from_slice(&[0x5a; 60000]);
+        let mut sigs = header(0, 20, 0, 0);
+        for _ in 0..20 {
+            sigs.extend_from_slice(&record(&[0], rtype::RRSIG, 1, 0, &sig));
+        }
+        let r = parse_records(&sigs);
+        let decoded: usize = r.an.iter().map(decoded_name_bytes).sum();
+        assert!(decoded <= MAX_DECODED_NAME_BYTES, "decoded {decoded} bytes");
+        assert!(r.an.len() < 20, "signatures escaped the budget");
     }
 
     #[test]

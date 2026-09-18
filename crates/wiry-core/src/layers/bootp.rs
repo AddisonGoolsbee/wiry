@@ -11,6 +11,12 @@ use crate::proto::{Next, ProtoDesc, ProtoId};
 /// RFC 951 §3: `file` ends at 108 + 128.
 const BOOTP_LEN: usize = 236;
 
+/// RFC 951 §3 field positions, which RFC 2131 §4.1 lets options take over.
+const SNAME_AT: usize = 44;
+const SNAME_LEN: usize = 64;
+const FILE_AT: usize = 108;
+const FILE_LEN: usize = 128;
+
 /// RFC 2131 §3 / RFC 1497: 99.130.83.99 in network order.
 pub const MAGIC_COOKIE: [u8; 4] = [99, 130, 83, 99];
 
@@ -33,8 +39,8 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::ipv4("siaddr", 160, 0),
     FieldDesc::ipv4("giaddr", 192, 0),
     FieldDesc::bytes("chaddr", 224, 128),
-    FieldDesc::bytes("sname", 352, 512),
-    FieldDesc::bytes("file", 864, 1024),
+    FieldDesc::bytes("sname", (SNAME_AT * 8) as u16, (SNAME_LEN * 8) as u16),
+    FieldDesc::bytes("file", (FILE_AT * 8) as u16, (FILE_LEN * 8) as u16),
     // RFC 2131 §3: the magic cookie opens the option area, which belongs to
     // BOOTP. The DHCP layer starts at the first option.
     FieldDesc::var_bytes("options", (BOOTP_LEN * 8) as u16),
@@ -120,6 +126,33 @@ static MSGTYPE_NAMES: &[(&str, u64)] = &[
 const PAD: u8 = 0;
 const END: u8 = 255;
 
+/// RFC 2132 §9.3.
+const OVERLOAD: u8 = 52;
+
+/// RFC 2131 §4.1: `file` holds options, `sname` does, or both do.
+mod overload {
+    pub const FILE: u8 = 1;
+    pub const SNAME: u8 = 2;
+}
+
+/// RFC 3046 §2. Sub-options count only their own data, as RFC 2132 options do,
+/// and the region ends with the enclosing option rather than with a code.
+pub static RELAY_OPTIONS: OptTable = OptTable {
+    proto: "DHCP relay agent",
+    rule: LenRule::PayloadOnly,
+    end: None,
+    opts: &[
+        OptDesc::new("agent_circuit_id", 1, Shape::Bytes),
+        OptDesc::new("agent_remote_id", 2, Shape::Bytes),
+        // RFC 3993 §4, RFC 3527 §4, RFC 4243 §4, RFC 5010 §2.
+        OptDesc::new("subscriber_id", 6, Shape::Text),
+        OptDesc::new("link_selection", 5, Shape::Ipv4List),
+        OptDesc::new("vendor_specific", 9, Shape::Bytes),
+        OptDesc::new("relay_agent_flags", 10, Shape::LooseUint(1)),
+        OptDesc::new("server_id_override", 11, Shape::Ipv4List),
+    ],
+};
+
 /// The option area itself; the cookie belongs to BOOTP.
 pub static DHCP_OPTIONS: OptTable = OptTable {
     proto: "DHCP",
@@ -135,6 +168,7 @@ pub static DHCP_OPTIONS: OptTable = OptTable {
         OptDesc::new("broadcast_address", 28, Shape::Ipv4List),
         OptDesc::new("requested_addr", 50, Shape::Ipv4List),
         OptDesc::new("lease_time", 51, Shape::LooseUint(4)),
+        OptDesc::new("overload", OVERLOAD, Shape::LooseUint(1)),
         OptDesc::new("message-type", 53, Shape::LooseUint(1)).with_names(MSGTYPE_NAMES),
         OptDesc::new("server_id", 54, Shape::Ipv4List),
         OptDesc::new("param_req_list", 55, Shape::Bytes),
@@ -142,13 +176,60 @@ pub static DHCP_OPTIONS: OptTable = OptTable {
         OptDesc::new("renewal_time", 58, Shape::LooseUint(4)),
         OptDesc::new("rebinding_time", 59, Shape::LooseUint(4)),
         OptDesc::new("client_id", 61, Shape::Bytes),
-        OptDesc::new("relay_agent_information", 82, Shape::Bytes),
+        OptDesc::new("relay_agent_information", 82, Shape::Bytes).nesting(&RELAY_OPTIONS),
         OptDesc::new("end", END, Shape::Bare),
     ],
 };
 
 fn parse_options(data: &[u8]) -> Vec<Item> {
     DHCP_OPTIONS.walk(data)
+}
+
+/// RFC 3396 §4 puts `file` before `sname`, which is the order a split value is
+/// joined in.
+pub fn overload_regions(tlvs: &[(u8, &[u8])]) -> Vec<(usize, usize)> {
+    let Some(&v) = tlvs
+        .iter()
+        .find_map(|(c, p)| (*c == OVERLOAD).then_some(p).and_then(|p| p.first()))
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if v & overload::FILE != 0 {
+        out.push((FILE_AT, FILE_AT + FILE_LEN));
+    }
+    if v & overload::SNAME != 0 {
+        out.push((SNAME_AT, SNAME_AT + SNAME_LEN));
+    }
+    out
+}
+
+/// RFC 3396 §5: a value too long for one option is split over repeated
+/// appearances of its code. Joining the octets before anything decodes them is
+/// the only order that can join halves which do not each decode alone — half an
+/// address list, or half a nested region. Pad and End repeat by design.
+pub fn decode_joined(t: &OptTable, tlvs: &[(u8, &[u8])]) -> Vec<Item> {
+    let mut count = [0u8; 256];
+    for (code, _) in tlvs {
+        let n = &mut count[*code as usize];
+        *n = n.saturating_add(1);
+    }
+    let mut joined = [false; 256];
+    let mut out = Vec::with_capacity(tlvs.len());
+    for (code, p) in tlvs {
+        let split = *code != PAD && *code != END && count[*code as usize] > 1;
+        if !split {
+            out.push(t.decode(*code, p));
+        } else if !std::mem::replace(&mut joined[*code as usize], true) {
+            let all: Vec<u8> = tlvs
+                .iter()
+                .filter(|(c, _)| c == code)
+                .flat_map(|(_, v)| v.iter().copied())
+                .collect();
+            out.push(t.decode(*code, &all));
+        }
+    }
+    out
 }
 
 pub static DHCP_DESC: ProtoDesc = ProtoDesc {
@@ -565,6 +646,160 @@ mod tests {
         assert!(DHCP_OPTIONS
             .build(&[("no_such_option", OptArg::Flag)])
             .is_err());
+    }
+
+    /// RFC 3046 §2: Agent Circuit ID then Agent Remote ID, each a sub-option
+    /// whose length counts only its own data.
+    const RELAY: &[u8] = &[82, 10, 1, 4, b'e', b't', b'h', b'0', 2, 2, 0xab, 0xcd];
+
+    #[test]
+    fn relay_agent_sub_options_are_parsed_and_re_encoded() {
+        let items = parse_options(&[RELAY, &[255]].concat());
+        assert_eq!(names(&items), vec!["relay_agent_information", "end"]);
+        let nested = vec![
+            Item::bytes("agent_circuit_id", 1, b"eth0"),
+            Item::bytes("agent_remote_id", 2, &[0xab, 0xcd]),
+        ];
+        assert_eq!(items[0].value, ItemValue::Items(nested.clone()));
+        assert_eq!(DHCP_OPTIONS.encode(&items[..1]), Ok(RELAY.to_vec()));
+
+        let rebuilt = DHCP_OPTIONS
+            .build(&[(
+                "relay_agent_information",
+                OptArg::List(vec![
+                    OptArg::List(vec![
+                        OptArg::Text("agent_circuit_id".into()),
+                        OptArg::Bytes(b"eth0".to_vec()),
+                    ]),
+                    OptArg::List(vec![
+                        OptArg::Text("agent_remote_id".into()),
+                        OptArg::Bytes(vec![0xab, 0xcd]),
+                    ]),
+                ]),
+            )])
+            .unwrap();
+        assert_eq!(rebuilt, RELAY);
+
+        let raw = DHCP_OPTIONS
+            .build(&[("relay_agent_information", OptArg::Bytes(vec![9, 1, 7]))])
+            .unwrap();
+        assert_eq!(raw, vec![82, 3, 9, 1, 7]);
+        let items = parse_options(&raw);
+        assert_eq!(
+            items[0].value,
+            ItemValue::Items(vec![Item::bytes("vendor_specific", 9, &[7])])
+        );
+    }
+
+    #[test]
+    fn a_truncated_sub_option_region_stops_cleanly() {
+        for cut in 0..RELAY.len() {
+            let mut v = RELAY.to_vec();
+            v[1] = (cut as u8).saturating_sub(2);
+            v.truncate(cut);
+            let items = parse_options(&v);
+            assert!(items.len() <= 1, "cut {cut} produced {items:?}");
+            if let Some(ItemValue::Items(sub)) = items.first().map(|i| &i.value) {
+                assert!(sub.len() <= 2, "cut {cut} produced {sub:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_value_split_across_repeated_codes_is_joined() {
+        // RFC 3396 §5: two appearances of option 12 are one hostname.
+        let mut v: Vec<u8> = vec![53, 1, 5];
+        v.extend_from_slice(&[12, 3, b'p', b'c', b'-']);
+        v.extend_from_slice(&[3, 4, 10, 0, 0, 1]);
+        v.extend_from_slice(&[12, 2, b'0', b'1']);
+        v.extend_from_slice(&[3, 4, 10, 0, 0, 2]);
+        v.push(255);
+        let items = decode_joined(&DHCP_OPTIONS, &DHCP_OPTIONS.walk_raw(&v));
+        assert_eq!(
+            names(&items),
+            vec!["message-type", "hostname", "router", "end"]
+        );
+        assert_eq!(items[1].value, ItemValue::Text("pc-01".into()));
+        assert_eq!(
+            items[2].value,
+            ItemValue::Ipv4List(vec![[10, 0, 0, 1], [10, 0, 0, 2]])
+        );
+
+        let pads = [0u8, 0, 53, 1, 1, 255, 0, 0];
+        assert_eq!(
+            names(&decode_joined(&DHCP_OPTIONS, &DHCP_OPTIONS.walk_raw(&pads))),
+            names(&parse_options(&pads))
+        );
+
+        // A half of a nested region does not decode alone, so joining the
+        // decoded halves would lose it; joining the octets does not.
+        let split = [
+            82u8, 4, 1, 4, b'e', b't', 82, 6, b'h', b'0', 2, 2, 0xab, 0xcd, 255,
+        ];
+        let got = decode_joined(&DHCP_OPTIONS, &DHCP_OPTIONS.walk_raw(&split));
+        assert_eq!(
+            got[0].value,
+            ItemValue::Items(vec![
+                Item::bytes("agent_circuit_id", 1, b"eth0"),
+                Item::bytes("agent_remote_id", 2, &[0xab, 0xcd]),
+            ])
+        );
+
+        // An address list split between two of its addresses keeps both.
+        let mid = [3u8, 2, 10, 0, 3, 2, 0, 1, 255];
+        let got = decode_joined(&DHCP_OPTIONS, &DHCP_OPTIONS.walk_raw(&mid));
+        assert_eq!(got[0].value, ItemValue::Ipv4List(vec![[10, 0, 0, 1]]));
+    }
+
+    #[test]
+    fn overloaded_fields_are_read_as_option_regions() {
+        let mut hdr = bootp_header();
+        // RFC 2131 §4.1: option 52 value 3 gives both fields over to options.
+        hdr[SNAME_AT..SNAME_AT + 5].copy_from_slice(&[12, 3, b'p', b'c', b'1']);
+        hdr[SNAME_AT + 5] = END;
+        hdr[FILE_AT..FILE_AT + 6].copy_from_slice(&[54, 4, 192, 168, 1, 1]);
+        hdr[FILE_AT + 6] = END;
+
+        let mut buf = udp_bootpc_to_bootps();
+        buf.extend_from_slice(&hdr);
+        buf.extend_from_slice(&MAGIC_COOKIE);
+        buf.extend_from_slice(&[53, 1, 5, 52, 1, 3, 255]);
+        let p = Packet::dissect(buf, ProtoId::Udp);
+        let d = p.find_layer(ProtoId::Dhcp).expect("dhcp layer");
+        let items = p.options(d).expect("dhcp options");
+
+        // RFC 3396 §4 fixes the order: the options field, then file, then sname.
+        assert_eq!(
+            names(&items),
+            vec![
+                "message-type",
+                "overload",
+                "end",
+                "server_id",
+                "end",
+                "hostname",
+                "end"
+            ]
+        );
+        assert_eq!(items[3].value, ItemValue::Ipv4List(vec![[192, 168, 1, 1]]));
+        assert_eq!(items[5].value, ItemValue::Text("pc1".into()));
+    }
+
+    #[test]
+    fn without_option_52_the_fields_keep_their_own_content() {
+        let mut hdr = bootp_header();
+        hdr[FILE_AT..FILE_AT + 8].copy_from_slice(b"boot.img");
+        let mut buf = udp_bootpc_to_bootps();
+        buf.extend_from_slice(&hdr);
+        buf.extend_from_slice(&MAGIC_COOKIE);
+        buf.extend_from_slice(&[53, 1, 5, 255]);
+        let p = Packet::dissect(buf, ProtoId::Udp);
+        let d = p.find_layer(ProtoId::Dhcp).unwrap();
+        assert_eq!(names(&p.options(d).unwrap()), vec!["message-type", "end"]);
+        assert!(overload_regions(&[]).is_empty());
+        assert_eq!(overload_regions(&[(OVERLOAD, &[1])]).len(), 1);
+        assert_eq!(overload_regions(&[(OVERLOAD, &[3])]).len(), 2);
+        assert_eq!(overload_regions(&[(OVERLOAD, &[])]).len(), 0);
     }
 
     #[test]

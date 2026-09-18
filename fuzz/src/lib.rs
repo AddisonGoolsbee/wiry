@@ -4,7 +4,7 @@
 //! stay in step.
 
 use wiry_core::packet::Packet;
-use wiry_core::proto::{self, desc, ProtoId};
+use wiry_core::proto::{self, ProtoId};
 use wiry_core::{parse, show};
 
 pub const ALL_PROTOS: [ProtoId; 14] = [
@@ -45,11 +45,10 @@ pub fn exercise(pkt: &mut Packet) {
     check_spans(pkt);
     let total = pkt.len();
     for i in 0..pkt.layers().len() {
-        let proto = pkt.layers()[i].proto;
         assert!(pkt.header(i).len() <= total);
         assert!(pkt.payload(i).len() <= total);
         assert!(pkt.layer_bytes(i).len() <= total);
-        for f in desc(proto).fields {
+        for f in pkt.fields(i) {
             let v = pkt.get_desc(i, f);
             let _ = show::render_value(&v);
             let _ = v.as_uint();
@@ -57,7 +56,8 @@ pub fn exercise(pkt: &mut Packet) {
             // compare only when that resolves back to this one: a false
             // condition, or another field sharing the name under a disjoint
             // condition (ICMP), both give a different answer.
-            if proto::active_field_of(proto, pkt.header(i), f.name)
+            if pkt
+                .active_field(i, f.name)
                 .is_some_and(|a| std::ptr::eq(a, f))
             {
                 assert_eq!(pkt.get(i, f.name), Some(v));
@@ -82,9 +82,10 @@ const WRITE_STRS: [&str; 4] = ["1.2.3.4", "00:11:22:33:44:55", "::1", "SA"];
 pub fn exercise_writes(pkt: &Packet) {
     for i in 0..pkt.layers().len() {
         let proto = pkt.layers()[i].proto;
-        let names: Vec<&'static str> = proto::active_fields(proto, pkt.header(i))
-            .map(|f| f.name)
-            .collect();
+        let names: Vec<&'static str> =
+            proto::active_fields(proto, pkt.framing(i) > 0, pkt.header(i))
+                .map(|f| f.name)
+                .collect();
         for name in names {
             // One copy per field: writing a field can deactivate the
             // conditional fields after it, which would leave them untested.
@@ -96,7 +97,7 @@ pub fn exercise_writes(pkt: &Packet) {
                 p.set_bytes(i, name, b);
             }
             for s in WRITE_STRS {
-                let Some(f) = proto::active_field_of(proto, p.header(i), name) else {
+                let Some(f) = p.active_field(i, name) else {
                     continue;
                 };
                 match parse::value_for(f, s) {

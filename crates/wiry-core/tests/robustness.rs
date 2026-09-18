@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use wiry_core::answers;
 use wiry_core::layers::{bootp, dns, ipv4, tcp};
 use wiry_core::packet::Packet;
-use wiry_core::proto::{self, desc, ProtoId};
+use wiry_core::proto::{desc, ProtoId};
 use wiry_core::{parse, pcap, pcapng, show};
 
 /// Fixed so a failure is reproducible; printed in every assertion message.
@@ -112,18 +112,18 @@ fn exercise(pkt: &mut Packet, what: &str) {
     check_spans(pkt, what);
     let total = pkt.len();
     for i in 0..pkt.layers().len() {
-        let proto = pkt.layers()[i].proto;
         assert!(pkt.header(i).len() <= total, "{what}, seed {SEED:#x}");
         assert!(pkt.payload(i).len() <= total, "{what}, seed {SEED:#x}");
         assert!(pkt.layer_bytes(i).len() <= total, "{what}, seed {SEED:#x}");
-        for f in desc(proto).fields {
+        for f in pkt.fields(i) {
             let v = pkt.get_desc(i, f);
             let _ = show::render_value(&v);
             let _ = v.as_uint();
             // A lookup by name answers with the field this header carries, so
             // compare only when that resolves back to this one: a false condition,
             // or an ICMP name shared under a disjoint one, answer differently.
-            if proto::active_field_of(proto, pkt.header(i), f.name)
+            if pkt
+                .active_field(i, f.name)
                 .is_some_and(|a| std::ptr::eq(a, f))
             {
                 assert_eq!(pkt.get(i, f.name), Some(v), "{what}, seed {SEED:#x}");
@@ -147,10 +147,7 @@ const WRITE_STRS: [&str; 4] = ["1.2.3.4", "00:11:22:33:44:55", "::1", "SA"];
 /// assertions have seen the input pristine.
 fn exercise_writes(pkt: &Packet, what: &str) {
     for i in 0..pkt.layers().len() {
-        let proto = pkt.layers()[i].proto;
-        let names: Vec<&'static str> = proto::active_fields(proto, pkt.header(i))
-            .map(|f| f.name)
-            .collect();
+        let names: Vec<&'static str> = pkt.active_fields(i).map(|f| f.name).collect();
         for name in names {
             // One copy per field: writing a field can deactivate the
             // conditional fields after it, which would leave them untested.
@@ -162,7 +159,7 @@ fn exercise_writes(pkt: &Packet, what: &str) {
                 p.set_bytes(i, name, b);
             }
             for s in WRITE_STRS {
-                let Some(f) = proto::active_field_of(proto, p.header(i), name) else {
+                let Some(f) = p.active_field(i, name) else {
                     continue;
                 };
                 match parse::value_for(f, s) {
@@ -298,6 +295,53 @@ fn eth_ip_icmp_timestamp() -> Vec<u8> {
     v
 }
 
+/// RFC 1035 §4.2.2 framing.
+fn eth_ip_tcp_dns() -> Vec<u8> {
+    let dns = dns_query();
+    let mut v = Vec::new();
+    v.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]);
+    v.extend_from_slice(&[0x08, 0x00]);
+    let total = (20 + 20 + 2 + dns.len()) as u16;
+    v.extend_from_slice(&[0x45, 0x00]);
+    v.extend_from_slice(&total.to_be_bytes());
+    v.extend_from_slice(&[0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00]);
+    v.extend_from_slice(&[10, 0, 0, 1, 10, 0, 0, 2]);
+    v.extend_from_slice(&[0x14, 0xe9, 0x00, 0x35]);
+    v.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 2]);
+    v.extend_from_slice(&[0x50, 0x18, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    v.extend_from_slice(&(dns.len() as u16).to_be_bytes());
+    v.extend_from_slice(&dns);
+    v
+}
+
+/// RFC 2131 §4.1 option 52: `sname` and `file` carry options of their own, and
+/// RFC 3396 §5 splits option 12 over two appearances.
+fn eth_dhcp_overloaded() -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(&[0xff; 6]);
+    v.extend_from_slice(&[0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb]);
+    v.extend_from_slice(&[0x08, 0x00]);
+    let mut payload = vec![0x02, 0x01, 0x06, 0x00, 0x12, 0x34, 0x56, 0x78];
+    payload.extend_from_slice(&[0u8; 228]);
+    payload[44..50].copy_from_slice(&[12, 3, b'p', b'c', b'1', 255]);
+    payload[108..115].copy_from_slice(&[54, 4, 10, 0, 0, 1, 255]);
+    payload.extend_from_slice(&[0x63, 0x82, 0x53, 0x63]);
+    payload.extend_from_slice(&[53, 1, 5, 52, 1, 3]);
+    payload.extend_from_slice(&[82, 8, 1, 2, b'e', b'0', 2, 2, 0, 1]);
+    payload.extend_from_slice(&[60, 2, b'a', b'b', 60, 2, b'c', b'd', 255]);
+    let total = (20 + 8 + payload.len()) as u16;
+    v.extend_from_slice(&[0x45, 0x00]);
+    v.extend_from_slice(&total.to_be_bytes());
+    v.extend_from_slice(&[0x00, 0x01, 0x00, 0x00, 0x40, 0x11, 0x00, 0x00]);
+    v.extend_from_slice(&[10, 0, 0, 1, 255, 255, 255, 255]);
+    v.extend_from_slice(&[0x00, 0x43, 0x00, 0x44]);
+    v.extend_from_slice(&((8 + payload.len()) as u16).to_be_bytes());
+    v.extend_from_slice(&[0x00, 0x00]);
+    v.extend_from_slice(&payload);
+    v
+}
+
 fn valid_frames() -> Vec<(&'static str, Vec<u8>)> {
     vec![
         ("eth/ip/tcp", eth_ip_tcp()),
@@ -307,6 +351,8 @@ fn valid_frames() -> Vec<(&'static str, Vec<u8>)> {
         ("eth/arp", eth_arp()),
         ("eth/ipv6/icmpv6", eth_ipv6_icmpv6()),
         ("eth/ip/udp/dhcp", eth_dhcp()),
+        ("eth/ip/tcp/dns", eth_ip_tcp_dns()),
+        ("eth/ip/udp/dhcp overloaded", eth_dhcp_overloaded()),
     ]
 }
 
@@ -608,13 +654,27 @@ fn dns_random_and_mutated_messages_terminate() {
                 d
             }
             _ => {
-                let mut d = dns_header(
-                    (rng.next_u64() >> 24) as u16,
-                    (rng.next_u64() >> 24) as u16,
-                    (rng.next_u64() >> 24) as u16,
-                    (rng.next_u64() >> 24) as u16,
-                );
-                d.extend(rng.bytes_below(300));
+                // Random RDATA under a type the parser reaches into: the
+                // DNSSEC and EDNS0 decoders all walk attacker-set lengths.
+                let types = [
+                    dns::rtype::OPT,
+                    dns::rtype::DS,
+                    dns::rtype::RRSIG,
+                    dns::rtype::NSEC,
+                    dns::rtype::NSEC3,
+                    dns::rtype::NSEC3PARAM,
+                    dns::rtype::DNSKEY,
+                    dns::rtype::SRV,
+                    dns::rtype::CAA,
+                ];
+                let mut d = dns_header(0, 1, 0, 0);
+                let rdata = rng.bytes_below(120);
+                d.extend_from_slice(&[0]);
+                d.extend_from_slice(&types[rng.below(types.len())].to_be_bytes());
+                d.extend_from_slice(&[0, 1]);
+                d.extend_from_slice(&rng.bytes(4));
+                d.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
+                d.extend_from_slice(&rdata);
                 d
             }
         };
@@ -624,12 +684,24 @@ fn dns_random_and_mutated_messages_terminate() {
             n <= data.len(),
             "message #{i}: more records than bytes (seed {SEED:#x})"
         );
+        let owned: usize = r.qd.iter().map(|q| q.qname.len()).sum::<usize>()
+            + r.an
+                .iter()
+                .chain(&r.ns)
+                .chain(&r.ar)
+                .map(dns::decoded_name_bytes)
+                .sum::<usize>();
+        assert!(
+            owned <= dns::MAX_DECODED_NAME_BYTES,
+            "message #{i} decoded {owned} owned bytes (seed {SEED:#x})"
+        );
         for q in &r.qd {
             assert!(q.qname.len() <= 1024, "qname too long (seed {SEED:#x})");
         }
         for rr in r.an.iter().chain(&r.ns).chain(&r.ar) {
             assert!(rr.rrname.len() <= 1024, "rrname too long (seed {SEED:#x})");
             let _ = format!("{:?}", rr.rdata);
+            let _ = rr.edns();
         }
     }
 
@@ -662,7 +734,12 @@ fn option_regions_never_hang_or_over_read() {
     }
 
     for (i, data) in fixed.iter().enumerate() {
-        for table in [&tcp::OPTIONS, &ipv4::OPTIONS, &bootp::DHCP_OPTIONS] {
+        for table in [
+            &tcp::OPTIONS,
+            &ipv4::OPTIONS,
+            &bootp::DHCP_OPTIONS,
+            &bootp::RELAY_OPTIONS,
+        ] {
             let items = table.walk(data);
             // Every item consumes an octet, so a non-advancing walk trips this
             // rather than hanging.
@@ -673,6 +750,14 @@ fn option_regions_never_hang_or_over_read() {
             );
             // Re-encoding anything a walk produced must fail, not panic.
             let _ = table.encode(&items);
+            let tlvs = table.walk_raw(data);
+            assert_eq!(tlvs.len(), items.len(), "#{i}, seed {SEED:#x}");
+            let joined = bootp::decode_joined(table, &tlvs);
+            assert!(
+                joined.len() <= items.len(),
+                "{} joining grew the list (#{i}, seed {SEED:#x})",
+                table.proto
+            );
         }
 
         let mut pkt = Packet::build_with(&[(ProtoId::Tcp, Some(data.clone()))]);
@@ -684,6 +769,14 @@ fn option_regions_never_hang_or_over_read() {
 
         let mut pkt = Packet::dissect(data.clone(), ProtoId::Dhcp);
         exercise(&mut pkt, &format!("dhcp options #{i}"));
+
+        // Only a BOOTP header in front reaches the overload and concatenation
+        // paths, and only through `Packet::options`.
+        let mut framed = vec![0u8; 236];
+        framed.extend_from_slice(&bootp::MAGIC_COOKIE);
+        framed.extend_from_slice(data);
+        let mut pkt = Packet::dissect(framed, ProtoId::Bootp);
+        exercise(&mut pkt, &format!("bootp overload #{i}"));
     }
 
     assert!(

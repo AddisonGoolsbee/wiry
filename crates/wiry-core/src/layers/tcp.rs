@@ -2,7 +2,7 @@
 
 use crate::field::FieldDesc;
 use crate::options::{Item, LenRule, OptDesc, OptTable, Shape};
-use crate::proto::{Next, ProtoDesc, ProtoId};
+use crate::proto::{ports, Next, ProtoDesc, ProtoId};
 
 /// Control bits, least significant first. The ninth, NS (RFC 3540), takes the
 /// low bit of the field RFC 9293 §3.1 otherwise reserves.
@@ -31,10 +31,26 @@ fn header_len(hdr: &[u8]) -> usize {
     (((hdr[12] >> 4) & 0x0f) as usize * 4).max(20)
 }
 
-/// Always opaque: DNS over TCP is length-prefixed, which the DNS layer does not
-/// handle, and nothing else dispatches on a TCP port.
-fn next(_: &[u8]) -> Next {
+/// DNS is the one stream protocol wiry dissects; `proto::framing_octets`
+/// accounts for the RFC 1035 §4.2.2 length prefix that frames it.
+fn next(hdr: &[u8]) -> Next {
+    if hdr.len() < 4 {
+        return Next::Raw;
+    }
+    let sport = u16::from_be_bytes([hdr[0], hdr[1]]);
+    let dport = u16::from_be_bytes([hdr[2], hdr[3]]);
+    if sport == ports::DNS || dport == ports::DNS {
+        return Next::Proto(ProtoId::Dns);
+    }
     Next::Raw
+}
+
+/// Without this a built `TCP()/DNS()` would not dissect back as DNS, since the
+/// default ports name no protocol.
+fn bind_next(hdr: &mut [u8], p: ProtoId) {
+    if p == ProtoId::Dns && hdr.len() >= 4 {
+        hdr[2..4].copy_from_slice(&ports::DNS.to_be_bytes());
+    }
 }
 
 /// IANA "TCP Option Kind Numbers" registry.
@@ -62,8 +78,8 @@ pub static OPTIONS: OptTable = OptTable {
         OptDesc::new("MSS", optkind::MSS, Shape::Uint(2)),
         OptDesc::new("WScale", optkind::WSCALE, Shape::Uint(1)),
         OptDesc::new("SAckOK", optkind::SACKOK, Shape::Empty),
-        // RFC 2018 §3 edge pairs, left unstructured.
-        OptDesc::new("SAck", optkind::SACK, Shape::Bytes),
+        // RFC 2018 §3: 8n octets, one left and one right edge per block.
+        OptDesc::new("SAck", optkind::SACK, Shape::PairList),
         OptDesc::new("Timestamp", optkind::TIMESTAMP, Shape::Pair),
         OptDesc::new("UTO", optkind::UTO, Shape::Uint(2)),
         OptDesc::new("AO", optkind::AO, Shape::Bytes),
@@ -97,7 +113,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     parse_options: Some(parse_options),
     opt_table: Some(&OPTIONS),
     set_hlen: Some(set_hlen),
-    bind_next: None,
+    bind_next: Some(bind_next),
     bind_next_bytes: None,
     content_len: None,
 };
@@ -251,13 +267,74 @@ mod tests {
         let items = parse_options(&tcp_hdr(opts));
         assert_eq!(items.len(), 4);
         assert_eq!(items[0].name.as_ref(), "SAck");
-        assert_eq!(
-            items[0].value,
-            ItemValue::Bytes(vec![0, 0, 0, 1, 0, 0, 0, 2])
-        );
+        assert_eq!(items[0].value, ItemValue::Pairs(vec![(1, 2)]));
         assert_eq!(items[1], Item::uint("UTO", 28, 0x800a));
         assert_eq!(items[2], Item::bytes("AO", 29, &[0xaa, 0xbb]));
         assert_eq!(items[3], Item::bytes("TFO", 34, &[0xc0, 0xff]));
+    }
+
+    #[test]
+    fn sack_blocks_split_into_edge_pairs() {
+        // RFC 2018 §3: kind 5, 8n+2 octets, a left and a right edge per block.
+        let mut opts = vec![0x01, 0x01, 0x05, 0x12];
+        for e in [1000u32, 2000, 3000, 4000] {
+            opts.extend_from_slice(&e.to_be_bytes());
+        }
+        let items = parse_options(&tcp_hdr(&opts));
+        assert_eq!(items[2].name.as_ref(), "SAck");
+        assert_eq!(
+            items[2].value,
+            ItemValue::Pairs(vec![(1000, 2000), (3000, 4000)])
+        );
+        assert_eq!(OPTIONS.encode(&items[2..3]).unwrap(), opts[2..]);
+
+        let odd = &[0x05, 0x06, 0, 0, 0, 1, 0x01, 0x01];
+        assert_eq!(
+            parse_options(&tcp_hdr(odd))[0].value,
+            ItemValue::Bytes(vec![0, 0, 0, 1])
+        );
+    }
+
+    #[test]
+    fn a_sack_option_encodes_from_a_list_of_pairs() {
+        let got = OPTIONS
+            .build(&[(
+                "SAck",
+                OptArg::List(vec![
+                    OptArg::List(vec![OptArg::Uint(1), OptArg::Uint(2)]),
+                    OptArg::List(vec![OptArg::Uint(3), OptArg::Uint(4)]),
+                ]),
+            )])
+            .unwrap();
+        assert_eq!(
+            got,
+            vec![5, 18, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4]
+        );
+        assert_eq!(
+            OPTIONS
+                .build(&[(
+                    "SAck",
+                    OptArg::List(vec![
+                        OptArg::Uint(1),
+                        OptArg::Uint(2),
+                        OptArg::Uint(3),
+                        OptArg::Uint(4)
+                    ]),
+                )])
+                .unwrap(),
+            got
+        );
+        assert!(OPTIONS
+            .build(&[("SAck", OptArg::List(vec![OptArg::Uint(1)]))])
+            .is_err());
+    }
+
+    #[test]
+    fn port_53_reaches_dns_over_the_stream() {
+        assert_eq!(next(&[0x00, 0x35, 0x04, 0x00]), Next::Proto(ProtoId::Dns));
+        assert_eq!(next(&[0x04, 0x00, 0x00, 0x35]), Next::Proto(ProtoId::Dns));
+        assert_eq!(next(&[0x04, 0x00, 0x01, 0xbb]), Next::Raw);
+        assert_eq!(next(&[0x00]), Next::Raw);
     }
 
     #[test]

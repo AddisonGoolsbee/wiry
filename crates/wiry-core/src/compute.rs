@@ -18,6 +18,7 @@ pub fn recompute(pkt: &mut Packet) {
             ProtoId::Tcp if !clipped => fix_tcp(pkt, i),
             ProtoId::Icmp if !clipped => fix_icmp(pkt, i),
             ProtoId::Icmpv6 if !clipped => fix_icmpv6(pkt, i),
+            ProtoId::Dns if !clipped && pkt.framing(i) > 0 => fix_dns_length(pkt, i),
             _ => {}
         }
     }
@@ -71,13 +72,15 @@ pub fn oversize(pkt: &Packet) -> Option<String> {
         return None;
     }
     let end = content_end(pkt);
-    for s in pkt.spans.iter() {
+    for (i, s) in pkt.spans.iter().enumerate() {
         let n = end.saturating_sub(s.off as usize);
         let (what, n) = match s.proto {
             ProtoId::Ipv4 => ("IP.len", n),
             ProtoId::Ipv6 => ("IPv6.plen", n.saturating_sub(40)),
             ProtoId::Udp => ("UDP.len", n),
             ProtoId::Tcp => ("the TCP pseudo-header length", n),
+            // RFC 1035 §4.2.2.
+            ProtoId::Dns if pkt.framing(i) > 0 => ("DNS.length", n.saturating_sub(pkt.framing(i))),
             _ => continue,
         };
         if n > u16::MAX as usize {
@@ -214,6 +217,23 @@ fn fix_icmp(pkt: &mut Packet, i: usize) {
     put16(&mut pkt.buf, off + 2, c);
 }
 
+/// RFC 1035 §4.2.2. A segment may carry more messages than wiry dissects, so a
+/// prefix already framing a shorter one is describing bytes this layer does not
+/// own and is left as the sender wrote it.
+fn fix_dns_length(pkt: &mut Packet, i: usize) {
+    let (off, _, end) = span_bounds(pkt, i);
+    let pre = pkt.framing(i);
+    if off + pre > end || pkt.is_pinned(i, "length") {
+        return;
+    }
+    let want = end - off - pre;
+    let have = u16::from_be_bytes([pkt.buf[off], pkt.buf[off + 1]]) as usize;
+    if (12..want).contains(&have) {
+        return;
+    }
+    put16(&mut pkt.buf, off, want as u16);
+}
+
 fn fix_icmpv6(pkt: &mut Packet, i: usize) {
     let (off, _, end) = span_bounds(pkt, i);
     if off + 4 > end || pkt.is_pinned(i, "cksum") {
@@ -234,6 +254,41 @@ fn fix_icmpv6(pkt: &mut Packet, i: usize) {
 mod tests {
     use super::*;
     use crate::field::FieldValue;
+
+    #[test]
+    fn every_derived_field_of_a_built_in_layer_is_recomputed() {
+        const HANDLED: &[(ProtoId, &str)] = &[
+            (ProtoId::Ipv4, "len"),
+            (ProtoId::Ipv4, "chksum"),
+            (ProtoId::Ipv6, "plen"),
+            (ProtoId::Udp, "len"),
+            (ProtoId::Udp, "chksum"),
+            (ProtoId::Tcp, "chksum"),
+            (ProtoId::Icmp, "chksum"),
+            (ProtoId::Icmpv6, "cksum"),
+            // Over a stream only.
+            (ProtoId::Dns, "length"),
+        ];
+        for id in (0..crate::proto::BUILTIN_COUNT).map(ProtoId) {
+            for framed in [false, true] {
+                for f in crate::proto::fields_of(id, framed) {
+                    assert!(
+                        !f.computed || HANDLED.contains(&(id, f.name)),
+                        "{}.{} is derived but nothing recomputes it",
+                        id.name(),
+                        f.name
+                    );
+                }
+            }
+        }
+        for (id, name) in HANDLED {
+            assert!(
+                crate::proto::field_of(*id, name).is_some_and(|f| f.computed),
+                "{}.{name} is recomputed but is not a derived field",
+                id.name()
+            );
+        }
+    }
 
     #[test]
     fn ipv4_checksum_verifies_after_build() {
