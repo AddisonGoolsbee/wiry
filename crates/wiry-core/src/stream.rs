@@ -141,35 +141,42 @@ struct Build {
     half: Half,
     held: BTreeMap<u64, Held>,
     held_bytes: usize,
-    /// Reference point for reading a 32-bit sequence number onto the 64-bit
-    /// line: the frontier once the origin is fixed, the first sequence number
-    /// seen before that.
-    r: u64,
-    /// Sequence of the next octet to deliver. Meaningless until `open`.
+    /// Sequence of the next octet to deliver, and the reference every 32-bit
+    /// sequence number is read against. Before `open` there is no frontier and
+    /// it holds the first sequence number seen instead. It only ever moves
+    /// forward, which is what keeps a segment at the frontier expressible: a
+    /// second reference that lagged behind it would, after 2^31 of advance,
+    /// map arriving octets to the wrong side of the line and the direction
+    /// would go deaf without saying so.
     next: u64,
+    /// The lowest offset this direction can ever deliver. Octets below it are
+    /// not a retransmission of anything, so refusing them is a loss to report.
+    origin: u64,
     started: bool,
     open: bool,
 }
 
 impl Build {
     fn absolute(&self, seq: u32) -> u64 {
-        let d = seq.wrapping_sub(self.r as u32) as i32 as i64;
-        (self.r as i64).saturating_add(d).max(0) as u64
+        let d = seq.wrapping_sub(self.next as u32) as i32 as i64;
+        (self.next as i64 + d) as u64
     }
 
-    fn feed(&mut self, seq: u32, flags: u8, data: &[u8], pkt: u32, total: &mut usize) {
+    fn feed(&mut self, seq: u32, flags: u8, data: &[u8], pkt: u32) {
         if !self.started {
             // The line starts one wrap in, so a segment that arrives before the
-            // first one seen still has somewhere to sit.
-            self.r = seq as u64 + (1u64 << 32);
+            // first one seen still has somewhere to sit and the reference plus
+            // a 32-bit delta stays positive.
+            self.next = seq as u64 + (1u64 << 32);
+            self.origin = self.next;
             self.started = true;
         }
         let mut at = self.absolute(seq);
         if flags & SYN != 0 {
             self.half.flags |= SAW_SYN;
             if !self.open {
+                self.origin = at;
                 self.next = at.saturating_add(1);
-                self.r = self.next;
                 self.open = true;
             }
             // RFC 9293 §3.4: SYN occupies one sequence number, so any octets
@@ -188,17 +195,21 @@ impl Build {
         if !self.open {
             // Before the origin is fixed there is no frontier to measure
             // against, so the first sequence number seen stands in for one.
-            if at.abs_diff(self.r) > MAX_AHEAD {
+            if at.abs_diff(self.next) > MAX_AHEAD {
                 self.half.flags |= LOSSY;
                 self.half.dropped += data.len() as u64;
                 return;
             }
-            self.hold(at, data, pkt, total);
+            self.hold(at, data, pkt);
             if self.held.len() >= ORIGIN_WINDOW {
                 self.fix_origin();
-                self.drain(total);
+                self.drain();
             }
             return;
+        }
+        if at < self.origin {
+            self.half.flags |= LOSSY;
+            self.half.dropped += (self.origin - at).min(data.len() as u64);
         }
         let end = at.saturating_add(data.len() as u64);
         if end <= self.next {
@@ -216,13 +227,12 @@ impl Build {
                 self.half.dropped += data.len() as u64;
                 return;
             }
-            self.hold(at, data, pkt, total);
-            self.relieve(total);
+            self.hold(at, data, pkt);
+            self.relieve();
             return;
         }
         self.append(data, pkt);
-        self.drain(total);
-        self.r = self.next;
+        self.drain();
     }
 
     fn fix_origin(&mut self) {
@@ -230,7 +240,7 @@ impl Build {
             return;
         };
         self.next = first;
-        self.r = first;
+        self.origin = first;
         self.open = true;
     }
 
@@ -239,7 +249,7 @@ impl Build {
     /// entries rather than being concatenated onto a neighbour: concatenating
     /// would let a sender who sends descending, overlapping segments pay one
     /// small segment for one whole-buffer copy.
-    fn hold(&mut self, at: u64, src: &[u8], pkt: u32, total: &mut usize) {
+    fn hold(&mut self, at: u64, src: &[u8], pkt: u32) {
         let end = at.saturating_add(src.len() as u64);
         let mut cur = at;
         if let Some((&ps, h)) = self.held.range(..=at).next_back() {
@@ -258,41 +268,48 @@ impl Build {
                 let a = (cur - at) as usize;
                 let b = (stop.0 - at) as usize;
                 let bytes = src[a..b].to_vec();
-                *total += bytes.len();
                 self.held_bytes += bytes.len();
                 self.held.insert(cur, Held { bytes, pkt });
             }
+            // Held entries are never empty, so `stop.1` already passes `cur`;
+            // the floor is what makes that an invariant rather than a trust,
+            // on a loop whose shape the sender chooses.
             cur = stop.1.max(cur.saturating_add(1));
         }
     }
 
-    /// Bring the held set back under its bounds by giving up on the octets in
-    /// front of it. The gap is recorded, never guessed at, and what was waiting
-    /// behind it is delivered rather than discarded.
-    fn relieve(&mut self, total: &mut usize) {
-        while self.held.len() > MAX_HELD_SEGS || self.held_bytes > MAX_HELD_BYTES {
-            let Some((&first, _)) = self.held.first_key_value() else {
-                return;
-            };
-            if first > self.next {
-                self.half.gaps.push(Gap {
-                    at: self.half.data.len() as u32,
-                    len: first - self.next,
-                });
-                self.next = first;
-            }
-            self.drain(total);
+    /// Give up on the octets in front of what is held: record the gap, never
+    /// guess at it, and deliver what was waiting behind it. `false` when there
+    /// is nothing left to wait for.
+    fn give_up_on_front(&mut self) -> bool {
+        let Some((&first, _)) = self.held.first_key_value() else {
+            return false;
+        };
+        if first > self.next {
+            self.half.gaps.push(Gap {
+                at: self.half.data.len() as u32,
+                len: first - self.next,
+            });
+            self.next = first;
         }
+        self.drain();
+        true
     }
 
-    fn drain(&mut self, total: &mut usize) {
+    /// Bring the held set back under its bounds.
+    fn relieve(&mut self) {
+        while (self.held.len() > MAX_HELD_SEGS || self.held_bytes > MAX_HELD_BYTES)
+            && self.give_up_on_front()
+        {}
+    }
+
+    fn drain(&mut self) {
         while let Some((&ks, _)) = self.held.first_key_value() {
             if ks > self.next {
                 break;
             }
             let h = self.held.remove(&ks).expect("just looked it up");
             self.held_bytes -= h.bytes.len();
-            *total -= h.bytes.len();
             let ke = ks + h.bytes.len() as u64;
             if ke <= self.next {
                 continue;
@@ -331,23 +348,11 @@ impl Build {
 
     /// Everything still held is delivered, each run behind the gap in front of
     /// it, so a stream that never became contiguous still hands back its octets.
-    fn finish(mut self, total: &mut usize) -> Half {
+    fn finish(mut self) -> Half {
         if !self.open {
             self.fix_origin();
         }
-        while !self.held.is_empty() {
-            let Some((&first, _)) = self.held.first_key_value() else {
-                break;
-            };
-            if first > self.next {
-                self.half.gaps.push(Gap {
-                    at: self.half.data.len() as u32,
-                    len: first - self.next,
-                });
-                self.next = first;
-            }
-            self.drain(total);
-        }
+        while self.give_up_on_front() {}
         self.half
     }
 }
@@ -533,7 +538,6 @@ impl Reassembler {
         };
         let stamp = self.seq;
         self.seq += 1;
-        let held = &mut self.held;
         let live = self.live.entry(s.key).or_insert_with(|| {
             // A SYN with no ACK is the side that opened the connection; with no
             // SYN in the capture the first packet's own direction stands.
@@ -551,7 +555,9 @@ impl Reassembler {
         });
         live.seq = stamp;
         let dir = usize::from(live.key_src != s.src || live.sport != s.sport);
-        live.build[dir].feed(s.seq, s.flags, &buf[s.at..s.end], pos, held);
+        let before = live.build[dir].held_bytes;
+        live.build[dir].feed(s.seq, s.flags, &buf[s.at..s.end], pos);
+        self.held = self.held + live.build[dir].held_bytes - before;
         self.order.push_back((stamp, s.key));
         self.evict();
     }
@@ -578,10 +584,9 @@ impl Reassembler {
     }
 
     fn retire(&mut self, l: Live, evicted: bool) {
+        self.held -= l.build[0].held_bytes + l.build[1].held_bytes;
         let [a, b] = l.build;
-        let mut held = self.held;
-        let halves = [a.finish(&mut held), b.finish(&mut held)];
-        self.held = held;
+        let halves = [a.finish(), b.finish()];
         self.out.push(Stream {
             src: l.key_src,
             dst: l.key_dst,
@@ -1047,6 +1052,60 @@ mod tests {
         assert_eq!(h.packet_at(7), Some(2));
         assert_eq!(h.packet_at(8), None);
         assert_eq!(s[0].packets(), vec![0, 1, 2]);
+    }
+
+    /// The frontier can advance entirely through `relieve`, never through an
+    /// in-order arrival. A reference that only followed the in-order path would
+    /// lag it without bound, and once the two were 2^31 apart every arriving
+    /// segment would map to the wrong side of the line and be discarded as
+    /// already delivered — a direction going deaf with nothing said about it.
+    #[test]
+    fn the_reference_follows_the_frontier_however_it_advances() {
+        let mut b = Build::default();
+        b.feed(1000, SYN, b"", 0);
+        let mut next: u32 = 1001;
+        // Each round holds one more than the bound allows, forcing the frontier
+        // the maximum distance a segment may claim.
+        for _ in 0..2100 {
+            for k in 0..=MAX_HELD_SEGS as u32 {
+                b.feed(next.wrapping_add(MAX_AHEAD as u32 - 64 + k), 0, b"y", 0);
+            }
+            next = next.wrapping_add(MAX_AHEAD as u32 + 1);
+        }
+        assert!(
+            (next as u64).abs_diff(1001) > (1 << 31),
+            "the frontier has to cross 2^31 for this to test anything"
+        );
+        b.feed(next, 0, b"HEARD", 0);
+        let h = b.finish();
+        assert!(h.data.ends_with(b"HEARD"), "the direction went deaf");
+    }
+
+    /// The origin heuristic can be wrong: a segment earlier than the earliest
+    /// of the opening window, arriving later still, cannot be delivered. What
+    /// it must not do is vanish without saying so.
+    #[test]
+    fn octets_before_the_origin_are_refused_out_loud() {
+        let mut frames: Vec<Vec<u8>> = (0..ORIGIN_WINDOW as u32)
+            .map(|i| c2s(1000 + i * 4, b"late"))
+            .collect();
+        frames.push(c2s(900, b"EARLY!"));
+        let h = &run(&frames)[0].halves[0];
+        assert!(!h.data.starts_with(b"EARLY!"));
+        assert_eq!(h.flags & LOSSY, LOSSY);
+        assert_eq!(h.dropped, 6);
+        // A retransmission of octets the stream did deliver is not a loss.
+        let h = &run(&[c2s(0, b"abcd"), c2s(4, b"efgh"), c2s(0, b"abcd")])[0].halves[0];
+        assert_eq!(h.flags & LOSSY, 0);
+        assert_eq!(h.dropped, 0);
+        // Nor is an octet claiming the SYN's own sequence number.
+        let h = &run(&[
+            seg(1, 2, 1234, 80, 99, SYN, b""),
+            c2s(99, b"X"),
+            c2s(100, b"ok"),
+        ])[0]
+            .halves[0];
+        assert_eq!(h.flags & LOSSY, 0);
     }
 
     #[test]
