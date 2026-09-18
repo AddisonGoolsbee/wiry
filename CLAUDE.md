@@ -109,16 +109,22 @@ suite asserts this. If they diverge, the bulk path is wrong.
 ### The flat field model and its limit
 
 Protocols are a static `FieldDesc` table (name, bit offset, bit length, kind,
-default). Fast and simple, and it cannot express type-dependent or
-variable-length structure. Logged as **E1**. Variable-length regions live in
-`options.rs` (`walk_tlv` plus a uniform `Item`); DNS record sections need a
-different shape again and live in `layers/dns.rs`.
+default). Fast and simple. A field may now carry a condition over its own
+layer's header bytes, which is what expresses ICMP's type-dependent layout, and
+a layer *pair* may contribute framing octets ahead of every field, which is what
+gives DNS over TCP its RFC 1035 §4.2.2 length prefix; a framed layout is a
+second static table rather than a second condition, because a condition cannot
+move a field. What the model still cannot express is variable-length structure.
+Logged as **E1**. Variable-length regions live in `options.rs` (`walk_tlv` plus a
+uniform `Item`), and the line-oriented and BER protocols reuse that same item
+list; DNS record sections need a different shape again and live in
+`layers/dns.rs`.
 
 ## 4. Scope
 
 | Decision | Rationale |
 |---|---|
-| Ether, Loopback, CookedLinux, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP/DHCP, Raw, Padding | scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. dpkt does 1.35M downloads/month with ~80 protocols. |
+| 91 layers: the 17 core ones (Ether, Loopback, CookedLinux and CookedLinuxV2, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP, DHCP, Raw, Padding), 14 encapsulations, and 60 generated from `dev/protogen/specs/` at the depth `DEVIATIONS.md`'s P rows state one row at a time | scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. dpkt does 1.35M downloads/month with ~80 protocols. A header-depth layer that says so is worth more than an implied one. |
 | **Live capture behind the `live` feature, off by default** | Needs raw sockets, root and per-OS backends. `sniff(offline=...)` drives the whole state machine without it, so the live backend is an I/O shim over proven logic rather than a second implementation. |
 | Unknown protocols dissect to `Raw` | Bytes always round-trip, at any depth. |
 
@@ -159,6 +165,12 @@ This audience will pull a benchmark apart, and should.
    which would have published a 2.0x margin that is really about 1.7x. Load
    flatters whichever tool is least sensitive to it, and that is not something
    best-of-N fixes.
+8. **Name the corpus by hash, not by URL.** `bigFlows.pcap` is served from one
+   URL that has already changed underneath us: the published table was measured
+   on a 256 MB, 549,726-packet revision and the same address now returns 368 MB
+   and 791,615 packets. A reader following our own instructions got a different
+   corpus and different numbers. Every published table states the byte size, the
+   packet count, the SHA-256 and the date measured.
 
 ## 7. Naming
 
@@ -180,11 +192,26 @@ parallel. Each owns its file, follows `layers/ether.rs`, cites its RFC, and adds
 hand-built tests. Shared files (`proto.rs`, `packet.rs`, `options.rs`, the PyO3
 crate) are edited by the orchestrator only.
 
+That is now literally true rather than aspirational: `dev/protogen/` takes one
+TOML spec per protocol and writes the layer module, the `ProtoId`, the
+registration and the dispatch entry, so a contributor adding a flat layer
+touches no shared file and serialises nobody. `citation` is a required key, which
+makes the provenance rule of §2 a build error rather than a review comment, and
+the generator refuses rather than guesses where the flat model cannot place a
+field. Hand-written hooks live in a marked region it reads back and preserves —
+and a region whose end marker is damaged is refused, not silently emptied, which
+an earlier draft did. `dev/protogen/README.md` is the contract; `protogen.py
+--check` is what CI runs.
+
 ## 9. Current state
 
-All fifteen in-scope layers are complete, including TCP/IPv4/DHCP options in both
-directions, DNS record sections with name compression, and pcap plus pcapng
-reading. Field names match scapy exactly across every audited layer.
+All 17 core layers are complete, including TCP/IPv4/DHCP options in both
+directions (RFC 3046 sub-options, RFC 3396 joining and RFC 2131 overload
+included), DNS record sections with name compression and DNS over TCP, and pcap
+plus pcapng in both directions. Around them are 14 encapsulations and 60
+generated layers, 91 in all; `known_layers()` is the authority and
+`DEVIATIONS.md` states the depth of each generated one. Field names match scapy
+exactly across every audited layer.
 
 Beyond parity:
 
@@ -208,10 +235,20 @@ Beyond parity:
   IPv6 pair (RFC 8200 §4.5) live in `frag.rs`. Reassembly over a capture is a
   bulk path: one crossing with the GIL released, and the suite asserts it agrees
   with the list path octet for octet. Every bound it keeps is named in the
-  module, overlap resolves first-writer-wins, and DEVIATIONS E18 says so out
+  module, overlap resolves first-writer-wins, and DEVIATIONS E19 says so out
   loud, because operating systems disagree about overlap and that disagreement
   is what fragmentation-based IDS evasion is built on.
-- **Fuzzing.** Eight libFuzzer targets plus seeded property tests on stable. All
+- **Generators (E21).** A field may hold a list, a range, a `Net`/`Net6` or a
+  `Rand*` value, and the packet is then a template. The generator set crosses
+  once and Rust walks the product in 256-packet chunks, so the boundary rule
+  holds for sixteen million packets as well as for one. Do not let a Python
+  callback into that walk either.
+- **Reporting and the active tools.** `sprintf`, `show2`, `command`, `json`,
+  `hexdiff`, `PacketList` aggregation (E23, E22, E24), and `traceroute`,
+  `arping`, `srloop`, `srploop`, `getmacbyip`, `get_if_hwaddr` (E18) on top of
+  `sr`/`srp`. Their arithmetic is plain functions over plain data so it is
+  testable with no interface and no privileges; only the exchange needs `live`.
+- **Fuzzing.** Nine libFuzzer targets plus seeded property tests on stable. All
   three crates forbid unsafe.
 - **Two parity harnesses.** `dev/parity_check.py` covers dissection over real
   captures; `dev/build_matrix.py` enumerates construction. The second exists

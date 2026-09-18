@@ -92,11 +92,9 @@ def _probes(targets: list, minttl: int, maxttl: int, dport: int,
             sport: Optional[int], l4: Any) -> list:
     """One probe per target per TTL.
 
-    ``IP.id`` carries the TTL. wiry has no field generators (E13), so without
-    it every probe of a sweep would be byte-identical but for the TTL — and the
-    TTL is not part of a reply key, while the quoted IP id is. Every hop's
-    time-exceeded would then pair with the first probe and the trace would be
-    one row long.
+    ``IP.id`` carries the TTL, because the TTL is not part of a reply key and
+    the quoted IP id is. Without it every hop's time-exceeded would pair with
+    the first probe and the trace would be one row long.
     """
     if not 1 <= minttl <= maxttl <= 255:
         raise ValueError(
@@ -234,8 +232,8 @@ def _hosts(net: Any) -> list:
     """The addresses an ARP sweep should ask about.
 
     A CIDR is expanded here, with the standard library, rather than by the
-    address generators E13 rules out: the expansion is this function's own and
-    never reaches a field, so `IP(dst="10.0.0.0/24")` is still one packet.
+    generators of E21: a sweep pairs each address with its own reply, which is
+    this function's arithmetic and not a template's product.
     """
     def refuse(n: int) -> None:
         if n > MAX_SWEEP:
