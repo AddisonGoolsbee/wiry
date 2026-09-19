@@ -757,15 +757,14 @@ def get_if_hwaddr(iface: Any) -> str:
     """The interface's hardware address, as ``aa:bb:cc:dd:ee:ff``.
 
     Read through getifaddrs, so it works wherever a capture does. An interface
-    that has no hardware address of its own — a loopback, a tunnel — raises
-    rather than returning a plausible-looking zero.
+    with none of its own — a loopback, a tunnel — answers all zeros, as scapy
+    does: callers iterate `get_if_list()` and would otherwise have to guard
+    every interface. `interface_mac()` still distinguishes absent from zero.
     """
     _b.capture_check()
     name = _iface_name(iface)
     mac = _b.interface_mac(name)
-    if mac is None:
-        raise ValueError(f"{name} has no hardware address")
-    return mac
+    return "00:00:00:00:00:00" if mac is None else mac
 
 
 def get_working_if() -> str:

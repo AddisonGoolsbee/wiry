@@ -126,14 +126,17 @@ def test_the_route_tables_cannot_be_swapped_wholesale():
 
 
 @live
-def test_the_interface_hardware_address_is_readable_or_refused_by_name():
+def test_every_interface_answers_a_hardware_address():
+    """Scripts iterate get_if_list() and call this on each; scapy answers all
+    zeros for an interface with none of its own rather than raising."""
     for info in P.interfaces():
-        try:
-            mac = P.get_if_hwaddr(info["name"])
-        except ValueError as exc:
-            assert info["name"] in str(exc)
-            continue
+        mac = P.get_if_hwaddr(info["name"])
         assert len(mac.split(":")) == 6
+
+
+@live
+def test_a_loopback_answers_zeros_rather_than_raising():
+    assert P.get_if_hwaddr(P.conf.loopback_name) == "00:00:00:00:00:00"
 
 
 @absent
