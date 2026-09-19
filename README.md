@@ -157,22 +157,33 @@ puts one back together, over a whole capture in a single crossing;
 attacker-controlled bytes, so its bounds and its overlap rule are stated in
 [DEVIATIONS.md](DEVIATIONS.md) E19 rather than left to be discovered.
 
-Capture and injection work too: `sniff`, `send`, `sendp`, `sr`, `sr1`, `srp`,
-`srp1` and `AsyncSniffer`, with scapy's arguments and semantics — and the tools
-built on them: `traceroute`, `arping`, `srloop`, `srploop`, `getmacbyip` and
-`get_if_hwaddr`. They need the `live` cargo feature, which a default build does
-not set, so a plain `pip install` raises `CaptureUnavailable` naming the rebuild
-command. And they are Linux and macOS only.
+Capture and injection work on a plain install: `sniff`, `send`, `sendp`, `sr`,
+`sr1`, `srp`, `srp1` and `AsyncSniffer`, with scapy's arguments and semantics —
+and the tools built on them: `traceroute`, `arping`, `srloop`, `srploop`,
+`getmacbyip` and `get_if_hwaddr`.
 
-Windows gets everything else. Dissection, crafting, capture files and `columns()`
-are pure Rust with no libpcap, so they build and pass the same test suite there
-in CI. What Windows does not get is the wire: live capture needs Npcap, and raw
-sends have been restricted by the OS since XP SP2. Those entry points exist and
-raise `CaptureUnavailable` rather than being missing.
+**libpcap is loaded when a capture is first asked for, not linked at build
+time.** That is how scapy has always done it, and it is what lets one wheel
+build anywhere and still capture: nothing in the build needs libpcap, and a
+machine without it gets a message naming the package to install rather than an
+instruction to rebuild. `wiry.capture_backend()` says which library was loaded,
+its version, or why there is none.
 
-`sniff(offline=...)` needs none of that. It runs the whole state machine from a
-capture file with no privileges and no feature flag: `count`, `store`, `prn`,
-`lfilter`, `stop_filter`, `timeout` and the `where=` extension.
+What is still needed is privilege — root, `CAP_NET_RAW` on Linux, or a readable
+`/dev/bpf*` on macOS — and without it every entry point raises `PermissionError`
+saying which of those to arrange.
+
+On Windows, Npcap supplies the library and wiry loads `wpcap.dll` the same way,
+but that path has never been run here and should be treated as unverified.
+Raw layer-3 `send` is refused outright on Windows, where the OS has restricted
+it since XP SP2; `sendp` at layer 2 is the supported route. Dissection,
+crafting, capture files and `columns()` need none of it and pass the same suite
+on Windows in CI.
+
+`sniff(offline=...)` needs nothing at all. It runs the whole state machine from
+a capture file with no privileges and no library: `count`, `store`, `prn`,
+`lfilter`, `stop_filter`, `timeout` and the `where=` extension. A `filter=` is
+the one exception, since compiling BPF is libpcap's job.
 
 ## Capture files
 
@@ -312,11 +323,24 @@ have, and 2 are
 generator differences [DEVIATIONS.md](DEVIATIONS.md) E21 states outright. Every
 gap is enumerated there.
 
-670 Rust and 1,196 Python tests pass, 676 Rust with live capture built in. All
-four crates set `#![forbid(unsafe_code)]`, which constrains this code and says
-nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
-compiled in. The dissector carries ten fuzz targets plus seeded property tests
-that run on stable.
+686 Rust and 1,231 Python tests pass; 680 and 1,202 with
+`--no-default-features`, which drops live capture.
+
+The live paths were run against a real wire for the first time on
+2026-09-18, on a Linux veth pair as root: `dev/live/netns_check.py` passes in
+full — a frame sent with `sendp` arrives byte-identical, `sr1`, `srp1`,
+`arping`, `getmacbyip`, `srloop` and `traceroute` all match real replies. It
+found two defects that no offline test could reach, and
+[DEVIATIONS.md](DEVIATIONS.md) S2 names them, what is still unverified (macOS
+`/dev/bpf`, all of Windows) and what a burst costs.
+
+Four of the five crates set `#![forbid(unsafe_code)]`, the dissector — the part
+that reads attacker-controlled bytes — among them. The fifth is `wiry-pcap`,
+which is nothing but the FFI: it `dlopen`s libpcap, calls through function
+pointers and owns what libpcap hands back. It parses no packets. That
+constrains this code and says nothing about dependencies: PyO3 contains
+hundreds of unsafe blocks and is compiled in. The dissector carries ten fuzz
+targets plus seeded property tests that run on stable.
 
 The core and every branch merged for this release were reviewed adversarially
 for wrong answers, hostile-input failures and races. Each defect a review found
@@ -343,20 +367,20 @@ code inside a damaged marker region. All are fixed, with a regression test each.
 - **You need a protocol outside the 100, or deeper inside one of the
   sixty-nine than `DEVIATIONS.md` says it goes.** scapy has 1,746 layers and an interactive shell. It is
   a more capable tool and will stay one.
-- **Your work is live, on a default install.** `sniff`, `send` and the `sr`
-  family need a non-default build, on Linux or macOS. Offline needs nothing.
 - **You have a few thousand packets.** scapy takes a second. Nothing here matters.
 - **You only want a fast parser and dpkt's API suits you.** dpkt is BSD-licensed
   and fine, and the per-packet margin over it is small. Its last release was 2022.
-
+- **You are sniffing a burst at wire speed on Linux.** The default snaplen makes
+  the kernel's ring hold a few thousand frames, so 400k pkt/s costs packets; see
+  [DEVIATIONS.md](DEVIATIONS.md) S2 for the numbers and the `snaplen=` knob.
 - **You need a permissive licence.** wiry is GPL-2.0-only and cannot be relicensed
   — see [Relationship to scapy](#relationship-to-scapy). If you are shipping a
   proprietary product, or writing a Rust crate you want the rest of crates.io to
   be able to depend on, wiry is the wrong dependency and dpkt or a
   purpose-written parser is the right one.
 
-Use wiry when you are moving a lot of packets offline, when GPL-2.0 is a licence
-you can live with, or when `columns()` is the shape of your problem.
+Use wiry when you are moving a lot of packets, offline or live, when GPL-2.0 is a
+licence you can live with, or when `columns()` is the shape of your problem.
 
 ## Install
 
@@ -368,15 +392,15 @@ git clone https://github.com/AddisonGoolsbee/wiry && cd wiry
 pip install .
 ```
 
-With live capture, from the same checkout:
+That build needs no libpcap: live capture loads it at run time instead.
+`python -c "import wiry; print(wiry.capture_backend())"` says which library was
+found, or why none was. macOS ships libpcap; Debian and Ubuntu call the runtime
+package `libpcap0.8`, Fedora and Alpine call it `libpcap`; Windows needs
+[Npcap](https://npcap.com). Set `WIRY_LIBPCAP` to a full path to override the
+search.
 
-```sh
-MATURIN_PEP517_ARGS="--features pyo3/extension-module,live" pip install .
-```
-
-Confirm it took with `python -c "import wiry; print(wiry.capture_available())"`.
-Building this way needs libpcap, which macOS already ships and which Debian and
-Ubuntu call `libpcap-dev`.
+Capturing also needs privilege: root, `CAP_NET_RAW` on Linux, or ChmodBPF on
+macOS so `/dev/bpf*` is readable.
 
 The Rust crate is separate and needs none of that:
 

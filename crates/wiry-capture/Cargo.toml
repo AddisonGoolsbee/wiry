@@ -12,14 +12,16 @@ rust-version.workspace = true
 
 [dependencies]
 wiry-core = { path = "../wiry-core", version = "0.1.0" }
-# Pinned exactly: 2.5.0 declares MSRV 1.64 but master already declares 1.85 and
-# edition 2024, so a 2.6 would break this workspace's MSRV on `cargo update`.
-pcap = { version = "=2.5.0", optional = true }
+wiry-pcap = { path = "../wiry-pcap", version = "0.1.0", optional = true }
 socket2 = { version = "0.6", features = ["all"], optional = true }
 # getifaddrs/AF_LINK, which this crate cannot reach itself: forbid(unsafe_code).
-# Pinned for the same reason pcap is: it declares no MSRV of its own, so a minor
-# bump of it or of its nix dependency could quietly raise this workspace's.
+# Pinned because it declares no MSRV of its own, so a minor bump of it or of its
+# nix dependency could quietly raise this workspace's.
 mac_address = { version = "=1.1.8", optional = true }
 
 [features]
-live = ["dep:pcap", "dep:socket2", "dep:mac_address"]
+# On by default. Nothing here is needed at build time any more — libpcap is
+# loaded when a capture is first asked for — so the only reason to turn it off
+# is to drop the three dependencies.
+default = ["live"]
+live = ["dep:wiry-pcap", "dep:socket2", "dep:mac_address"]

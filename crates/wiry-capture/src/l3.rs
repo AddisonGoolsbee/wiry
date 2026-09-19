@@ -34,7 +34,7 @@ pub fn send_l3(frames: &[Vec<u8>], count: usize, inter: f64) -> Result<usize, Ca
     })?;
 
     let sock = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::from(255)))
-        .map_err(|e| CaptureError::Permission(format!("raw socket: {e}")))?;
+        .map_err(|e| CaptureError::Permission(format!("a raw IPv4 socket: {e}")))?;
     sock.set_header_included_v4(true)
         .map_err(|e| CaptureError::Pcap(format!("IP_HDRINCL: {e}")))?;
 

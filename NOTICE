@@ -90,11 +90,23 @@ per-file blocks are authoritative.
 | `crates/wiry-core/src/layers/netflow9.rs` | `scapy/layers/netflow.py` | scapy 2.7.0 | 2026-09-18 |
 | `crates/wiry-core/src/layers/rtp.rs` | `scapy/layers/rtp.py` | scapy 2.7.0 | 2026-09-18 |
 | `crates/wiry-core/src/layers/sctp.rs` | `scapy/layers/sctp.py` | scapy 2.7.0 | 2026-09-18 |
-
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift
 apart. A spec with no such table generates a file with no block, which is the
 claim that its layout came from the RFC alone.
+| `crates/wiry-pcap/src/sys.rs` | `scapy/libs/winpcapy.py`, `scapy/libs/structures.py` | 2.7.0 / `7d69454` | 2026-09-18 |
+| `crates/wiry-pcap/src/lib.rs` | `scapy/libs/winpcapy.py`, `scapy/arch/libpcap.py` | 2.7.0 / `7d69454` | 2026-09-18 |
+| `crates/wiry-capture/src/pcap_backend.rs` | `scapy/interfaces.py` | 2.7.0 / `7d69454` | 2026-09-18 |
+## Third-party interfaces that are not scapy's
+`crates/wiry-pcap` declares libpcap's C interface. The declarations themselves
+come from libpcap's own `pcap/pcap.h` and `pcap/bpf.h`:
+    libpcap — https://github.com/the-tcpdump-group/libpcap
+    Copyright (c) 1993-2023 The Regents of the University of California
+    and the tcpdump.org contributors
+    Licensed BSD-3-Clause
+BSD-3-Clause is GPL-compatible, so those declarations may be used here. **No
+libpcap code is copied or shipped**: wiry links against nothing and loads the
+library the host already has, at run time.
 
 
 ## Licence history — the MIT period

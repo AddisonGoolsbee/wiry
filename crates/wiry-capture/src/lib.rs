@@ -60,6 +60,22 @@ pub fn available() -> bool {
     backend::available()
 }
 
+/// Why this host cannot capture, and `None` when it can. Answered without
+/// opening anything, so a caller can refuse early and say why.
+pub fn unavailable_reason() -> Option<CaptureError> {
+    backend::unavailable_reason()
+}
+
+/// libpcap's own version banner, for a diagnostic that has to be believable.
+pub fn backend_version() -> Option<String> {
+    backend::backend_version()
+}
+
+/// The shared object that was loaded at run time.
+pub fn backend_path() -> Option<String> {
+    backend::backend_path()
+}
+
 pub fn list_interfaces() -> Result<Vec<Interface>, CaptureError> {
     backend::list_interfaces()
 }

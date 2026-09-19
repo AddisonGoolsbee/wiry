@@ -1,11 +1,17 @@
 //! The live drivers: an I/O shim over `SniffState`, which is already proved by
 //! the offline driver. Nothing here decides when to keep, count or stop.
 //!
-//! Two things the offline driver never has to face. A wire read blocks, so the
-//! GIL is released across every one of them and the stop conditions are polled
-//! between reads rather than per matched packet: `next_into` returning
-//! `Ok(None)` on libpcap's read timeout is that poll, not an error. And the
-//! link type comes from the handle, since loopback is not Ethernet.
+//! Two things the offline driver never has to face. A wire read can wait, so
+//! the GIL is released across every one of them and the stop conditions are
+//! polled between reads rather than per matched packet: `next_into` returning
+//! `Ok(None)` is that poll, not an error. And the link type comes from the
+//! handle, since loopback is not Ethernet.
+//!
+//! The reads are non-blocking, because libpcap's read timeout is not a bound:
+//! on Linux `pcap_next_ex` waits for a frame however the timeout is set, so a
+//! capture over a silent interface would never reach its own deadline, its stop
+//! flag or the signal check. The waiting is done here instead, where those
+//! three things are.
 
 // With the feature off `Handle` is uninhabited, so every driver below is
 // unreachable past its `open_live`. Keeping the module compiled anyway is what
@@ -36,6 +42,14 @@ use crate::{build_query, PyPktList};
 /// Per slice rather than per packet, so an unbounded `sniff` answers Ctrl-C
 /// without paying a GIL hop for every frame.
 const SLICE: Duration = Duration::from_millis(250);
+
+/// The reads are non-blocking, so an idle interface is a loop that has to be
+/// slowed down by hand. It doubles from `IDLE_MIN` to `IDLE_MAX` and resets on
+/// every frame, which keeps a busy capture spinning and an idle one at a few
+/// hundred wakeups a second. `IDLE_MAX` is what the deadline, the stop flag and
+/// the signal check are granular to, so it stays far below `SLICE`.
+const IDLE_MIN: Duration = Duration::from_micros(50);
+const IDLE_MAX: Duration = Duration::from_millis(2);
 
 /// Where the GIL is. One capture loop then serves both the synchronous driver,
 /// which holds it, and the background thread, which does not.
@@ -137,6 +151,7 @@ impl LiveRun {
         until: Option<Instant>,
         stop: &AtomicBool,
     ) -> PyResult<Flow> {
+        let mut idle = IDLE_MIN;
         loop {
             if stop.load(Ordering::Relaxed) || self.st.tick() == Flow::Stop {
                 return Ok(Flow::Stop);
@@ -147,12 +162,22 @@ impl LiveRun {
             let Self {
                 handle, scratch, ..
             } = self;
+            let blocking = handle.reads_block();
             let Some(meta) = gil
                 .blocking(|| handle.next_into(scratch))
                 .map_err(to_py_err)?
             else {
+                // Nothing was waiting. A blocking handle already slept in
+                // libpcap; a non-blocking one has to be slowed down here, or
+                // the loop spins a core while it waits for the deadline it is
+                // about to check.
+                if !blocking {
+                    gil.blocking(|| std::thread::sleep(idle));
+                    idle = (idle * 2).min(IDLE_MAX);
+                }
                 continue;
             };
+            idle = IDLE_MIN;
             let Self {
                 st, scratch, link, ..
             } = self;
@@ -742,6 +767,7 @@ impl Exchange {
         deadline: Option<Instant>,
         until: Instant,
     ) -> PyResult<bool> {
+        let mut idle = IDLE_MIN;
         loop {
             if self.settled() || deadline.is_some_and(|d| Instant::now() >= d) {
                 return Ok(true);
@@ -750,8 +776,13 @@ impl Exchange {
                 return Ok(false);
             }
             let Some(meta) = h.next_into(&mut self.scratch).map_err(to_py_err)? else {
+                if !h.reads_block() {
+                    std::thread::sleep(idle);
+                    idle = (idle * 2).min(IDLE_MAX);
+                }
                 continue;
             };
+            idle = IDLE_MIN;
             self.offer(&meta);
         }
     }

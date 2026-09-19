@@ -12,7 +12,8 @@ rust-version.workspace = true
 
 [dependencies]
 wiry-core = { path = "../wiry-core", version = "0.1.0" }
-wiry-capture = { path = "../wiry-capture", version = "0.1.0", optional = true }
+wiry-capture = { path = "../wiry-capture", version = "0.1.0", optional = true, default-features = false }
 
 [features]
+default = ["live"]
 live = ["dep:wiry-capture", "wiry-capture/live"]

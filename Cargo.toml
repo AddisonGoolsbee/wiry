@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/wiry", "crates/wiry-core", "crates/wiry-capture", "crates/wiry-py"]
+members = [
+    "crates/wiry",
+    "crates/wiry-core",
+    "crates/wiry-capture",
+    "crates/wiry-pcap",
+    "crates/wiry-py",
+]
 
 [workspace.package]
 version = "0.1.0"

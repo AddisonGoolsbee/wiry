@@ -44,15 +44,30 @@ pub(crate) fn capture_available() -> bool {
     wiry_capture::available()
 }
 
-/// Raises the canonical explanation when this build cannot capture, so every
-/// caller reports the same rebuild instruction.
+/// Raises the canonical explanation when this host cannot capture, so every
+/// caller reports the same missing library and the same way to supply it.
 #[pyfunction]
 pub(crate) fn capture_check() -> PyResult<()> {
-    if wiry_capture::available() {
-        Ok(())
-    } else {
-        Err(to_py_err(CaptureError::Unsupported))
+    match wiry_capture::unavailable_reason() {
+        None => Ok(()),
+        Some(e) => Err(to_py_err(e)),
     }
+}
+
+/// What the capture backend is, for a bug report that has to be checkable:
+/// the shared object that was loaded, libpcap's own version banner, and the
+/// reason where nothing was loaded.
+#[pyfunction]
+pub(crate) fn capture_backend(py: Python<'_>) -> PyResult<Py<PyDict>> {
+    let d = PyDict::new_bound(py);
+    d.set_item("available", wiry_capture::available())?;
+    d.set_item("library", wiry_capture::backend_path())?;
+    d.set_item("version", wiry_capture::backend_version())?;
+    d.set_item(
+        "reason",
+        wiry_capture::unavailable_reason().map(|e| e.to_string()),
+    )?;
+    Ok(d.unbind())
 }
 
 fn iface_dict<'py>(py: Python<'py>, i: &Interface) -> PyResult<Bound<'py, PyDict>> {

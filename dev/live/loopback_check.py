@@ -13,7 +13,8 @@ from wiry import IP, Raw, UDP
 
 def main():
     if not P.capture_available():
-        sys.exit("built without the live feature; see dev/live/README.md")
+        sys.exit(P.capture_backend()["reason"])
+    print("backend:", P.capture_backend()["version"])
 
     s = P.AsyncSniffer(iface="lo0", filter="udp port 4445", count=1, timeout=5)
     s.start()

@@ -9,8 +9,12 @@ env:
 
 jobs:
   rust:
-    name: rust
-    runs-on: ubuntu-latest
+    name: rust (default) / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -30,8 +34,11 @@ jobs:
             ${{ runner.os }}-cargo-rust-
 
       - name: cargo fmt --check
+        if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all --check
 
+      # No libpcap is installed anywhere in this job. That is the point: live
+      # capture loads it at run time, so nothing in the build may need it.
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -39,23 +46,15 @@ jobs:
         run: cargo test --workspace
 
 
-  rust-live:
-    name: rust (live) / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+  rust-no-live:
+    name: rust (--no-default-features)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-
-      - name: Install libpcap
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -64,17 +63,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-live-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-nolive-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-live-
+            ${{ runner.os }}-cargo-nolive-
 
-      # Package-qualified: the workspace root is virtual, so a bare --features
-      # cannot name a member's feature.
-      - name: cargo clippy (live)
-        run: cargo clippy --workspace --all-targets --features wiry-py/live -- -D warnings
+      - name: cargo clippy (no live)
+        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 
-      - name: cargo test (live)
-        run: cargo test --workspace --features wiry-py/live
+      - name: cargo test (no live)
+        run: cargo test --workspace --no-default-features
 
   msrv:
     name: msrv 1.75
@@ -84,27 +81,20 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.75
 
-      - name: Install libpcap
-        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
-
-      # The pcap crate is pinned exactly because its master branch already
-      # declares a much newer MSRV; this job is what catches a bump.
-      - name: cargo check (live)
-        run: cargo check --workspace --features wiry-py/live
+      # libloading and mac_address are pinned exactly because neither declares
+      # an MSRV of its own; this job is what catches a bump.
+      - name: cargo check
+        run: cargo check --workspace
 
   python:
-    name: python ${{ matrix.python-version }} / ${{ matrix.os }} ${{ matrix.features && '(live)' || '' }}
+    name: python ${{ matrix.python-version }} / ${{ matrix.os }} ${{ matrix.features && '(no live)' || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.9", "3.13"]
-        features: ["", "live"]
-        exclude:
-          # Windows has no libpcap; the stub is what ships there.
-          - os: windows-latest
-            features: "live"
+        features: ["", "--no-default-features"]
     steps:
       - uses: actions/checkout@v4
 
@@ -125,9 +115,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-py-
 
-      - name: Install libpcap
-        if: matrix.os == 'ubuntu-latest' && matrix.features == 'live'
-        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+      # Only the runtime package, and only on Linux: macOS ships libpcap and
+      # Windows has none, which is the case the honest failure path is for.
+      # No -dev package anywhere, because the build must not need one.
+      - name: Install libpcap at run time only
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libpcap0.8
 
       - name: Install maturin and pytest
         run: pip install maturin pytest
@@ -140,7 +133,7 @@ jobs:
         shell: bash
         run: |
           if [ -n "${{ matrix.features }}" ]; then
-            MATURIN_PEP517_ARGS="--features pyo3/extension-module,live" pip install .
+            MATURIN_PEP517_ARGS="--no-default-features --features pyo3/extension-module" pip install .
           else
             pip install .
           fi
@@ -151,6 +144,12 @@ jobs:
       - name: Check the installed wheel imports
         shell: bash
         run: cd "${{ runner.temp }}" && python -c "import wiry; print(wiry.__version__)"
+
+      # Printed rather than asserted: whether libpcap is there is a property of
+      # the runner, and the suite covers both answers.
+      - name: Say what the capture backend is
+        shell: bash
+        run: cd "${{ runner.temp }}" && python -c "import wiry; print(wiry.capture_backend())"
 
       - name: Run Python tests
         shell: bash

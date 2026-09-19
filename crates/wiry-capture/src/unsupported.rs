@@ -22,6 +22,9 @@ impl Handle {
     pub fn set_filter(&mut self, _expr: &str) -> Result<(), CaptureError> {
         match *self {}
     }
+    pub fn reads_block(&self) -> bool {
+        match *self {}
+    }
 }
 
 pub enum CompiledFilter {}
@@ -34,6 +37,18 @@ impl CompiledFilter {
 
 pub fn available() -> bool {
     false
+}
+
+pub fn unavailable_reason() -> Option<CaptureError> {
+    Some(CaptureError::Unsupported)
+}
+
+pub fn backend_version() -> Option<String> {
+    None
+}
+
+pub fn backend_path() -> Option<String> {
+    None
 }
 
 pub fn list_interfaces() -> Result<Vec<Interface>, CaptureError> {

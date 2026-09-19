@@ -11,10 +11,10 @@ import wiry as P
 from wiry import capture as C
 
 live = pytest.mark.skipif(
-    not P.capture_available(), reason="built without the live feature"
+    not P.capture_available(), reason="this host cannot load libpcap"
 )
 absent = pytest.mark.skipif(
-    P.capture_available(), reason="this build has the live feature"
+    P.capture_available(), reason="this host can load libpcap"
 )
 
 

@@ -19,7 +19,9 @@ setup)
   echo "ready: $VETH on the host, $PEER inside $NS"
   ;;
 run)
-  exec "$(dirname "$0")/../../.venv/bin/python" "$(dirname "$0")/netns_check.py" "$VETH" "$NS" "$PEER"
+  # PYTHON= overrides, for a container or a system interpreter with CAP_NET_RAW.
+  exec "${PYTHON:-$(dirname "$0")/../../.venv/bin/python}" -u \
+    "$(dirname "$0")/netns_check.py" "$VETH" "$NS" "$PEER"
   ;;
 teardown)
   ip netns del "$NS" 2>/dev/null || true
