@@ -1,0 +1,17 @@
+[package]
+name = "wiry-pcap"
+description = "Runtime-loaded libpcap bindings for wiry: no libpcap at build time"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["pcap", "libpcap", "npcap", "dlopen", "network"]
+categories = ["network-programming", "external-ffi-bindings"]
+readme = "../../README.md"
+rust-version.workspace = true
+
+[dependencies]
+# Pinned for the reason the whole crate exists: the loader is the one place
+# unsafe lives, and a silent minor bump of the thing doing the dlopen is not
+# something to discover from a segfault.
+libloading = "=0.8.9"

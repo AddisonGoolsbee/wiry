@@ -4,6 +4,9 @@ use std::fmt;
 pub enum CaptureError {
     /// Built without the `live` feature.
     Unsupported,
+    /// Built with it, but libpcap is not on this host. Carries libpcap's own
+    /// loader message and the install instruction for this platform.
+    LibraryMissing(String),
     /// The operation cannot work on this platform at all.
     UnsupportedOn(&'static str),
     /// What the caller handed in is not something this can send. A packet
@@ -20,12 +23,12 @@ impl fmt::Display for CaptureError {
         match self {
             CaptureError::Unsupported => write!(
                 f,
-                "this build of wiry has no live capture support. Rebuild with \
-                 the `live` feature: MATURIN_PEP517_ARGS=\"--features \
-                 pyo3/extension-module,live\" pip install . -- from a checkout, \
-                 and it needs libpcap. Reading and writing capture files does \
-                 not need it."
+                "this build of wiry was compiled with --no-default-features, \
+                 which leaves out live capture. A default build has it, and \
+                 loads libpcap at run time rather than at build time. Reading \
+                 and writing capture files does not need it."
             ),
+            CaptureError::LibraryMissing(m) => write!(f, "{m}"),
             CaptureError::UnsupportedOn(why) => write!(f, "{why}"),
             CaptureError::BadArgument(m) => write!(f, "{m}"),
             CaptureError::Permission(d) => write!(

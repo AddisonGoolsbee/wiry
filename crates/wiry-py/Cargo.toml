@@ -15,12 +15,15 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wiry-core = { path = "../wiry-core", version = "0.1.0" }
-wiry-capture = { path = "../wiry-capture", version = "0.1.0" }
+wiry-capture = { path = "../wiry-capture", version = "0.1.0", default-features = false }
 # extension-module is NOT enabled here: it disables linking against libpython,
 # which breaks `cargo test`/`cargo build`. maturin enables it at build time via
 # pyproject.toml's [tool.maturin] features, which is the only place it matters.
 pyo3 = { version = "0.22", features = ["abi3-py39"] }
 
 [features]
-# Forwards to the capture crate. Off by default: the offline paths never need it.
+# Forwards to the capture crate, and on by default there: a plain
+# `pip install wiry` must capture live, the way scapy does. Building with
+# --no-default-features leaves the offline paths, which need nothing at all.
+default = ["live"]
 live = ["wiry-capture/live"]

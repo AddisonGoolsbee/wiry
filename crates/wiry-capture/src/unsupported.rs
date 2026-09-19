@@ -36,6 +36,18 @@ pub fn available() -> bool {
     false
 }
 
+pub fn unavailable_reason() -> Option<CaptureError> {
+    Some(CaptureError::Unsupported)
+}
+
+pub fn backend_version() -> Option<String> {
+    None
+}
+
+pub fn backend_path() -> Option<String> {
+    None
+}
+
 pub fn list_interfaces() -> Result<Vec<Interface>, CaptureError> {
     Err(CaptureError::Unsupported)
 }
