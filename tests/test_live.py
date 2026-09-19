@@ -25,7 +25,8 @@ def test_live_args_mirror_the_sniff_keywords():
     assert a["store"] is False
     assert a["timeout"] == 2.0
     assert a["conds"] == [("IP", "ttl", "==", 64)]
-    assert a["wrap"] is C._wrap
+    # The live wrap records which interface the packet arrived on.
+    assert a["wrap"].__qualname__.startswith("_wrap_from")
 
 
 def test_live_args_reject_a_keyword_sniff_does_not_take():

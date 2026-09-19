@@ -94,6 +94,8 @@ class RandNum(VolatileValue):
 
 
 class RandByte(RandNum):
+    """A random octet."""
+
     __slots__ = ()
 
     def __init__(self) -> None:
@@ -101,6 +103,8 @@ class RandByte(RandNum):
 
 
 class RandShort(RandNum):
+    """A random 16-bit integer."""
+
     __slots__ = ()
 
     def __init__(self) -> None:
@@ -108,6 +112,8 @@ class RandShort(RandNum):
 
 
 class RandInt(RandNum):
+    """A random 32-bit integer."""
+
     __slots__ = ()
 
     def __init__(self) -> None:
@@ -115,6 +121,8 @@ class RandInt(RandNum):
 
 
 class RandLong(RandNum):
+    """A random 64-bit integer."""
+
     __slots__ = ()
 
     def __init__(self) -> None:

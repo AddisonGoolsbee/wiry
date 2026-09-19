@@ -22,6 +22,12 @@ arrow = ["pyarrow>=14"]
 polars = ["polars>=0.20"]
 pandas = ["pandas>=1.5"]
 plot = ["matplotlib>=3.5"]
+# A nicer console. `wiry` starts either way; without this it is the standard
+# Python shell, which is why neither is a hard requirement.
+console = ["ipython>=8"]
+
+[project.scripts]
+wiry = "wiry.console:main"
 
 [project.urls]
 Repository = "https://github.com/AddisonGoolsbee/wiry"

@@ -8,7 +8,7 @@ import pytest
 import wiry
 from wiry import (
     ARP, Dot1Q, Ether, ICMP, IP, IPv6, Padding, Raw, TCP, UDP, hexdump_str,
-    known_layers, ls, raw,
+    known_layers, ls, lsc, explore, raw,
 )
 from helpers import ETHER_IP_TCP, checksum
 
@@ -293,25 +293,69 @@ def test_known_layers_matches_the_exported_classes():
         assert getattr(wiry, name)._name == name
 
 
-def test_ls_lists_layers_and_fields():
+def _printed(fn, *a, **kw):
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        ls()
-    assert out.getvalue().split() == known_layers()
-
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        ls(TCP)
-    assert out.getvalue().split()[:3] == ["sport", "dport", "seq"]
+        fn(*a, **kw)
+    return out.getvalue()
 
 
-def test_ls_of_a_packet_lists_each_layer(pkt):
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        ls(pkt)
-    printed = out.getvalue()
+def test_ls_lists_every_layer_with_its_shape():
+    lines = [ln for ln in _printed(ls).splitlines() if " : " in ln]
+    assert [ln.split()[0] for ln in lines] == sorted(known_layers())
+    assert "fields" in lines[0] and "octets" in lines[0]
+
+
+def test_ls_of_a_class_names_each_field_its_type_and_its_default():
+    printed = _printed(ls, TCP)
+    assert [ln.split()[0] for ln in printed.splitlines()][:3] == [
+        "sport", "dport", "seq"
+    ]
+    # A computed field has no default: it has whatever the octets make it.
+    assert "chksum" in printed and "computed" in printed
+    assert "(None)" in printed
+    assert "uint (2 bytes)" in printed and "flags (9 bits)" in printed
+
+
+def test_ls_searches_by_name_closest_match_first():
+    printed = _printed(ls, "tcp")
+    names = [ln.split()[0] for ln in printed.splitlines() if " : " in ln]
+    assert names[0] == "TCP"
+    assert "RTCP" in names
+    assert "UDP" not in names
+
+
+def test_ls_of_a_packet_lists_each_layer_with_values_and_defaults(pkt):
+    printed = _printed(ls, pkt)
     assert "###[ Ether ]###" in printed and "###[ TCP ]###" in printed
-    assert "  sport" in printed
+    # value first, then the default it was compared against
+    assert "= 80" in printed and "(80)" in printed
+    assert "'00:11:22:33:44:55'" in printed
+
+
+def test_ls_verbose_names_the_bits_of_a_flags_field():
+    assert "F, S, R" not in _printed(ls, TCP)
+    assert "F, S, R, P, A, U, E, C, N" in _printed(ls, TCP, verbose=True)
+
+
+def test_ls_of_something_that_is_not_a_layer_says_so():
+    assert "Not a packet class" in _printed(ls, object())
+
+
+def test_lsc_lists_commands_with_their_first_doc_line():
+    printed = _printed(lsc)
+    assert "rdpcap" in printed and "sniff" in printed
+    # Layers and value classes are not commands.
+    assert "\nIP " not in printed and "RandIP " not in printed
+    assert "wrpcap" in _printed(lsc, "pcap")
+    assert "sniff" not in _printed(lsc, "pcap")
+
+
+def test_explore_shows_one_layer_in_full():
+    printed = _printed(explore, "TCP")
+    assert "###[ TCP ]###" in printed
+    assert "dataofs" in printed
+    assert "options" in printed
 
 
 def test_ls_verbose_keeps_the_fields_a_header_does_not_carry():

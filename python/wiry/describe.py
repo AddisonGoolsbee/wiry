@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import difflib
 import json as _json
+import re
+import sys
+import warnings
 from typing import Any
 
 from . import _wiry as _b
 
-__all__ = ["command", "json_str", "to_dict", "hexdiff", "hexdiff_str"]
+__all__ = ["command", "json_str", "to_dict", "hexdiff", "hexdiff_str",
+           "from_hexcap"]
 
 # Aligning two byte strings is quadratic, and a diff of two 64 KB datagrams is
 # not what anyone means by hexdiff. Past this, the columns line up by offset.
@@ -180,4 +184,40 @@ def hexdiff_str(a: Any, b: Any, width: int = 16) -> str:
 
 
 def hexdiff(a: Any, b: Any, width: int = 16) -> None:
+    """Print two packets side by side, aligned."""
     print(hexdiff_str(a, b, width), end="")
+
+
+# An offset column, then up to 16 hex pairs, then whatever ASCII the tool put
+# on the right; tcpdump, Wireshark and `hexdump -C` all fit this.
+_HEXCAP = re.compile(
+    r"^\s*(?:(?:0x)?[0-9a-fA-F]{2,}[ :\t]{1,3})?((?:[0-9a-fA-F]{2}[ \t]{0,2}){1,16})"
+)
+
+
+def from_hexcap(text: str | None = None) -> bytes:
+    """The octets of a pasted hex dump.
+
+    With no argument it reads stdin until a blank line, so a paste at a prompt
+    ends by pressing enter twice. A line it cannot read is skipped with a
+    warning rather than aborting the paste.
+    """
+    if text is None:
+        lines = []
+        for line in sys.stdin:
+            if not line.strip():
+                break
+            lines.append(line)
+    else:
+        lines = text.splitlines()
+    out = bytearray()
+    for line in lines:
+        if not line.strip():
+            continue
+        m = _HEXCAP.match(line)
+        if m is None:
+            warnings.warn(f"skipped an unreadable hexcap line: {line.strip()!r}",
+                          stacklevel=2)
+            continue
+        out += bytes.fromhex(re.sub(r"\s", "", m.group(1)))
+    return bytes(out)
