@@ -254,7 +254,7 @@ fn walk_in(rec: &[u8], g: &GroupDesc, b: &mut Budget) -> Vec<Item> {
     let mut out: Vec<Item> = Vec::new();
     let mut i = 0usize;
     while i < region.len() && out.len() < MAX_ELEMENTS {
-        if want.is_some_and(|w| out.len() >= w) || b.items == 0 {
+        if want.is_some_and(|w| out.len() >= w) || !b.spend_item() {
             break;
         }
         let total = g.elem_len(&region[i..]);
@@ -282,6 +282,7 @@ fn element(e: &[u8], g: &GroupDesc, idx: usize, b: &mut Budget) -> Item {
     }
     if let Some(n) = g.nested {
         let inner = walk_in(e, n, b);
+        b.spend_item();
         vals.push(Item::named(n.name, 0, ItemValue::Items(inner)));
     }
     if g.is_scalar_list() {
@@ -777,15 +778,28 @@ mod tests {
         assert_eq!(walk(&data, &RESTED).len(), MAX_ELEMENTS);
     }
 
+    /// The element cap alone does not bound the work, because a nested group
+    /// multiplies it: 512 records of 20 sources each is past the item budget.
     #[test]
-    fn the_item_cap_bounds_the_total_work() {
-        // Every element carries two fields, so the item budget binds before the
-        // element cap does when the budget is the smaller of the two.
-        let data = vec![0u8; MAX_ITEMS * 4];
-        let got = walk(&data, &RESTED);
-        assert!(got.len() <= MAX_ELEMENTS);
-        let fields: usize = got.iter().map(|i| uints(i).len()).sum();
-        assert!(fields <= MAX_ITEMS);
+    fn the_item_cap_bounds_the_total_work_across_nesting() {
+        let mut data = Vec::new();
+        for _ in 0..MAX_ELEMENTS {
+            data.extend_from_slice(&[1u8, 20]);
+            data.extend(std::iter::repeat(0u8).take(80));
+        }
+        let items = count(&walk(&data, &VAR));
+        assert!(items <= MAX_ITEMS, "{items} items");
+        assert!(items > MAX_ITEMS / 2, "the budget was never approached");
+    }
+
+    fn count(items: &[Item]) -> usize {
+        items
+            .iter()
+            .map(|i| match &i.value {
+                ItemValue::Items(v) => 1 + count(v),
+                _ => 1,
+            })
+            .sum()
     }
 
     #[test]

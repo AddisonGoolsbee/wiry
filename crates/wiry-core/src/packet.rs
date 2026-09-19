@@ -283,9 +283,8 @@ impl Packet {
     }
 
     /// Rewrite the count or extent field of a layer's repeating group from the
-    /// region that is actually there. Construction writes the fixed header
-    /// before any field the caller named, and a group may be conditional on one
-    /// of those fields, so the region cannot always be counted at build time.
+    /// region that is there. A group may be conditional on a field the caller
+    /// names, which construction writes after the fixed header.
     pub fn sync_group(&mut self, layer: usize) {
         let Some(s) = self.spans.get(layer).copied() else {
             return;

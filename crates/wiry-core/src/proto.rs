@@ -477,9 +477,9 @@ pub fn accessor_names(id: ProtoId) -> &'static [&'static str] {
     }
 }
 
-/// The repeating group a protocol's payload is, where its payload is one.
-/// A generated match rather than a `ProtoDesc` field: ninety layers carry no
-/// group, and the descriptor is already the widest struct in the crate.
+/// The repeating group a protocol's payload is, where its payload is one. A
+/// generated match rather than a `ProtoDesc` field, since ninety layers carry
+/// no group.
 #[inline]
 // The arms are generated, so a spec set that declares no group at all still
 // has to compile.

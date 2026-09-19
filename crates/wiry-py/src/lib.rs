@@ -1728,9 +1728,8 @@ fn option_region_limit(id: ProtoId) -> Option<usize> {
 fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u8>> {
     let mut out = Vec::new();
     let mut named = Vec::new();
-    // A repeating group and an option table are both "named things appended
-    // after the fixed header", so they share this path and differ only in who
-    // resolves the name.
+    // A group and an option table are both named things appended after the
+    // fixed header, so only the name resolution differs.
     let group = proto::group_of(id);
     for (_, name, arg) in opts.iter().filter(|(l, _, _)| *l == layer) {
         let Some(name) = name else {
