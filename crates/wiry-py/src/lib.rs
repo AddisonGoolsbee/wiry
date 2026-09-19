@@ -2150,7 +2150,6 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(template::rand_value, m)?)?;
     m.add_function(wrap_pyfunction!(template::set_rand_seed, m)?)?;
     m.add_function(wrap_pyfunction!(template::field_specs, m)?)?;
-    m.add_function(wrap_pyfunction!(template::corrupt, m)?)?;
     m.add_function(wrap_pyfunction!(capture::capture_available, m)?)?;
     m.add_function(wrap_pyfunction!(capture::capture_check, m)?)?;
     m.add_function(wrap_pyfunction!(capture::list_interfaces, m)?)?;

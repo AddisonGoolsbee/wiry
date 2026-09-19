@@ -448,12 +448,23 @@ def test_corruption_of_nothing_is_nothing():
 
 
 def test_a_corruption_fraction_cannot_run_away():
-    # p is a fraction; unclamped, p=1e9 spun in Rust for 88 s with the GIL held.
+    # p is a fraction; unclamped, p=1e9 spun for 88 s with the GIL held.
     started = time.perf_counter()
     assert len(corrupt_bytes(b"A" * 64, p=1e9)) == 64
     assert len(corrupt_bits(b"A" * 64, p=float("inf"))) == 64
-    assert corrupt_bytes(b"A" * 64, p=-1) == b"A" * 64
+    # Both ends clamp, and a fraction that rounds to nothing still corrupts
+    # one position: "at least one" is the contract, not a rounding accident.
+    assert sum(c != 65 for c in corrupt_bytes(b"A" * 64, p=-1)) == 1
+    assert sum(c != 65 for c in corrupt_bytes(b"A" * 64, p=0.0)) == 1
     assert time.perf_counter() - started < 5
+
+
+def test_an_explicit_count_is_exact_and_bounded_by_the_data():
+    data = b"A" * 16
+    assert sum(a != b for a, b in zip(data, corrupt_bytes(data, n=5))) == 5
+    # More positions asked for than exist corrupts every one of them, rather
+    # than repeating a position or raising.
+    assert sum(a != b for a, b in zip(data, corrupt_bytes(data, n=99))) == 16
 
 
 def test_a_seed_repeats_a_corruption():
@@ -461,3 +472,19 @@ def test_a_seed_repeats_a_corruption():
     first = corrupt_bytes(b"A" * 32, n=6)
     set_rand_seed(11)
     assert corrupt_bytes(b"A" * 32, n=6) == first
+
+
+def test_corruption_follows_scapys_draw_order():
+    """The two corrupt helpers draw from the interpreter's `random` in scapy's
+    order, so `random.seed(n)` alone reproduces scapy's own octets. This is the
+    regression scapy's suite asserts and wiry could not pass before."""
+    import random
+
+    def sane(raw):
+        return "".join(chr(c) if 32 <= c < 127 else "." for c in raw)
+
+    random.seed(0x2807)
+    assert corrupt_bytes("ABCDE") in (b"ABCDW", b"ABCDX")
+    assert sane(corrupt_bytes("ABCDE", n=3)) in ("A.8D4", ".2.DE")
+    assert corrupt_bits("ABCDE") in (b"EBCDE", b"ABCDG")
+    assert sane(corrupt_bits("ABCDE", n=3)) in ("AF.EE", "QB.TE")

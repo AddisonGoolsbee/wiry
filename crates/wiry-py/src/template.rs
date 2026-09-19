@@ -298,26 +298,6 @@ pub(crate) fn make_template(
     })
 }
 
-/// Replaces `n` byte positions, or flips `n` bits, drawing from the same
-/// generator every volatile value comes from, so a seeded run repeats.
-#[pyfunction]
-pub(crate) fn corrupt(py: Python<'_>, data: &[u8], n: usize, bits: bool) -> Py<PyBytes> {
-    let mut out = data.to_vec();
-    if !out.is_empty() {
-        with_rng(|rng| {
-            for _ in 0..n {
-                let at = rng.in_range(0, out.len() as u64 - 1) as usize;
-                if bits {
-                    out[at] ^= 1 << rng.in_range(0, 7);
-                } else {
-                    out[at] = rng.next_u64() as u8;
-                }
-            }
-        });
-    }
-    PyBytes::new_bound(py, &out).into()
-}
-
 /// name, bit width, kind, computed, conditional.
 type FieldShape = (&'static str, u16, &'static str, bool, bool);
 

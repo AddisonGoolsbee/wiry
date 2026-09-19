@@ -69,7 +69,7 @@ per-file blocks are authoritative.
 
 | wiry file | scapy source | scapy version / commit | First taken |
 |---|---|---|---|
-| _(none yet — the relicence landed before any copying)_ | | | |
+| `python/wiry/volatile.py` | `scapy/utils.py` — `corrupt_bytes`, `corrupt_bits` | scapy 2.7.0 | 2026-09-18 |
 
 
 ## Licence history — the MIT period

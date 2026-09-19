@@ -1,3 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Derived from scapy: scapy/utils.py (`corrupt_bytes`, `corrupt_bits` only)
+#   scapy 2.7.0
+#   Copyright (C) Philippe Biondi and the scapy contributors
+#
+# Changed by the wiry authors:
+#   2026-09-18 — transcribed the two corruption helpers, whose draw order from
+#     the interpreter's `random` is their interface; clamped `p` to a fraction
+#     and `n` to the number of positions, and made empty input return empty
+#     rather than raise.
 """Generators: one declaration that multiplies into many packets.
 
 Each class below carries a small spec tuple; the whole set crosses into Rust
@@ -7,6 +18,7 @@ once and the product is walked there.
 from __future__ import annotations
 
 import ipaddress
+import random
 from typing import Any, Iterator, Optional, Sequence
 
 from . import _wiry as _b
@@ -23,8 +35,17 @@ STRING_CHARS = (b"abcdefghijklmnopqrstuvwxyz"
 
 
 def set_rand_seed(seed: int) -> None:
-    """Seed every volatile value, so a fuzz run repeats exactly."""
+    """Seed every volatile value, so a fuzz run repeats exactly.
+
+    Two streams, because they answer to different things. Templates draw from a
+    splitmix64 in Rust, which is what keeps a sixteen-million-packet expansion
+    out of Python. `corrupt_bytes` and `corrupt_bits` draw from the
+    interpreter's `random`, where scapy's draw order is the interface rather
+    than an implementation detail — so **this reseeds the process-wide `random`
+    module**, and `random.seed(n)` alone also steers the two corrupt helpers.
+    """
     _b.set_rand_seed(int(seed) & 0xFFFFFFFFFFFFFFFF)
+    random.seed(seed)
 
 
 class VolatileValue:
@@ -429,12 +450,17 @@ def _fuzz_gen(kind: str, bits: int) -> Optional[Any]:
     return None
 
 
-def _how_many(data: bytes, p: float, n: Optional[int], per: int) -> int:
-    """`p` is a fraction of the positions, so it clamps to one: unclamped, a
-    `p=1e9` spins in Rust for a minute and a half with the GIL held."""
-    if n is not None:
-        return max(int(n), 0)
-    return int(min(max(float(p), 0.0), 1.0) * len(data) * per)
+def _how_many(positions: int, p: float, n: Optional[int]) -> int:
+    """How many positions to touch, never more than there are.
+
+    `p` is a fraction, so it clamps to one: unclamped, `p=1e9` used to spin for
+    a minute and a half with the GIL held. At least one position is touched,
+    which is scapy's contract and why its own default corrupts a five-octet
+    string that 1% of would round to nothing.
+    """
+    if n is None:
+        n = max(1, int(min(max(float(p), 0.0), 1.0) * positions))
+    return min(max(int(n), 0), positions)
 
 
 def _octets(data: Any) -> bytes:
@@ -442,15 +468,27 @@ def _octets(data: Any) -> bytes:
 
 
 def corrupt_bytes(data: Any, p: float = 0.01, n: Optional[int] = None) -> bytes:
-    """Replace whole octets at random: `n` of them, or a fraction `p`."""
-    raw = _octets(data)
-    return _b.corrupt(raw, _how_many(raw, p, n, 1), False)
+    """Replace whole octets at random: `n` of them, or a fraction `p`.
+
+    The positions are distinct and every one of them changes, so `n` octets
+    asked for is `n` octets different.
+    """
+    raw = bytearray(_octets(data))
+    if not raw:
+        return b""
+    for i in random.sample(range(len(raw)), _how_many(len(raw), p, n)):
+        raw[i] = (raw[i] + random.randint(1, 255)) % 256
+    return bytes(raw)
 
 
 def corrupt_bits(data: Any, p: float = 0.01, n: Optional[int] = None) -> bytes:
     """Flip single bits at random: `n` of them, or a fraction `p`."""
-    raw = _octets(data)
-    return _b.corrupt(raw, _how_many(raw, p, n, 8), True)
+    raw = bytearray(_octets(data))
+    if not raw:
+        return b""
+    for i in random.sample(range(len(raw) * 8), _how_many(len(raw) * 8, p, n)):
+        raw[i // 8] ^= 1 << (i % 8)
+    return bytes(raw)
 
 
 def fuzz(pkt: Any) -> Any:
