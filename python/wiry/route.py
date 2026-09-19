@@ -75,9 +75,16 @@ def itom(x: int) -> int:
     return (0xFFFFFFFF << (32 - x)) & 0xFFFFFFFF if x else 0
 
 
-def loopback_name() -> str:
+def platform_loopback() -> str:
     """What this host calls its loopback interface."""
     return "lo" if _LINUX else "lo0"
+
+
+def loopback_name() -> str:
+    """The loopback interface a route falls back to, which `conf` may override."""
+    from .capture import conf
+
+    return conf.loopback_name
 
 
 # ---------------------------------------------------------------- interfaces

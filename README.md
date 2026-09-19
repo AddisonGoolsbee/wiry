@@ -293,19 +293,19 @@ all 20,000 layer chains agree, all 210,910 field comparisons are equal, and
 every packet re-serialises byte-identically.
 
 scapy's own regression suite runs against wiry. Over its whole `test/`
-directory: **55 pass, 621 skip, 4 fail**; over `regression.uts` alone, 44 pass,
-298 skip, 3 fail. Read the skip column honestly: it is 91% of the suite, and
-that ratio is the coverage statement, not the pass count. A skip is a scope
-boundary — most often a layer we do not implement, a scapy internal we have no
-equivalent for, a call we refuse by design, or a test whose `~` marker asks for
-a Linux host, root or tshark. A refusal counts as a skip rather than a failure,
-which is a choice the harness makes and `dev/scapy_suite.py` shows. Of the 4
-failures, 1 needs Windows, 1 asserts by patching a scapy internal we do not
-have, and 2 are
+directory: **59 pass, 616 skip, 5 fail**; over `regression.uts` alone, 47 pass,
+294 skip, 4 fail; over `test/scapy/automaton.uts`, 7 pass, 8 skip, 0 fail. Read
+the skip column honestly: it is 90% of the suite, and that ratio is the coverage
+statement, not the pass count. A skip is a scope boundary — most often a layer
+we do not implement, a scapy internal we have no equivalent for, a call we
+refuse by design, or a test whose `~` marker asks for a Linux host, root or
+tshark. A refusal counts as a skip rather than a failure, which is a choice the
+harness makes and `dev/scapy_suite.py` shows. Of the 5 failures, 1 needs
+Windows, 2 assert by patching a scapy internal we do not have, and 2 are
 generator differences [DEVIATIONS.md](DEVIATIONS.md) E21 states outright. Every
 gap is enumerated there.
 
-670 Rust and 1,196 Python tests pass, 676 Rust with live capture built in. All
+670 Rust and 1,288 Python tests pass, 676 Rust with live capture built in. All
 four crates set `#![forbid(unsafe_code)]`, which constrains this code and says
 nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
 compiled in. The dissector carries ten fuzz targets plus seeded property tests

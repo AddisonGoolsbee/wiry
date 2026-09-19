@@ -19,6 +19,7 @@ import atexit
 import math
 import os
 import threading
+import warnings
 import weakref
 from typing import Any, Callable, Optional
 
@@ -125,7 +126,19 @@ def _add_session(args: dict, session: Any, store: Any) -> None:
 
     def wrap(rust: Any) -> Any:
         pkt = base(rust)
-        out = session.process(pkt)
+        try:
+            out = session.process(pkt)
+        except Exception as exc:
+            # scapy reports and skips past a session's own failure so one bad
+            # packet does not end the capture; conf.debug_dissector says no.
+            if conf.debug_dissector:
+                raise
+            warnings.warn(
+                f"{type(session).__name__}.process failed with {exc!r}; "
+                "passing the packet through",
+                RuntimeWarning, stacklevel=2,
+            )
+            return pkt
         if store and out is not None and out is not pkt:
             raise NotImplementedError(
                 f"{type(session).__name__} replaced a packet, and a replaced "
@@ -765,9 +778,9 @@ class _Conf:
     @property
     def loopback_name(self) -> str:
         """What this host calls its loopback interface."""
-        from .route import loopback_name
+        from .route import platform_loopback
 
-        return self._loopback or loopback_name()
+        return self._loopback or platform_loopback()
 
     @loopback_name.setter
     def loopback_name(self, value: Any) -> None:

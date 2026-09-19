@@ -105,6 +105,19 @@ def select_objects(inputs: Iterable[Any], remain: Optional[float]) -> list:
     return list(results)
 
 
+#: Default for a `select` nobody gave a wait to: read from `conf` at the call
+#: rather than baked in, so `conf.recv_poll_rate` is a live knob.
+_POLL = object()
+
+
+def _poll_rate(remain: Any) -> Optional[float]:
+    if remain is not _POLL:
+        return remain
+    from .capture import conf
+
+    return conf.recv_poll_rate
+
+
 class ObjectPipe:
     """A queue of Python objects that ``select`` can wait on.
 
@@ -191,11 +204,11 @@ class ObjectPipe:
         self.close()
 
     @staticmethod
-    def select(sockets: list, remain: Optional[float] = 0.05) -> list:
+    def select(sockets: list, remain: Any = _POLL) -> list:
         ready = [s for s in sockets if getattr(s, "closed", False)]
         if ready:  # let the read raise EOF
             return ready
-        return select_objects(sockets, remain)
+        return select_objects(sockets, _poll_rate(remain))
 
 
 class SuperSocket:
@@ -230,8 +243,8 @@ class SuperSocket:
             pass
 
     @staticmethod
-    def select(sockets: list, remain: Optional[float] = 0.05) -> list:
-        return select_objects(sockets, remain)
+    def select(sockets: list, remain: Any = _POLL) -> list:
+        return select_objects(sockets, _poll_rate(remain))
 
 
 class OfflineSocket(SuperSocket):

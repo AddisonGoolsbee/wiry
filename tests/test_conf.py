@@ -5,6 +5,8 @@ that silently absorbed a setting would be worse than a missing one, so a value
 wiry cannot honour raises by name, and a name wiry does not have raises too.
 """
 
+import time
+
 import pytest
 
 import wiry as P
@@ -77,12 +79,27 @@ def test_a_socket_knob_names_a_real_class_and_takes_a_replacement(name, default)
     assert getattr(P.conf, name).__name__ == default
 
 
-def test_loopback_name_is_this_hosts_and_can_be_overridden():
+def test_loopback_name_is_this_hosts_and_is_what_a_route_falls_back_to():
+    from wiry import Route
+
     assert P.conf.loopback_name in ("lo", "lo0")
     P.conf.loopback_name = "lo42"
-    assert P.conf.loopback_name == "lo42"
+    assert Route(autoload=False).route("8.8.8.8")[0] == "lo42"
     P.conf.loopback_name = None
     assert P.conf.loopback_name in ("lo", "lo0")
+
+
+def test_recv_poll_rate_is_the_wait_a_select_takes_when_given_none():
+    from wiry import ObjectPipe, SuperSocket
+
+    pipe = ObjectPipe("t")
+    try:
+        P.conf.recv_poll_rate = 0.3
+        started = time.monotonic()
+        assert SuperSocket.select([pipe]) == []
+        assert time.monotonic() - started >= 0.25
+    finally:
+        pipe.close()
 
 
 def test_conf_says_what_it_holds():

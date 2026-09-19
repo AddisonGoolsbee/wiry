@@ -623,7 +623,6 @@ class Automaton(metaclass=Automaton_metaclass):
     ionames: List[str] = []
     iosupersockets: List[Any] = []
 
-    # used by spawn()
     pkt_cls: Any = None
     socketcls: Any = StreamSocket
 

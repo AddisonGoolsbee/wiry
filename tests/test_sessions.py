@@ -134,6 +134,31 @@ def test_tcpsession_without_the_message_step_is_a_per_packet_pass_through(captur
         [bytes(p) for p in sniff(offline=capture)]
 
 
+def test_a_session_that_fails_is_reported_and_skipped_past(capture):
+    class Broken(DefaultSession):
+        def process(self, pkt):
+            raise RuntimeError("boom")
+
+    with pytest.warns(RuntimeWarning, match="boom"):
+        out = sniff(offline=capture, session=Broken)
+    assert len(out) == 3  # every packet passed through as captured
+
+
+def test_debug_dissector_makes_that_failure_raise_instead(capture):
+    from wiry import conf
+
+    class Broken(DefaultSession):
+        def process(self, pkt):
+            raise RuntimeError("boom")
+
+    saved, conf.debug_dissector = conf.debug_dissector, True
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            sniff(offline=capture, session=Broken)
+    finally:
+        conf.debug_dissector = saved
+
+
 def test_a_whole_capture_session_is_refused_on_an_interface():
     with pytest.raises(NotImplementedError, match="offline"):
         sniff(iface="lo0", session=TCPSession, count=1)
