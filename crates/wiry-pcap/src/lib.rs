@@ -368,7 +368,13 @@ impl Handle {
         }
         Error {
             kind: classify(&msg, code),
-            msg: format!("{ctx}: {msg}"),
+            // An empty context leaves libpcap's own sentence alone, for the
+            // callers that supply a better one of their own.
+            msg: if ctx.is_empty() {
+                msg
+            } else {
+                format!("{ctx}: {msg}")
+            },
         }
     }
 
@@ -416,7 +422,7 @@ impl Handle {
         // Positive is a warning that still activated: promiscuous mode refused
         // on an interface that captures anyway, a link type substituted.
         if rc < 0 {
-            let mut e = self.err("open", Some(rc));
+            let mut e = self.err("", Some(rc));
             if rc == PCAP_ERROR_IFACE_NOT_UP {
                 e.msg = format!("{e} (the interface is down)");
             }

@@ -2153,6 +2153,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(template::corrupt, m)?)?;
     m.add_function(wrap_pyfunction!(capture::capture_available, m)?)?;
     m.add_function(wrap_pyfunction!(capture::capture_check, m)?)?;
+    m.add_function(wrap_pyfunction!(capture::capture_backend, m)?)?;
     m.add_function(wrap_pyfunction!(capture::list_interfaces, m)?)?;
     m.add_function(wrap_pyfunction!(capture::default_interface, m)?)?;
     m.add_function(wrap_pyfunction!(capture::interface_mac, m)?)?;

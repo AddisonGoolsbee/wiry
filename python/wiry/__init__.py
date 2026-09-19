@@ -30,7 +30,8 @@ _DESCRIBE = ("hexdiff", "hexdiff_str")
 _CAPTURE = (
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
     "get_if_list", "get_if_addr", "get_if_hwaddr", "get_working_if",
-    "interfaces", "conf", "capture_available", "CaptureUnavailable",
+    "interfaces", "conf", "capture_available", "capture_backend",
+    "CaptureUnavailable",
 )
 
 _TOOLS = (

@@ -35,7 +35,9 @@ impl fmt::Display for CaptureError {
                 f,
                 "permission denied opening {d}. Live capture needs elevated \
                  privileges: run as root, or on Linux grant the interpreter \
-                 CAP_NET_RAW, or on macOS install ChmodBPF so /dev/bpf* is readable."
+                 CAP_NET_RAW (setcap cap_net_raw,cap_net_admin+eip \"$(readlink \
+                 -f $(which python3))\"), or on macOS install ChmodBPF, which \
+                 ships with Wireshark, so /dev/bpf* is readable."
             ),
             CaptureError::NoSuchDevice(d) => write!(f, "no such interface: {d}"),
             CaptureError::BadFilter(m) => write!(f, "invalid capture filter: {m}"),

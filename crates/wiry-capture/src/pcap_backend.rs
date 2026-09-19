@@ -6,7 +6,9 @@ use wiry_pcap as raw;
 fn map_err(e: raw::Error, ctx: &str) -> CaptureError {
     match e.kind {
         raw::Kind::NotLoaded => CaptureError::LibraryMissing(e.msg),
-        raw::Kind::Permission => CaptureError::Permission(format!("{ctx}: {}", e.msg)),
+        raw::Kind::Permission => {
+            CaptureError::Permission(format!("{ctx}: {}", e.msg.trim_end_matches('.')))
+        }
         raw::Kind::NoSuchDevice => CaptureError::NoSuchDevice(ctx.to_string()),
         raw::Kind::BadFilter => CaptureError::BadFilter(e.msg),
         raw::Kind::Other => CaptureError::Pcap(e.msg),

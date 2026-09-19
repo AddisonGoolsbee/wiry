@@ -1,7 +1,10 @@
-"""The capture surface with no live backend.
+"""The capture surface on a host that cannot capture.
 
-Every name must import and every entry point must explain itself. A build with
-the feature on skips only the assertions that are about its absence.
+Two things land here: a build made with ``--no-default-features``, and an
+ordinary build on a machine with no libpcap to load. Every name must still
+import and every entry point must explain itself, naming what is missing and
+how to supply it. A host that can capture skips only the assertions that are
+about the absence.
 """
 
 import pytest
@@ -11,14 +14,20 @@ import wiry as P
 NAMES = [
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
     "get_if_list", "get_if_addr", "get_if_hwaddr", "get_working_if",
-    "interfaces", "conf", "capture_available", "CaptureUnavailable",
-    "traceroute", "TracerouteResult", "arping", "srloop", "srploop",
+    "interfaces", "conf", "capture_available", "capture_backend",
+    "CaptureUnavailable", "traceroute", "TracerouteResult", "arping", "srloop", "srploop",
     "getmacbyip",
 ]
 
 absent = pytest.mark.skipif(
-    P.capture_available(), reason="this build has the live feature"
+    P.capture_available(), reason="this host can load libpcap"
 )
+
+
+def _explains_itself(msg):
+    """Whatever is missing, the message must name it and say what to do."""
+    assert "live capture" in msg, msg
+    assert "install" in msg or "--no-default-features" in msg, msg
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -54,12 +63,10 @@ def test_capture_is_reported_absent():
 
 
 @absent
-def test_sniffing_an_interface_names_the_build_command():
+def test_sniffing_an_interface_says_what_is_missing():
     with pytest.raises(P.CaptureUnavailable) as exc:
         P.sniff(iface="lo0")
-    msg = str(exc.value)
-    assert "pip install" in msg
-    assert "live" in msg
+    _explains_itself(str(exc.value))
 
 
 @absent
@@ -69,14 +76,14 @@ def test_sniffing_with_no_source_at_all_raises():
 
 
 @absent
-def test_a_bpf_filter_offline_explains_the_feature(tmp_path):
+def test_a_bpf_filter_offline_explains_what_compiles_one(tmp_path):
     from wiry import Ether, IP, TCP
 
     path = tmp_path / "one.pcap"
     P.wrpcap(str(path), [Ether() / IP() / TCP()])
     with pytest.raises(P.CaptureUnavailable) as exc:
         P.sniff(offline=str(path), filter="tcp")
-    assert "live" in str(exc.value)
+    _explains_itself(str(exc.value))
 
 
 @absent
@@ -87,7 +94,7 @@ def test_the_send_helpers_raise(name):
 
 
 @absent
-def test_the_active_tools_raise_and_name_the_build_command():
+def test_the_active_tools_raise_and_say_what_is_missing():
     from wiry import ARP, Ether, IP, TCP
 
     calls = [
@@ -100,7 +107,7 @@ def test_the_active_tools_raise_and_name_the_build_command():
     for fn, args, kw in calls:
         with pytest.raises(P.CaptureUnavailable) as exc:
             fn(*args, **kw)
-        assert "pip install" in str(exc.value)
+        _explains_itself(str(exc.value))
 
 
 @absent

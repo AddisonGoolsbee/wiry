@@ -8,9 +8,11 @@ first: ``filter=`` (BPF, in the kernel's own bytecode) rejects a packet for
 nothing, ``where=`` (a wiry extension, evaluated in Rust) rejects one before
 it ever becomes a Python object, and only survivors reach ``lfilter=``.
 
-Everything except ``sniff(offline=...)`` needs the live backend. Without it the
-names still import and raise ``CaptureUnavailable``, which subclasses
-``OSError``, so ``except OSError`` catches a failed library load too.
+Everything except ``sniff(offline=...)`` needs libpcap, which is loaded when a
+capture is first asked for rather than linked at build time. Where it is absent
+the names still import and raise ``CaptureUnavailable``, which subclasses
+``OSError``, naming the package to install. ``capture_backend()`` says which
+library was loaded, or why none was.
 """
 
 from __future__ import annotations
@@ -31,13 +33,28 @@ CaptureUnavailable = _b.CaptureUnavailable
 __all__ = [
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
     "get_if_list", "get_if_addr", "get_if_hwaddr", "get_working_if", "conf",
-    "capture_available", "CaptureUnavailable",
+    "capture_available", "capture_backend", "CaptureUnavailable",
 ]
 
 
 def capture_available() -> bool:
-    """Whether this build can capture live traffic. Never raises."""
+    """Whether this host can capture live traffic. Never raises.
+
+    True once libpcap has been found and loaded, which is a property of the
+    machine rather than of the build. It says nothing about privileges: a host
+    that can load libpcap and cannot open ``/dev/bpf0`` answers True here and
+    raises ``PermissionError`` from ``sniff``.
+    """
     return _b.capture_available()
+
+
+def capture_backend() -> dict:
+    """What the capture backend is: ``available``, the ``library`` that was
+    loaded, its ``version`` banner, and the ``reason`` where none was.
+
+    Never raises, so it is safe to put in a bug report unconditionally.
+    """
+    return dict(_b.capture_backend())
 
 
 def _iface_name(iface: Any) -> str:
@@ -749,7 +766,7 @@ class _Conf:
     @property
     def use_pcap(self) -> bool:
         """Reports rather than chooses: libpcap is the only backend wiry has,
-        and this is False only in a build without the ``live`` feature."""
+        and this is False only where it could not be loaded."""
         return capture_available()
 
     @use_pcap.setter
@@ -757,9 +774,9 @@ class _Conf:
         if bool(value) != capture_available():
             raise NotImplementedError(
                 "conf.use_pcap cannot be changed: libpcap is the only capture "
-                "backend wiry has, and this build "
-                + ("has it" if capture_available()
-                   else "was built without the live feature")
+                "backend wiry has, and on this host it "
+                + ("loaded" if capture_available()
+                   else "could not be loaded. " + capture_backend()["reason"])
             )
 
     @property
