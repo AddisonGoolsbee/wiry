@@ -131,6 +131,9 @@ impl Packet {
             if let Some(setter) = d.set_hlen {
                 setter(&mut buf[off..hdr_end], hlen);
             }
+            if let Some(g) = crate::proto::group_of(p) {
+                crate::repeat::sync(&mut buf[off..hdr_end], g);
+            }
             spans.push(LayerSpan {
                 proto: p,
                 off: off as u32,
@@ -279,6 +282,21 @@ impl Packet {
         }
     }
 
+    /// Rewrite the count or extent field of a layer's repeating group from the
+    /// region that is there. A group may be conditional on a field the caller
+    /// names, which construction writes after the fixed header.
+    pub fn sync_group(&mut self, layer: usize) {
+        let Some(s) = self.spans.get(layer).copied() else {
+            return;
+        };
+        let Some(g) = crate::proto::group_of(s.proto) else {
+            return;
+        };
+        let (a, b) = self.hdr_range(&s);
+        crate::repeat::sync(&mut self.buf[a..b], g);
+        self.mark_dirty(layer);
+    }
+
     fn pin(&mut self, layer: usize, proto: ProtoId, name: &'static str) {
         if !self.is_pinned(layer, name) {
             self.pinned.push((layer as u32, proto, name));
@@ -379,6 +397,11 @@ impl Packet {
             let grown = self.spans[layer];
             let (a, b) = self.hdr_range(&grown);
             setter(&mut self.buf[a..b], hlen);
+        }
+        if let Some(g) = crate::proto::group_of(s.proto) {
+            let grown = self.spans[layer];
+            let (a, b) = self.hdr_range(&grown);
+            crate::repeat::sync(&mut self.buf[a..b], g);
         }
         self.dirty = u32::MAX;
         self.resized = true;
@@ -489,6 +512,9 @@ pub fn options_at(
 ) -> Option<Vec<crate::options::Item>> {
     let s = spans.get(layer)?;
     let d = desc(s.proto);
+    if let Some(g) = crate::proto::group_of(s.proto) {
+        return Some(crate::repeat::walk(s.header(buf), g));
+    }
     let parse = d.parse_options?;
     let Some(t) = d.opt_table.filter(|_| s.proto == ProtoId::Dhcp) else {
         return Some(parse(s.header(buf)));

@@ -1,0 +1,45 @@
+name = "BGPRouteRefresh"
+id = "BgpRouteRefresh"
+num = 101
+module = "bgp_route_refresh"
+citation = """
+RFC 2918 §3, ROUTE-REFRESH message: a 16-bit Address Family Identifier, a
+reserved octet and a one-octet Subsequent Address Family Identifier. RFC 7313
+§3 reuses the reserved octet as a message subtype (0 normal, 1 BoRR, 2 EoRR)
+and lets an Outbound Route Filtering payload follow, which stays opaque.
+Identifiers from the IANA "Address Family Numbers" and "SAFI Values"
+registries.
+"""
+min_len = 4
+header_len = 4
+next = "raw"
+
+[[fields]]
+name = "afi"
+off = 0
+len = 16
+default = 1
+
+[[fields]]
+name = "subtype"
+off = 16
+len = 8
+
+[[fields]]
+name = "safi"
+off = 24
+len = 8
+default = 1
+
+[vector]
+source = "RFC 2918 §3 ROUTE-REFRESH for IPv4 unicast."
+bytes = [0x00, 0x01, 0x00, 0x01]
+[vector.fields]
+afi = 1
+subtype = 0
+safi = 1
+
+[provenance]
+source = "scapy/contrib/bgp.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — BGPRouteRefresh's field table transcribed; checked against RFC 2918 §3 and RFC 7313 §3"]

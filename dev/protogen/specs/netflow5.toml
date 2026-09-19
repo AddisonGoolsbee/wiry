@@ -7,11 +7,22 @@ Cisco Systems, "NetFlow Export Datagram Formats", version 5 header: a 16-bit
 version (5), a 16-bit record count, the 32-bit system uptime in milliseconds,
 the 32-bit UNIX seconds and nanoseconds of the export, a 32-bit flow sequence
 number, a one-octet engine type, a one-octet engine id and a two-octet
-sampling interval. The 48-octet flow records that follow are a fixed-size array
-and stay in the payload (DEVIATIONS P3).
+sampling interval.
+
+The 48-octet flow records that follow are a count-driven repeating group
+(`crates/wiry-core/src/repeat.rs`): `count` says how many, and the same document
+gives the record as source, destination and next-hop addresses, SNMP input and
+output indices, packet and octet counts, the first and last uptimes of the flow,
+the port pair, a pad octet, the cumulative TCP flags, the IP protocol and type of
+service, the source and destination autonomous systems, the two prefix mask
+widths and two octets of padding. RFC 3954 defines version 9, not version 5; v5
+has no RFC, so Cisco's document is the control.
 """
 min_len = 24
-header_len = 24
+header_len = "rest"
+build_len = 24
+next = "end"
+parsed_field = "records"
 
 [[fields]]
 name = "version"
@@ -59,6 +70,125 @@ name = "samplingInterval"
 off = 176
 len = 16
 
+[[fields]]
+name = "records"
+off = 192
+kind = "var_bytes"
+
+[group]
+name = "NetflowRecordV5"
+start = 24
+extent = "count"
+count_off = 16
+count_len = 16
+elem_len = 48
+
+[[group.fields]]
+name = "src"
+off = 0
+kind = "ipv4"
+
+[[group.fields]]
+name = "dst"
+off = 32
+kind = "ipv4"
+
+[[group.fields]]
+name = "nexthop"
+off = 64
+kind = "ipv4"
+
+[[group.fields]]
+name = "input"
+off = 96
+len = 16
+
+[[group.fields]]
+name = "output"
+off = 112
+len = 16
+
+[[group.fields]]
+name = "dpkts"
+off = 128
+len = 32
+default = 1
+
+[[group.fields]]
+name = "dOctets"
+off = 160
+len = 32
+default = 60
+
+[[group.fields]]
+name = "first"
+off = 192
+len = 32
+
+[[group.fields]]
+name = "last"
+off = 224
+len = 32
+
+[[group.fields]]
+name = "srcport"
+off = 256
+len = 16
+
+[[group.fields]]
+name = "dstport"
+off = 272
+len = 16
+
+[[group.fields]]
+name = "pad1"
+off = 288
+len = 8
+
+[[group.fields]]
+name = "tcpFlags"
+off = 296
+len = 8
+kind = "flags"
+flags = ["F", "S", "R", "P", "A", "U", "E", "C"]
+default = 2
+
+[[group.fields]]
+name = "prot"
+off = 304
+len = 8
+default = 6
+
+[[group.fields]]
+name = "tos"
+off = 312
+len = 8
+
+[[group.fields]]
+name = "src_as"
+off = 320
+len = 16
+
+[[group.fields]]
+name = "dst_as"
+off = 336
+len = 16
+
+[[group.fields]]
+name = "src_mask"
+off = 352
+len = 8
+
+[[group.fields]]
+name = "dst_mask"
+off = 360
+len = 8
+
+[[group.fields]]
+name = "pad2"
+off = 368
+len = 16
+
 [[parents]]
 from = "udp_port"
 values = [2055, 9995, 9996]
@@ -85,3 +215,8 @@ flowSequence = 0
 engineType = 0
 engineID = 0
 samplingInterval = 0
+
+[provenance]
+source = "scapy/layers/netflow.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — NetflowRecordV5's 48-octet field table transcribed as a count-driven repeating group; wiry keeps the version word in the same layer, where scapy splits off NetflowHeader"]

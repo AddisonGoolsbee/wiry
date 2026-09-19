@@ -16,7 +16,10 @@ NEW_LAYERS = [
     "ICMPv6ND_RS", "ICMPv6ND_RA", "ICMPv6ND_NS", "ICMPv6ND_NA",
     "ICMPv6ND_Redirect",
     "ICMPv6MLQuery", "ICMPv6MLReport", "ICMPv6MLDone", "ICMPv6MLReport2",
-    "ESP", "AH", "OSPF_Hdr", "RIP", "BGPHeader", "VRRP", "HSRP", "BFD",
+    "ESP", "AH", "OSPF_Hdr", "OSPF_Hello", "OSPF_DBDesc", "OSPF_LSReq",
+    "OSPF_LSUpd", "OSPF_LSAck", "RIP",
+    "BGPHeader", "BGPOpen", "BGPUpdate", "BGPNotification", "BGPRouteRefresh",
+    "VRRP", "HSRP", "BFD",
     "NTP", "DHCP6", "SNMP", "TFTP", "Syslog", "NBNS", "NBTSession", "Radius",
     "RTP", "RTCP", "NetflowHeaderV5", "NetflowHeaderV9", "IPFIX", "SFlow",
     "QUIC", "WireGuard",
@@ -224,14 +227,14 @@ def test_mld_query_v1_and_v2_are_told_apart_by_length():
     got = Ether(bytes(data))
     assert got.layers()[:3] == ["Ether", "IPv6", "ICMPv6MLQuery"]
     assert got["ICMPv6MLQuery"].mrd == 10000
-    assert "qqic" not in got["ICMPv6MLQuery"].fields()
+    assert "QQIC" not in got["ICMPv6MLQuery"].fields()
 
     v2 = v1 + bytes([0x02, 0x7D, 0x00, 0x00])
     data = bytearray(bytes(Ether() / IPv6() / Raw(v2)))
     data[20] = 58
     got = Ether(bytes(data))
-    assert got["ICMPv6MLQuery"].qqic == 0x7D
-    assert got["ICMPv6MLQuery"].numsrc == 0
+    assert got["ICMPv6MLQuery"].QQIC == 0x7D
+    assert got["ICMPv6MLQuery"].sources_number == 0
 
 
 def test_a_plain_icmpv6_echo_still_reaches_the_generic_layer():

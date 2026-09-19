@@ -174,7 +174,7 @@ list; DNS record sections need a different shape again and live in
 
 | Decision | Rationale |
 |---|---|
-| 91 layers: the 17 core ones (Ether, Loopback, CookedLinux and CookedLinuxV2, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP, DHCP, Raw, Padding), 14 encapsulations, and 60 generated from `dev/protogen/specs/` at the depth `DEVIATIONS.md`'s P rows state one row at a time | scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. dpkt does 1.35M downloads/month with ~80 protocols. A header-depth layer that says so is worth more than an implied one. |
+| 100 layers: the 17 core ones (Ether, Loopback, CookedLinux and CookedLinuxV2, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP, DHCP, Raw, Padding), 14 encapsulations, and 69 generated from `dev/protogen/specs/` at the depth `DEVIATIONS.md`'s P rows state one row at a time | scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. dpkt does 1.35M downloads/month with ~80 protocols. A header-depth layer that says so is worth more than an implied one. |
 | **Live capture behind the `live` feature, off by default** | Needs raw sockets, root and per-OS backends. `sniff(offline=...)` drives the whole state machine without it, so the live backend is an I/O shim over proven logic rather than a second implementation. |
 | Unknown protocols dissect to `Raw` | Bytes always round-trip, at any depth. |
 

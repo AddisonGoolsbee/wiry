@@ -1,6 +1,7 @@
-//! Properties every layer must hold, asserted over all of them at once. Sixty
-//! of them come from one emission template, so a mistake in that template is a
-//! mistake sixty times and a per-module test would find it sixty times too late.
+//! Properties every layer must hold, asserted over all of them at once.
+//! Sixty-nine of them come from one emission template, so a mistake in that
+//! template is a mistake sixty-nine times and a per-module test would find it
+//! sixty-nine times too late.
 
 use wiry_core::field::{self, FieldKind, FieldValue};
 use wiry_core::packet::Packet;

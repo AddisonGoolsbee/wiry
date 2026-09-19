@@ -1,0 +1,39 @@
+name = "BGPNotification"
+id = "BgpNotification"
+num = 100
+module = "bgp_notification"
+citation = """
+RFC 4271 §4.5, NOTIFICATION message: a one-octet error code, a one-octet error
+subcode whose meaning depends on the code, and data to the end of the message.
+Codes and subcodes from the IANA "BGP Error (Notification) Codes" registry.
+"""
+min_len = 2
+header_len = "rest"
+next = "end"
+
+[[fields]]
+name = "error_code"
+off = 0
+len = 8
+
+[[fields]]
+name = "error_subcode"
+off = 8
+len = 8
+
+[[fields]]
+name = "data"
+off = 16
+kind = "var_bytes"
+
+[vector]
+source = "RFC 4271 §4.5 NOTIFICATION: error code 6 (Cease), subcode 2 (Administrative Shutdown), no data."
+bytes = [0x06, 0x02]
+[vector.fields]
+error_code = 6
+error_subcode = 2
+
+[provenance]
+source = "scapy/contrib/bgp.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — BGPNotification's field table transcribed; checked against RFC 4271 §4.5"]

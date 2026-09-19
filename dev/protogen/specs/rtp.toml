@@ -5,12 +5,15 @@ citation = """
 RFC 3550 §5.1: a two-bit version, a padding bit, an extension bit, a four-bit
 CSRC count, a marker bit, a seven-bit payload type, a 16-bit sequence number, a
 32-bit timestamp, a 32-bit synchronisation source identifier, then that many
-32-bit contributing source identifiers. RTP is negotiated out of band, so no
-port is bound to it by default (DEVIATIONS P5).
+32-bit contributing source identifiers — a count-driven repeating group
+(`crates/wiry-core/src/repeat.rs`). §5.3.1's header extension follows the list
+and is counted into the header, not decoded. RTP is negotiated out of band, so
+no port is bound to it by default (DEVIATIONS P5).
 """
 min_len = 12
 header_len = "hand"
 build_len = 12
+parsed_field = "sync"
 
 [[fields]]
 name = "version"
@@ -39,7 +42,7 @@ off = 8
 len = 1
 
 [[fields]]
-name = "payload"
+name = "payload_type"
 off = 9
 len = 7
 
@@ -58,6 +61,24 @@ name = "sourcesync"
 off = 64
 len = 32
 
+[[fields]]
+name = "sync"
+off = 96
+kind = "var_bytes"
+
+[group]
+name = "sync"
+start = 12
+extent = "count"
+count_off = 4
+count_len = 4
+elem_len = 4
+
+[[group.fields]]
+name = "id"
+off = 0
+len = 32
+
 [vector]
 source = "RFC 3550 §5.1, hand-built: version 2, payload type 0 (PCMU), sequence 1, SSRC 0x11223344."
 bytes = [
@@ -71,7 +92,12 @@ padding = 0
 extension = 0
 numsync = 0
 marker = 0
-payload = 0
+payload_type = 0
 sequence = 1
 timestamp = 160
 sourcesync = 0x11223344
+
+[provenance]
+source = "scapy/layers/rtp.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — RTP's sync FieldListField transcribed as a count-driven repeating group, and payload renamed payload_type to match; checked against RFC 3550 §5.1"]

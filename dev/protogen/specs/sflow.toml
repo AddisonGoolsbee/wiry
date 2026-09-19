@@ -6,13 +6,21 @@ citation = """
 sFlow.org, "sFlow Version 5" (July 2004), §5.1 datagram format: a 32-bit
 version (5), a 32-bit address type (1 IPv4, 2 IPv6), the agent address, a
 32-bit sub-agent id, a 32-bit datagram sequence number, the 32-bit agent
-uptime in milliseconds and a 32-bit sample count. Only the IPv4 agent-address
-form has a fixed header length; the samples that follow are an XDR array and
-stay in the payload (DEVIATIONS P3).
+uptime in milliseconds and a 32-bit sample count. §5.1 then gives the samples
+themselves: each is a 32-bit sample type (the enterprise number in the high 20
+bits and the format in the low 12), a 32-bit length in octets and that many
+octets of sample data, which is a count-driven repeating group of computed
+width (`crates/wiry-core/src/repeat.rs`).
+
+The sample data is kept as octets: §5.1 gives each format its own record
+structure, which the flat record table cannot express (DEVIATIONS E1). Only the
+IPv4 agent-address form has a fixed header length, so an address type of 2
+moves every field after it and its samples stay in the payload.
 """
 min_len = 28
 header_len = "hand"
 build_len = 28
+parsed_field = "samples"
 
 [[fields]]
 name = "version"
@@ -51,12 +59,47 @@ name = "num_samples"
 off = 192
 len = 32
 
+[[fields]]
+name = "samples"
+off = 224
+kind = "var_bytes"
+when = "is_ipv4_agent"
+
+[group]
+name = "SFlowSample"
+start = 28
+extent = "count"
+count_off = 192
+count_len = 32
+elem_base = 8
+when = "is_ipv4_agent"
+
+[[group.terms]]
+off = 32
+len = 32
+scale = 1
+
+[[group.fields]]
+name = "sample_type"
+off = 0
+len = 32
+
+[[group.fields]]
+name = "sample_length"
+off = 32
+len = 32
+
+[[group.fields]]
+name = "sample_data"
+off = 64
+kind = "var_bytes"
+
 [[parents]]
 from = "udp_port"
 values = [6343]
 
 [vector]
-source = "sFlow v5 §5.1 datagram header, hand-built: agent 10.0.0.1, sequence 1, one sample."
+source = "sFlow v5 §5.1 datagram, hand-built: agent 10.0.0.1, sequence 1, one four-octet counter sample (format 3)."
 bytes = [
   0x00, 0x00, 0x00, 0x05,
   0x00, 0x00, 0x00, 0x01,
@@ -65,6 +108,9 @@ bytes = [
   0x00, 0x00, 0x00, 0x01,
   0x00, 0x00, 0x03, 0xe8,
   0x00, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x03,
+  0x00, 0x00, 0x00, 0x04,
+  0x0a, 0x0b, 0x0c, 0x0d,
 ]
 [vector.fields]
 version = 5

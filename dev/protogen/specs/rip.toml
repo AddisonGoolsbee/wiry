@@ -3,12 +3,22 @@ id = "Rip"
 num = 60
 citation = """
 RFC 1058 §3.1 and RFC 2453 §3.6: a RIP message is a one-octet command, a
-one-octet version and two octets that must be zero, followed by up to 25
-twenty-octet route entries. The entries themselves are a fixed-size array
-rather than a header, so they are left in the payload — see DEVIATIONS P3.
+one-octet version and two octets that must be zero, followed by up to 25 route
+entries. RFC 2453 §4 gives an entry as a 16-bit address family, a 16-bit route
+tag, an IPv4 address, a subnet mask, a next hop and a 32-bit metric — twenty
+octets, repeated to the end of the datagram. RFC 1058 §3.1 lays version 1 out at
+the same widths and requires the tag, mask and next-hop words to be zero, so one
+table reads both; the version 2 names are used, as scapy's are.
+
+The entries are a repeating group (`crates/wiry-core/src/repeat.rs`), not a
+payload. RFC 2453 §4.1 authentication, which replaces the first entry when its
+address family is 0xFFFF, is not decoded — see DEVIATIONS E1.
 """
 min_len = 4
-header_len = 4
+header_len = "rest"
+build_len = 4
+next = "end"
+parsed_field = "entries"
 
 [[fields]]
 name = "cmd"
@@ -26,6 +36,49 @@ default = 2
 name = "null"
 off = 16
 len = 16
+
+[[fields]]
+name = "entries"
+off = 32
+kind = "var_bytes"
+
+[group]
+name = "RIPEntry"
+start = 4
+extent = "rest"
+elem_len = 20
+
+[[group.fields]]
+name = "AF"
+off = 0
+len = 16
+default = 2
+
+[[group.fields]]
+name = "RouteTag"
+off = 16
+len = 16
+
+[[group.fields]]
+name = "addr"
+off = 32
+kind = "ipv4"
+
+[[group.fields]]
+name = "mask"
+off = 64
+kind = "ipv4"
+
+[[group.fields]]
+name = "nextHop"
+off = 96
+kind = "ipv4"
+
+[[group.fields]]
+name = "metric"
+off = 128
+len = 32
+default = 1
 
 [[parents]]
 from = "udp_port"
@@ -45,3 +98,8 @@ bytes = [
 cmd = 1
 version = 2
 null = 0
+
+[provenance]
+source = "scapy/layers/rip.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — RIPEntry's field table (AF, RouteTag, addr, mask, nextHop, metric) transcribed as a repeating group rather than a chain of sub-packets; checked against RFC 2453 §4"]

@@ -6,14 +6,21 @@ citation = """
 RFC 2710 §3, Multicast Listener Query: ICMPv6 type 130, code 0, checksum, a
 16-bit Maximum Response Delay in milliseconds, a 16-bit reserved field and the
 128-bit multicast address. RFC 3810 §5.1 extends the same 24 octets with a
-reserved/S/QRV octet, a QQIC octet, a 16-bit source count and that many source
-addresses; a query of at least 28 octets is a version 2 query, which is why
-those four fields are conditional on the header length.
+four-bit reserved field, an S bit, a three-bit QRV, a QQIC octet, a 16-bit
+source count and that many 128-bit source addresses; a query of at least 28
+octets is a version 2 query, which is why those fields are conditional on the
+header length, and the source list is a count-driven repeating group
+(`crates/wiry-core/src/repeat.rs`).
+
+scapy keeps the two versions as separate classes (`ICMPv6MLQuery` and
+`ICMPv6MLQuery2`) and they are one layer here, as DEVIATIONS P12 records; the
+version 2 field names are scapy's.
 """
 min_len = 24
 header_len = "hand"
 build_len = 24
 next = "end"
+parsed_field = "sources"
 
 [[fields]]
 name = "type"
@@ -35,6 +42,7 @@ len = 16
 name = "mrd"
 off = 32
 len = 16
+default = 10000
 
 [[fields]]
 name = "reserved"
@@ -47,22 +55,54 @@ off = 64
 kind = "ipv6"
 
 [[fields]]
-name = "s_qrv"
+name = "Resv"
 off = 192
-len = 8
+len = 4
 when = "is_v2"
 
 [[fields]]
-name = "qqic"
+name = "S"
+off = 196
+len = 1
+when = "is_v2"
+
+[[fields]]
+name = "QRV"
+off = 197
+len = 3
+when = "is_v2"
+
+[[fields]]
+name = "QQIC"
 off = 200
 len = 8
 when = "is_v2"
 
 [[fields]]
-name = "numsrc"
+name = "sources_number"
 off = 208
 len = 16
 when = "is_v2"
+
+[[fields]]
+name = "sources"
+off = 224
+kind = "var_bytes"
+when = "is_v2"
+
+[group]
+name = "sources"
+start = 28
+extent = "count"
+count_off = 208
+count_len = 16
+elem_len = 16
+when = "is_v2"
+
+[[group.fields]]
+name = "src"
+off = 0
+kind = "ipv6"
 
 [[parents]]
 from = "icmpv6_type"
@@ -81,3 +121,8 @@ code = 0
 cksum = 0
 mrd = 10000
 reserved = 0
+
+[provenance]
+source = "scapy/layers/inet6.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — ICMPv6MLQuery2's field names (Resv, S, QRV, QQIC, sources_number) and its sources IP6ListField transcribed as a count-driven repeating group; checked against RFC 3810 §5.1"]

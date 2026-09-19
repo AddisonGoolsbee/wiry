@@ -5,12 +5,20 @@ citation = """
 RFC 3768 §5.1: a four-bit version, a four-bit type, a one-octet virtual router
 id, a one-octet priority, a one-octet count of IP addresses, a one-octet
 authentication type, a one-octet advertisement interval in seconds and a 16-bit
-checksum, followed by that many addresses. RFC 5798 §5.1 keeps the layout for
-version 3 but reads the two authentication octets as a reserved field and a
-12-bit advertisement interval in centiseconds.
+checksum, followed by that many addresses — a count-driven repeating group
+(`crates/wiry-core/src/repeat.rs`). RFC 5798 §5.1 keeps the layout for version
+3 but reads the two authentication octets as a reserved field and a 12-bit
+advertisement interval in centiseconds.
+
+RFC 3768 §5.3.10 puts eight octets of authentication data after the address
+list. They sit at an offset the address count decides, which the flat table
+cannot place, so they stay in the payload (DEVIATIONS E1); scapy declares them
+as `auth1` and `auth2`.
 """
 min_len = 8
-header_len = 8
+header_len = "hand"
+build_len = 8
+parsed_field = "addrlist"
 
 [[fields]]
 name = "version"
@@ -40,7 +48,6 @@ default = 100
 name = "ipcount"
 off = 24
 len = 8
-default = 1
 
 [[fields]]
 name = "authtype"
@@ -57,6 +64,24 @@ default = 1
 name = "chksum"
 off = 48
 len = 16
+
+[[fields]]
+name = "addrlist"
+off = 64
+kind = "var_bytes"
+
+[group]
+name = "addrlist"
+start = 8
+extent = "count"
+count_off = 24
+count_len = 8
+elem_len = 4
+
+[[group.fields]]
+name = "addr"
+off = 0
+kind = "ipv4"
 
 [[parents]]
 from = "ipproto"
@@ -78,3 +103,8 @@ ipcount = 1
 authtype = 0
 adv = 1
 chksum = 0xba52
+
+[provenance]
+source = "scapy/layers/vrrp.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — VRRP's addrlist FieldListField transcribed as a count-driven repeating group; checked against RFC 3768 §5.1"]

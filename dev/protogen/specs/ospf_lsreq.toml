@@ -1,0 +1,55 @@
+name = "OSPF_LSReq"
+id = "OspfLsReq"
+num = 95
+module = "ospf_lsreq"
+citation = """
+RFC 2328 §A.3.4, Link State Request packet: nothing but a list of 12-octet
+requests, each a 32-bit LS type, a link state id and an advertising router,
+running to the end of the packet the header's `len` declares — a repeating
+group (`crates/wiry-core/src/repeat.rs`).
+"""
+min_len = 12
+header_len = "rest"
+build_len = 0
+next = "end"
+parsed_field = "requests"
+
+[[fields]]
+name = "requests"
+off = 0
+kind = "var_bytes"
+
+[group]
+name = "OSPF_LSReq_Item"
+start = 0
+extent = "rest"
+elem_len = 12
+
+[[group.fields]]
+name = "type"
+off = 0
+len = 32
+default = 1
+
+[[group.fields]]
+name = "id"
+off = 32
+kind = "ipv4"
+
+[[group.fields]]
+name = "adrouter"
+off = 64
+kind = "ipv4"
+
+[vector]
+source = "RFC 2328 §A.3.4 request, hand-built: one router LSA (type 1) for 10.0.0.1 advertised by 10.0.0.1."
+bytes = [
+  0x00, 0x00, 0x00, 0x01,
+  0x0a, 0x00, 0x00, 0x01,
+  0x0a, 0x00, 0x00, 0x01,
+]
+
+[provenance]
+source = "scapy/contrib/ospf.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — OSPF_LSReq_Item's field table and OSPF_LSReq's requests PacketListField transcribed as a repeating group; checked against RFC 2328 §A.3.4"]

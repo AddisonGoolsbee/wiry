@@ -24,6 +24,7 @@ use wiry_core::options::{Item, OptArg};
 use wiry_core::packet::{self, dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use wiry_core::pcap;
 use wiry_core::proto::{self, ProtoId};
+use wiry_core::repeat;
 use wiry_core::show;
 use wiry_core::stream;
 
@@ -236,7 +237,7 @@ fn resolve_spec(layer: &str, name: &str) -> PyResult<ColSpec> {
     }
     // Line-oriented and BER-encoded layers name their parsed region something
     // other than "options"; `parsed_field_name` is the one authority on which.
-    if name == proto::parsed_field_name(id) && proto::desc(id).parse_options.is_some() {
+    if name == proto::parsed_field_name(id) && proto::has_parsed_items(id) {
         return Ok(ColSpec::Options(id));
     }
     let r = FieldRef::resolve(id, name)
@@ -867,8 +868,7 @@ impl PyPktList {
         let idx = self.index.clone();
         let link = self.link;
         let fname = field.to_string();
-        let parses_options =
-            field == proto::parsed_field_name(id) && proto::desc(id).parse_options.is_some();
+        let parses_options = field == proto::parsed_field_name(id) && proto::has_parsed_items(id);
 
         let collected: Vec<Cell> = py.allow_threads(move || {
             idx.iter()
@@ -1727,7 +1727,16 @@ fn option_region_limit(id: ProtoId) -> Option<usize> {
 
 fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u8>> {
     let mut out = Vec::new();
+    // The region is laid down straight after `build_len`, so a group whose
+    // elements start later than that needs the gap paid for or every element
+    // lands early. Emitted only if something is written into the region.
+    let gap = proto::group_of(id)
+        .map(|g| g.start.saturating_sub(proto::desc(id).build_len))
+        .unwrap_or(0);
     let mut named = Vec::new();
+    // A group and an option table are both named things appended after the
+    // fixed header, so only the name resolution differs.
+    let group = proto::group_of(id);
     for (_, name, arg) in opts.iter().filter(|(l, _, _)| *l == layer) {
         let Some(name) = name else {
             match &arg.0 {
@@ -1736,6 +1745,10 @@ fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u
             }
             continue;
         };
+        if let Some(g) = group {
+            named.push(repeat::item(g, name, &arg.0).map_err(PyValueError::new_err)?);
+            continue;
+        }
         let desc = proto::desc(id);
         let table = desc.opt_table.ok_or_else(|| {
             PyValueError::new_err(format!(
@@ -1746,10 +1759,19 @@ fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u
         named.push(table.item(name, &arg.0).map_err(PyValueError::new_err)?);
     }
     if !named.is_empty() {
-        let table = proto::desc(id)
-            .opt_table
-            .expect("named items imply a table");
-        out.extend_from_slice(&table.encode(&named).map_err(PyValueError::new_err)?);
+        let encoded = match group {
+            Some(g) => repeat::encode(g, &named),
+            None => proto::desc(id)
+                .opt_table
+                .expect("named items imply a table")
+                .encode(&named),
+        };
+        out.extend_from_slice(&encoded.map_err(PyValueError::new_err)?);
+    }
+    if !out.is_empty() && gap > 0 {
+        let mut padded = vec![0u8; gap];
+        padded.append(&mut out);
+        out = padded;
     }
     if let Some(max) = option_region_limit(id) {
         // `build_with` pads the region to a whole word before writing the
@@ -1791,7 +1813,30 @@ pub(crate) fn apply_all_fields(
         .partition(|(l, n, _)| !is_conditional(pkt, *l, n));
     apply_fields(pkt, &plain_ints, &plain_strs, &plain_raws)?;
     pkt.refit_headers();
-    apply_fields(pkt, &cond_ints, &cond_strs, &cond_raws)
+    apply_fields(pkt, &cond_ints, &cond_strs, &cond_raws)?;
+    sync_groups(pkt, ints, strs);
+    Ok(())
+}
+
+/// A group's count is only knowable once the fields that decide whether the
+/// group is there at all have been written, so it is settled last — and never
+/// over a value the caller supplied themselves.
+fn sync_groups(
+    pkt: &mut CorePacket,
+    ints: &[(usize, String, u64)],
+    strs: &[(usize, String, String)],
+) {
+    for i in 0..pkt.layers().len() {
+        let id = pkt.layers()[i].proto;
+        let given = |n: &str| {
+            ints.iter().any(|(l, f, _)| *l == i && f == n)
+                || strs.iter().any(|(l, f, _)| *l == i && f == n)
+        };
+        if proto::group_extent_field(id).is_some_and(given) {
+            continue;
+        }
+        pkt.sync_group(i);
+    }
 }
 
 fn is_conditional(pkt: &CorePacket, layer: usize, name: &str) -> bool {

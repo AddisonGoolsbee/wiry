@@ -5,12 +5,22 @@ module = "netflow9"
 citation = """
 RFC 3954 §5.1: a 16-bit version (9), a 16-bit count of FlowSets, the 32-bit
 system uptime in milliseconds, the 32-bit UNIX export time, a 32-bit sequence
-number and a 32-bit source id. The FlowSets that follow need the template the
-exporter sent earlier to be read, which is per-session state this dissector
-does not keep, so they stay in the payload (DEVIATIONS P6).
+number and a 32-bit source id. §5.2 and §5.3 give every FlowSet the same two
+leading fields — a 16-bit FlowSet id (0 template, 1 options, 256 and up data)
+and a 16-bit length covering both of them and the records — so the FlowSets are
+a repeating group whose element width is its own length field
+(`crates/wiry-core/src/repeat.rs`), running to the end of the datagram.
+
+The FlowSet *contents* are not decoded: a data FlowSet needs the template the
+exporter sent in an earlier datagram, which is per-session state this dissector
+does not keep (DEVIATIONS P6). The header's `count` is not used as the element
+count either, because §5.1 defines it as the number of records across all
+FlowSets rather than the number of FlowSets.
 """
 min_len = 20
-header_len = 20
+header_len = "rest"
+build_len = 20
+parsed_field = "flowsets"
 
 [[fields]]
 name = "version"
@@ -43,6 +53,39 @@ name = "SourceID"
 off = 128
 len = 32
 
+[[fields]]
+name = "flowsets"
+off = 160
+kind = "var_bytes"
+
+[group]
+name = "NetflowFlowsetV9"
+start = 20
+extent = "rest"
+elem_base = 0
+elem_min = 4
+
+[[group.terms]]
+off = 16
+len = 16
+scale = 1
+
+[[group.fields]]
+name = "flowSetID"
+off = 0
+len = 16
+
+[[group.fields]]
+name = "length"
+off = 16
+len = 16
+default = 4
+
+[[group.fields]]
+name = "content"
+off = 32
+kind = "var_bytes"
+
 [[parents]]
 from = "udp_port"
 values = [2055, 9995, 9996]
@@ -57,6 +100,7 @@ bytes = [
   0x00, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x01,
   0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x08, 0x01, 0x00, 0x00, 0x01,
 ]
 [vector.fields]
 version = 9
@@ -65,3 +109,8 @@ sysUptime = 1000
 unixSecs = 0
 sequenceNumber = 1
 SourceID = 0
+
+[provenance]
+source = "scapy/layers/netflow.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — NetflowFlowsetV9's flowSetID and length transcribed as a repeating group whose element width is its own length field; checked against RFC 3954 §5.2"]

@@ -102,6 +102,15 @@ impl ProtoId {
     pub const Smtp: ProtoId = ProtoId(90);
     pub const Imap: ProtoId = ProtoId(91);
     pub const Telnet: ProtoId = ProtoId(92);
+    pub const OspfHello: ProtoId = ProtoId(93);
+    pub const OspfDbDesc: ProtoId = ProtoId(94);
+    pub const OspfLsReq: ProtoId = ProtoId(95);
+    pub const OspfLsUpd: ProtoId = ProtoId(96);
+    pub const OspfLsAck: ProtoId = ProtoId(97);
+    pub const BgpOpen: ProtoId = ProtoId(98);
+    pub const BgpUpdate: ProtoId = ProtoId(99);
+    pub const BgpNotification: ProtoId = ProtoId(100);
+    pub const BgpRouteRefresh: ProtoId = ProtoId(101);
     // protogen:ids end
 
     pub fn name(self) -> &'static str {
@@ -255,6 +264,15 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::Smtp,
     ProtoId::Imap,
     ProtoId::Telnet,
+    ProtoId::OspfHello,
+    ProtoId::OspfDbDesc,
+    ProtoId::OspfLsReq,
+    ProtoId::OspfLsUpd,
+    ProtoId::OspfLsAck,
+    ProtoId::BgpOpen,
+    ProtoId::BgpUpdate,
+    ProtoId::BgpNotification,
+    ProtoId::BgpRouteRefresh,
     // protogen:builtins end
 ];
 
@@ -370,6 +388,15 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::Smtp.0 as usize] = &smtp::DESC;
     t[ProtoId::Imap.0 as usize] = &imap::DESC;
     t[ProtoId::Telnet.0 as usize] = &telnet::DESC;
+    t[ProtoId::OspfHello.0 as usize] = &ospf_hello::DESC;
+    t[ProtoId::OspfDbDesc.0 as usize] = &ospf_dbdesc::DESC;
+    t[ProtoId::OspfLsReq.0 as usize] = &ospf_lsreq::DESC;
+    t[ProtoId::OspfLsUpd.0 as usize] = &ospf_lsupd::DESC;
+    t[ProtoId::OspfLsAck.0 as usize] = &ospf_lsack::DESC;
+    t[ProtoId::BgpOpen.0 as usize] = &bgp_open::DESC;
+    t[ProtoId::BgpUpdate.0 as usize] = &bgp_update::DESC;
+    t[ProtoId::BgpNotification.0 as usize] = &bgp_notification::DESC;
+    t[ProtoId::BgpRouteRefresh.0 as usize] = &bgp_route_refresh::DESC;
     // protogen:desc end
     t
 };
@@ -477,6 +504,63 @@ pub fn accessor_names(id: ProtoId) -> &'static [&'static str] {
     }
 }
 
+/// The repeating group a protocol's payload is, where its payload is one. A
+/// generated match rather than a `ProtoDesc` field, since ninety layers carry
+/// no group.
+#[inline]
+// The arms are generated, so a spec set that declares no group at all still
+// has to compile.
+#[allow(clippy::match_single_binding)]
+pub fn group_of(id: ProtoId) -> Option<&'static crate::repeat::GroupDesc> {
+    match id {
+        // protogen:groups begin
+        ProtoId::Igmp => Some(&crate::layers::igmp::GROUP),
+        ProtoId::Icmpv6MlQuery => Some(&crate::layers::mld_query::GROUP),
+        ProtoId::Icmpv6MlReport2 => Some(&crate::layers::mld_report2::GROUP),
+        ProtoId::Rip => Some(&crate::layers::rip::GROUP),
+        ProtoId::Vrrp => Some(&crate::layers::vrrp::GROUP),
+        ProtoId::Rtp => Some(&crate::layers::rtp::GROUP),
+        ProtoId::NetflowV5 => Some(&crate::layers::netflow5::GROUP),
+        ProtoId::NetflowV9 => Some(&crate::layers::netflow9::GROUP),
+        ProtoId::Ipfix => Some(&crate::layers::ipfix::GROUP),
+        ProtoId::SFlow => Some(&crate::layers::sflow::GROUP),
+        ProtoId::OspfHello => Some(&crate::layers::ospf_hello::GROUP),
+        ProtoId::OspfDbDesc => Some(&crate::layers::ospf_dbdesc::GROUP),
+        ProtoId::OspfLsReq => Some(&crate::layers::ospf_lsreq::GROUP),
+        ProtoId::OspfLsUpd => Some(&crate::layers::ospf_lsupd::GROUP),
+        ProtoId::OspfLsAck => Some(&crate::layers::ospf_lsack::GROUP),
+        ProtoId::BgpOpen => Some(&crate::layers::bgp_open::GROUP),
+        // protogen:groups end
+        _ => None,
+    }
+}
+
+/// The header field a group's extent reads, by name, so a caller can tell a
+/// count the user wrote from one the region should supply. `None` where the
+/// elements simply run to the end.
+pub fn group_extent_field(id: ProtoId) -> Option<&'static str> {
+    use crate::repeat::Extent;
+    let (off, len) = match group_of(id)?.extent {
+        Extent::Count { bit_off, bit_len } => (bit_off, bit_len),
+        Extent::Length {
+            bit_off, bit_len, ..
+        } => (bit_off, bit_len),
+        Extent::Rest => return None,
+    };
+    desc(id)
+        .fields
+        .iter()
+        .find(|f| f.bit_off == off && f.bit_len == len)
+        .map(|f| f.name)
+}
+
+/// Whether a layer answers its parsed field with an item list at all, by either
+/// route: an option region or a repeating group.
+#[inline]
+pub fn has_parsed_items(id: ProtoId) -> bool {
+    desc(id).parse_options.is_some() || group_of(id).is_some()
+}
+
 /// The field a protocol's `parse_options` answers for. Line-oriented and
 /// BER-encoded layers reuse the same parsed-item shape under their own name,
 /// so `pkt[HTTP].headers` reads as `pkt[TCP].options` does.
@@ -485,8 +569,18 @@ pub fn parsed_field_name(id: ProtoId) -> &'static str {
         // protogen:parsed begin
         ProtoId::Lldp => "options",
         ProtoId::Cdp => "msg",
+        ProtoId::Igmp => "records",
+        ProtoId::Icmpv6MlQuery => "sources",
+        ProtoId::Icmpv6MlReport2 => "records",
+        ProtoId::Rip => "entries",
+        ProtoId::Vrrp => "addrlist",
         ProtoId::Snmp => "vars",
         ProtoId::Syslog => "headers",
+        ProtoId::Rtp => "sync",
+        ProtoId::NetflowV5 => "records",
+        ProtoId::NetflowV9 => "flowsets",
+        ProtoId::Ipfix => "sets",
+        ProtoId::SFlow => "samples",
         ProtoId::Http => "headers",
         ProtoId::Ldap => "vars",
         ProtoId::Sip => "headers",
@@ -494,6 +588,13 @@ pub fn parsed_field_name(id: ProtoId) -> &'static str {
         ProtoId::Smtp => "lines",
         ProtoId::Imap => "lines",
         ProtoId::Telnet => "lines",
+        ProtoId::OspfHello => "neighbors",
+        ProtoId::OspfDbDesc => "lsaheaders",
+        ProtoId::OspfLsReq => "requests",
+        ProtoId::OspfLsUpd => "lsalist",
+        ProtoId::OspfLsAck => "lsaheaders",
+        ProtoId::BgpOpen => "opt_params",
+        ProtoId::BgpUpdate => "body",
         // protogen:parsed end
         _ => "options",
     }

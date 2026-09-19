@@ -17,6 +17,7 @@ pub mod parse;
 pub mod pcap;
 pub mod pcapng;
 pub mod proto;
+pub mod repeat;
 pub mod show;
 pub mod stream;
 mod work;

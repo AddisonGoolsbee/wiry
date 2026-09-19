@@ -1,0 +1,92 @@
+name = "OSPF_LSAck"
+id = "OspfLsAck"
+num = 97
+module = "ospf_lsack"
+citation = """
+RFC 2328 §A.3.6, Link State Acknowledgment packet: nothing but a list of the
+20-octet LSA headers of §A.4.1 — a 16-bit age, the §A.2 options octet, a
+one-octet LS type, the link state and advertising-router ids, a 32-bit sequence
+number, a checksum and the LSA's own length — running to the end of the packet
+the header's `len` declares, which is a repeating group
+(`crates/wiry-core/src/repeat.rs`). scapy writes the same rule as
+`length_from=lambda pkt: pkt.underlayer.len - 24`; here the header's
+`content_len` has already cut the payload to that, so the elements simply run
+to the end.
+"""
+min_len = 20
+header_len = "rest"
+build_len = 0
+next = "end"
+parsed_field = "lsaheaders"
+
+[[fields]]
+name = "lsaheaders"
+off = 0
+kind = "var_bytes"
+
+[group]
+name = "OSPF_LSA_Hdr"
+start = 0
+extent = "rest"
+elem_len = 20
+
+[[group.fields]]
+name = "age"
+off = 0
+len = 16
+default = 1
+
+[[group.fields]]
+name = "options"
+off = 16
+len = 8
+kind = "flags"
+flags = ["MT", "E", "MC", "NP", "L", "DC", "O", "DN"]
+
+[[group.fields]]
+name = "type"
+off = 24
+len = 8
+default = 1
+
+[[group.fields]]
+name = "id"
+off = 32
+kind = "ipv4"
+
+[[group.fields]]
+name = "adrouter"
+off = 64
+kind = "ipv4"
+
+[[group.fields]]
+name = "seq"
+off = 96
+len = 32
+default = 0x80000001
+
+[[group.fields]]
+name = "chksum"
+off = 128
+len = 16
+
+[[group.fields]]
+name = "len"
+off = 144
+len = 16
+default = 36
+
+[vector]
+source = "RFC 2328 §A.3.6 acknowledgement, hand-built: one LSA header, type 1, id 10.0.0.1."
+bytes = [
+  0x00, 0x01, 0x02, 0x01,
+  0x0a, 0x00, 0x00, 0x01,
+  0x0a, 0x00, 0x00, 0x01,
+  0x80, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x24,
+]
+
+[provenance]
+source = "scapy/contrib/ospf.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — OSPF_LSA_Hdr's field table and OSPF_LSAck's lsaheaders PacketListField transcribed as a repeating group; checked against RFC 2328 §A.3.6 and §A.4.1"]
