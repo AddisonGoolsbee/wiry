@@ -481,9 +481,16 @@ pub fn accessor_names(id: ProtoId) -> &'static [&'static str] {
 /// A generated match rather than a `ProtoDesc` field: ninety layers carry no
 /// group, and the descriptor is already the widest struct in the crate.
 #[inline]
+// The arms are generated, so a spec set that declares no group at all still
+// has to compile.
+#[allow(clippy::match_single_binding)]
 pub fn group_of(id: ProtoId) -> Option<&'static crate::repeat::GroupDesc> {
     match id {
         // protogen:groups begin
+        ProtoId::Igmp => Some(&crate::layers::igmp::GROUP),
+        ProtoId::Ospf => Some(&crate::layers::ospf::GROUP),
+        ProtoId::Rip => Some(&crate::layers::rip::GROUP),
+        ProtoId::NetflowV5 => Some(&crate::layers::netflow5::GROUP),
         // protogen:groups end
         _ => None,
     }
@@ -504,8 +511,12 @@ pub fn parsed_field_name(id: ProtoId) -> &'static str {
         // protogen:parsed begin
         ProtoId::Lldp => "options",
         ProtoId::Cdp => "msg",
+        ProtoId::Igmp => "records",
+        ProtoId::Ospf => "lsaheaders",
+        ProtoId::Rip => "entries",
         ProtoId::Snmp => "vars",
         ProtoId::Syslog => "headers",
+        ProtoId::NetflowV5 => "records",
         ProtoId::Http => "headers",
         ProtoId::Ldap => "vars",
         ProtoId::Sip => "headers",

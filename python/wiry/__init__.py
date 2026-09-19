@@ -384,7 +384,7 @@ _FIELD_KINDS: dict[str, dict[str, str]] = {}
 def _is_plain_field(lname: str, key: str, value: Any) -> bool:
     """Whether the build path writes this into a fixed slot; the rest are
     option regions and payloads."""
-    if key == "options" and not _is_bytes(value):
+    if key == _PARSED_FIELD.get(lname, "options") and not _is_bytes(value):
         return False
     if key == "load" and lname in _OPAQUE:
         return False
@@ -598,7 +598,7 @@ class Packet(metaclass=_PacketMeta):
                 if blob:
                     out.append((i, None, _to_bytes(blob, f"{lname}.{var[0]}")))
                 continue
-            v = fields.get("options")
+            v = fields.get(_PARSED_FIELD.get(lname, "options"))
             if v is None or _is_bytes(v):
                 if _is_bytes(v) and v:
                     out.append((i, None, bytes(v)))

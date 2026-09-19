@@ -100,6 +100,54 @@ def load_specs() -> list[dict]:
     return out
 
 
+def validate_group(f: str, g: dict, nested: bool) -> None:
+    """A repeating group: DEVIATIONS E1's escape from the flat table. Every
+    refusal here is a layout the walk would read wrongly rather than fail on."""
+    if not g.get("name"):
+        raise SpecError(f"{f}: [group] needs a name")
+    fields = g.get("fields") or []
+    if not fields:
+        raise SpecError(f"{f}: group {g['name']!r} needs at least one field")
+    extent = g.get("extent", "rest")
+    if extent not in ("rest", "count", "length"):
+        raise SpecError(
+            f"{f}: group {g['name']!r} extent must be \"count\", \"length\" or \"rest\""
+        )
+    if extent == "count" and ("count_off" not in g or "count_len" not in g):
+        raise SpecError(f"{f}: a count-driven group needs count_off and count_len")
+    if extent == "length" and ("len_off" not in g or "len_len" not in g):
+        raise SpecError(f"{f}: a length-driven group needs len_off and len_len")
+    fixed = g.get("elem_len")
+    if (fixed is None) == (g.get("elem_base") is None):
+        raise SpecError(
+            f"{f}: group {g['name']!r} needs exactly one of elem_len and elem_base"
+        )
+    if fixed is None and not g.get("terms"):
+        raise SpecError(f"{f}: a computed element length needs [[...terms]]")
+    for fd in fields:
+        kind = fd.get("kind", "uint")
+        if kind not in KINDS:
+            raise SpecError(f"{f}: group field {fd.get('name')!r} has kind {kind!r}")
+        if "name" not in fd or "off" not in fd:
+            raise SpecError(f"{f}: a group field needs a name and an off")
+        if kind in FIXED_BITS:
+            fd["len"] = FIXED_BITS[kind]
+        if "len" not in fd:
+            raise SpecError(f"{f}: group field {fd['name']!r} needs a bit length")
+        if fixed is not None and fd["off"] + fd["len"] > fixed * 8:
+            raise SpecError(
+                f"{f}: group field {fd['name']!r} ends past the "
+                f"{fixed}-octet element"
+            )
+    if nested and g.get("nested"):
+        raise SpecError(
+            f"{f}: group {g['name']!r} nests a group inside a nested one; "
+            "the walk descends exactly one level"
+        )
+    if g.get("nested"):
+        validate_group(f, g["nested"], True)
+
+
 def validate(s: dict) -> None:
     f = s["_file"]
 
@@ -175,6 +223,30 @@ def validate(s: dict) -> None:
         for arm in nx.get("arms", []):
             if "value" not in arm or "proto" not in arm:
                 raise SpecError(f"{f}: every [[next.arms]] needs a value and a proto")
+
+    g = s.get("group")
+    if g:
+        validate_group(f, g, False)
+        # The region has to sit inside the header, because that is the slice a
+        # walk is handed; a fixed header length ends before it.
+        if isinstance(hl, int):
+            raise SpecError(
+                f"{f}: a group needs header_len \"rest\" or \"hand\", so the "
+                "elements are inside the header the walk is handed"
+            )
+        if not s.get("parsed_field"):
+            raise SpecError(f"{f}: a group needs parsed_field, the name it answers under")
+        tail = fields[-1]
+        if tail.get("kind") != "var_bytes" or tail["name"] != s["parsed_field"]:
+            raise SpecError(
+                f"{f}: the last field must be a var_bytes named "
+                f"{s['parsed_field']!r}, so the region is in the field table too"
+            )
+        if tail["off"] != g.get("start", 0) * 8:
+            raise SpecError(
+                f"{f}: group start {g.get('start', 0)} and field "
+                f"{tail['name']!r} at bit {tail['off']} disagree"
+            )
 
     for p in s.get("parents", []):
         if p.get("from") not in PARENT_KINDS:
@@ -317,6 +389,65 @@ def opt_hook(s: dict, key: str) -> str:
     return f"Some({key})" if v == "hand" else f"Some({v})"
 
 
+def group_chain(g: dict) -> list[dict]:
+    return [g] + (group_chain(g["nested"]) if g.get("nested") else [])
+
+
+def render_extent(g: dict) -> str:
+    extent = g.get("extent", "rest")
+    if extent == "count":
+        return (
+            "Extent::Count { bit_off: "
+            f"{g['count_off']}, bit_len: {g['count_len']} }}"
+        )
+    if extent == "length":
+        return (
+            "Extent::Length { bit_off: "
+            f"{g['len_off']}, bit_len: {g['len_len']}, "
+            f"scale: {g.get('len_scale', 1)}, covers: {g.get('len_covers', 0)} }}"
+        )
+    return "Extent::Rest"
+
+
+def render_elem_len(g: dict) -> str:
+    if g.get("elem_len") is not None:
+        return f"ElemLen::Fixed({g['elem_len']})"
+    terms = ", ".join(
+        "LenTerm { bit_off: "
+        f"{t['off']}, bit_len: {t['len']}, scale: {t.get('scale', 1)} }}"
+        for t in g["terms"]
+    )
+    return f"ElemLen::Computed {{ base: {g['elem_base']}, terms: &[{terms}] }}"
+
+
+def render_group(g: dict, const: str, vis: str) -> list[str]:
+    """One group, plus its nested group ahead of it so the reference resolves."""
+    out: list[str] = []
+    if g.get("nested"):
+        out += render_group(g["nested"], f"{const}_NESTED", "static")
+        out.append("")
+    out.append(f"{vis} {const}_FIELDS: &[FieldDesc] = &[")
+    for fd in g["fields"]:
+        out.append(render_field(fd))
+    out.append("];")
+    out.append("")
+    tail = ""
+    if g.get("align", 1) != 1:
+        tail += f".aligned({g['align']})"
+    if g.get("nested"):
+        tail += f".nesting(&{const}_NESTED)"
+    if g.get("when"):
+        tail += f".when({g['when']})"
+    out.append(f"{vis} {const}: GroupDesc = GroupDesc::new(")
+    out.append(f"    {rs_str(g['name'])},")
+    out.append(f"    {const}_FIELDS,")
+    out.append(f"    {render_elem_len(g)},")
+    out.append(f"    {render_extent(g)},")
+    out.append(f"    {g.get('start', 0)},")
+    out.append(f"){tail};")
+    return out
+
+
 def render_layer(s: dict, existing: str) -> str:
     hl = s["header_len"]
     fixed = hl if isinstance(hl, int) else None
@@ -339,6 +470,11 @@ def render_layer(s: dict, existing: str) -> str:
 
     lines.append("use crate::field::FieldDesc;")
     lines.append("use crate::proto::{" + ", ".join(names) + "};")
+    if s.get("group"):
+        used = ["ElemLen", "Extent", "GroupDesc"]
+        if any(g.get("elem_base") is not None for g in group_chain(s["group"])):
+            used.append("LenTerm")
+        lines.append("use crate::repeat::{" + ", ".join(used) + "};")
     lines.append("")
     lines.append(hand_region(existing, "hand", "", s["_file"]))
     lines.append("")
@@ -347,6 +483,9 @@ def render_layer(s: dict, existing: str) -> str:
         lines.append(render_field(fd))
     lines.append("];")
     lines.append("")
+    if s.get("group"):
+        lines += render_group(s["group"], "GROUP", "pub static")
+        lines.append("")
     for chunk in hooks:
         if chunk:
             lines.append(chunk.rstrip())
@@ -698,9 +837,14 @@ def render_registration(specs: list[dict]) -> dict[Path, list[tuple[str, str]]]:
             names = ", ".join(rs_str(a) for a in s["accessors"])
             acc.append(f"ProtoId::{s['id']} => &[{names}],")
     parsed = []
+    groups = []
     for s in sorted(specs, key=lambda s: s["num"]):
         if s.get("parsed_field"):
             parsed.append(f"ProtoId::{s['id']} => {rs_str(s['parsed_field'])},")
+        if s.get("group"):
+            groups.append(
+                f"ProtoId::{s['id']} => Some(&crate::layers::{s['module']}::GROUP),"
+            )
     mods = "\n".join(
         f"pub mod {m};"
         for m in sorted({s["module"] for s in specs} | {"dispatch"})
@@ -712,6 +856,7 @@ def render_registration(specs: list[dict]) -> dict[Path, list[tuple[str, str]]]:
             ("desc", descs),
             ("accessors", "\n".join(acc)),
             ("parsed", "\n".join(parsed)),
+            ("groups", "\n".join(groups)),
         ],
         MOD_RS: [("mods", mods)],
     }

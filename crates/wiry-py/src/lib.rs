@@ -24,6 +24,7 @@ use wiry_core::options::{Item, OptArg};
 use wiry_core::packet::{self, dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use wiry_core::pcap;
 use wiry_core::proto::{self, ProtoId};
+use wiry_core::repeat;
 use wiry_core::show;
 use wiry_core::stream;
 
@@ -236,7 +237,7 @@ fn resolve_spec(layer: &str, name: &str) -> PyResult<ColSpec> {
     }
     // Line-oriented and BER-encoded layers name their parsed region something
     // other than "options"; `parsed_field_name` is the one authority on which.
-    if name == proto::parsed_field_name(id) && proto::desc(id).parse_options.is_some() {
+    if name == proto::parsed_field_name(id) && proto::has_parsed_items(id) {
         return Ok(ColSpec::Options(id));
     }
     let r = FieldRef::resolve(id, name)
@@ -867,8 +868,7 @@ impl PyPktList {
         let idx = self.index.clone();
         let link = self.link;
         let fname = field.to_string();
-        let parses_options =
-            field == proto::parsed_field_name(id) && proto::desc(id).parse_options.is_some();
+        let parses_options = field == proto::parsed_field_name(id) && proto::has_parsed_items(id);
 
         let collected: Vec<Cell> = py.allow_threads(move || {
             idx.iter()
@@ -1728,6 +1728,10 @@ fn option_region_limit(id: ProtoId) -> Option<usize> {
 fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u8>> {
     let mut out = Vec::new();
     let mut named = Vec::new();
+    // A repeating group and an option table are both "named things appended
+    // after the fixed header", so they share this path and differ only in who
+    // resolves the name.
+    let group = proto::group_of(id);
     for (_, name, arg) in opts.iter().filter(|(l, _, _)| *l == layer) {
         let Some(name) = name else {
             match &arg.0 {
@@ -1736,6 +1740,10 @@ fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u
             }
             continue;
         };
+        if let Some(g) = group {
+            named.push(repeat::item(g, name, &arg.0).map_err(PyValueError::new_err)?);
+            continue;
+        }
         let desc = proto::desc(id);
         let table = desc.opt_table.ok_or_else(|| {
             PyValueError::new_err(format!(
@@ -1746,10 +1754,14 @@ fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u
         named.push(table.item(name, &arg.0).map_err(PyValueError::new_err)?);
     }
     if !named.is_empty() {
-        let table = proto::desc(id)
-            .opt_table
-            .expect("named items imply a table");
-        out.extend_from_slice(&table.encode(&named).map_err(PyValueError::new_err)?);
+        let encoded = match group {
+            Some(g) => repeat::encode(g, &named),
+            None => proto::desc(id)
+                .opt_table
+                .expect("named items imply a table")
+                .encode(&named),
+        };
+        out.extend_from_slice(&encoded.map_err(PyValueError::new_err)?);
     }
     if let Some(max) = option_region_limit(id) {
         // `build_with` pads the region to a whole word before writing the

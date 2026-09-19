@@ -7,11 +7,21 @@ RFC 2328 §A.3.1: every OSPF version 2 packet opens with a one-octet version, a
 one-octet type, a 16-bit packet length, the 32-bit router id, the 32-bit area
 id, a 16-bit checksum, a 16-bit authentication type and 64 bits of
 authentication data. The body that follows is per-type (§A.3.2 onwards) and is
-left opaque.
+left opaque, except the one body that is nothing but a repeating group.
+
+RFC 2328 §A.3.6: a Link State Acknowledgment (type 5) is a list of 20-octet LSA
+headers — §A.4.1: a 16-bit age, an options octet, a one-octet LS type, the link
+state and advertising-router ids, a 32-bit sequence number, a checksum and the
+LSA's own length — which fill the packet from octet 24 to the `len` the header
+declares. That is a length-driven repeating group
+(`crates/wiry-core/src/repeat.rs`); scapy writes the same rule as
+`length_from=lambda pkt: pkt.underlayer.len - 24`. The other bodies (§A.3.2
+onwards) stay opaque — see DEVIATIONS E1.
 """
 min_len = 24
-header_len = 24
+header_len = "hand"
 content_len = "hand"
+parsed_field = "lsaheaders"
 
 [[fields]]
 name = "version"
@@ -56,6 +66,68 @@ name = "authdata"
 off = 128
 len = 64
 kind = "bytes"
+
+[[fields]]
+name = "lsaheaders"
+off = 192
+kind = "var_bytes"
+when = "is_ls_ack"
+
+[group]
+name = "OSPF_LSA_Hdr"
+start = 24
+extent = "length"
+len_off = 16
+len_len = 16
+len_covers = 24
+elem_len = 20
+when = "is_ls_ack"
+
+[[group.fields]]
+name = "age"
+off = 0
+len = 16
+default = 1
+
+[[group.fields]]
+name = "options"
+off = 16
+len = 8
+kind = "flags"
+flags = ["MT", "E", "MC", "NP", "L", "DC", "O", "DN"]
+
+[[group.fields]]
+name = "type"
+off = 24
+len = 8
+default = 1
+
+[[group.fields]]
+name = "id"
+off = 32
+kind = "ipv4"
+
+[[group.fields]]
+name = "adrouter"
+off = 64
+kind = "ipv4"
+
+[[group.fields]]
+name = "seq"
+off = 96
+len = 32
+default = 0x80000001
+
+[[group.fields]]
+name = "chksum"
+off = 128
+len = 16
+
+[[group.fields]]
+name = "len"
+off = 144
+len = 16
+default = 36
 
 [[parents]]
 from = "ipproto"

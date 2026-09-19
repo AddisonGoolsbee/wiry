@@ -9,11 +9,20 @@ Query and appends a suppress/QRV octet, a QQIC octet and a source count; §4.2
 replaces the group address with a reserved word and a group record count. The
 three versions share one layer because they share one prefix and differ only in
 what follows it, which is what a conditional field is for.
+
+RFC 3376 §4.2.4 makes the version 3 report's body a count-driven repeating
+group (`crates/wiry-core/src/repeat.rs`): `numgrp` group records, each a record
+type, an auxiliary-data length in 32-bit words, a source count, a multicast
+address, and then that many source addresses — so a record is eight octets plus
+four per source plus four per auxiliary word, and the sources are a nested
+group of their own. The version 3 query's source list (§4.1.10) is inside the
+header but is not decoded: a layer answers under one group. See DEVIATIONS E1.
 """
 min_len = 8
 header_len = "hand"
 build_len = 8
 next = "end"
+parsed_field = "records"
 
 [[fields]]
 name = "type"
@@ -66,6 +75,65 @@ name = "numsrc"
 off = 80
 len = 16
 when = "is_v3_query"
+
+[[fields]]
+name = "records"
+off = 64
+kind = "var_bytes"
+when = "is_v3_report"
+
+[group]
+name = "IGMPv3gr"
+start = 8
+extent = "count"
+count_off = 48
+count_len = 16
+elem_base = 8
+when = "is_v3_report"
+
+[[group.terms]]
+off = 16
+len = 16
+scale = 4
+
+[[group.terms]]
+off = 8
+len = 8
+scale = 4
+
+[[group.fields]]
+name = "rtype"
+off = 0
+len = 8
+default = 4
+
+[[group.fields]]
+name = "auxdlen"
+off = 8
+len = 8
+
+[[group.fields]]
+name = "numsrc"
+off = 16
+len = 16
+
+[[group.fields]]
+name = "maddr"
+off = 32
+kind = "ipv4"
+
+[group.nested]
+name = "srcaddrs"
+start = 8
+extent = "count"
+count_off = 16
+count_len = 16
+elem_len = 4
+
+[[group.nested.fields]]
+name = "sa"
+off = 0
+kind = "ipv4"
 
 [[parents]]
 from = "ipproto"
