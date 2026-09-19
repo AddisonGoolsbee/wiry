@@ -477,6 +477,25 @@ pub fn accessor_names(id: ProtoId) -> &'static [&'static str] {
     }
 }
 
+/// The repeating group a protocol's payload is, where its payload is one.
+/// A generated match rather than a `ProtoDesc` field: ninety layers carry no
+/// group, and the descriptor is already the widest struct in the crate.
+#[inline]
+pub fn group_of(id: ProtoId) -> Option<&'static crate::repeat::GroupDesc> {
+    match id {
+        // protogen:groups begin
+        // protogen:groups end
+        _ => None,
+    }
+}
+
+/// Whether a layer answers its parsed field with an item list at all, by either
+/// route: an option region or a repeating group.
+#[inline]
+pub fn has_parsed_items(id: ProtoId) -> bool {
+    desc(id).parse_options.is_some() || group_of(id).is_some()
+}
+
 /// The field a protocol's `parse_options` answers for. Line-oriented and
 /// BER-encoded layers reuse the same parsed-item shape under their own name,
 /// so `pkt[HTTP].headers` reads as `pkt[TCP].options` does.
