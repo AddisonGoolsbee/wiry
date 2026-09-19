@@ -10,6 +10,7 @@ group (`crates/wiry-core/src/repeat.rs`).
 """
 min_len = 12
 header_len = "rest"
+build_len = 0
 next = "end"
 parsed_field = "requests"
 

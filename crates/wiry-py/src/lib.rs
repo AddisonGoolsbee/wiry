@@ -1727,6 +1727,12 @@ fn option_region_limit(id: ProtoId) -> Option<usize> {
 
 fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u8>> {
     let mut out = Vec::new();
+    // The region is laid down straight after `build_len`, so a group whose
+    // elements start later than that needs the gap paid for or every element
+    // lands early. Emitted only if something is written into the region.
+    let gap = proto::group_of(id)
+        .map(|g| g.start.saturating_sub(proto::desc(id).build_len))
+        .unwrap_or(0);
     let mut named = Vec::new();
     // A group and an option table are both named things appended after the
     // fixed header, so only the name resolution differs.
@@ -1761,6 +1767,11 @@ fn option_region(id: ProtoId, layer: usize, opts: &[OptEntry]) -> PyResult<Vec<u
                 .encode(&named),
         };
         out.extend_from_slice(&encoded.map_err(PyValueError::new_err)?);
+    }
+    if !out.is_empty() && gap > 0 {
+        let mut padded = vec![0u8; gap];
+        padded.append(&mut out);
+        out = padded;
     }
     if let Some(max) = option_region_limit(id) {
         // `build_with` pads the region to a whole word before writing the

@@ -45,7 +45,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
     min_len: 12,
     header_len: crate::proto::header_len_rest,
     next: crate::proto::next_end,
-    build_len: 12,
+    build_len: 0,
     parse_options: None,
     opt_table: None,
     set_hlen: None,

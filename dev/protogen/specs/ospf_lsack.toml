@@ -15,6 +15,7 @@ to the end.
 """
 min_len = 20
 header_len = "rest"
+build_len = 0
 next = "end"
 parsed_field = "lsaheaders"
 

@@ -14,15 +14,21 @@ from wiry import (
     BGPHeader,
     BGPOpen,
     BGPUpdate,
+    ICMPv6MLQuery,
+    ICMPv6MLReport2,
     IGMP,
     IP,
     NetflowHeaderV5,
     OSPF_Hdr,
     OSPF_Hello,
     OSPF_LSAck,
+    OSPF_LSReq,
     OSPF_LSUpd,
     RIP,
+    RTP,
+    SFlow,
     UDP,
+    VRRP,
     rdpcap,
     wrpcap,
 )
@@ -265,6 +271,71 @@ def test_building_igmp_records_writes_both_counts():
     assert named(back.records[0], "numsrc") == 2
     assert named(back.records[0], "srcaddrs") == [("sa", "10.0.0.1"), ("sa", "10.0.0.2")]
     assert named(back.records[1], "numsrc") == 0
+
+
+def test_a_scalar_list_takes_bare_values():
+    """A list of addresses is how these are written, not a list of pairs."""
+    built = OSPF_Hdr(len=52) / OSPF_Hello(neighbors=["10.0.0.2", "10.0.0.3"])
+    back = OSPF_Hdr(bytes(built))[OSPF_Hello]
+    assert back.neighbors == [("neighbor", "10.0.0.2"), ("neighbor", "10.0.0.3")]
+    assert VRRP(bytes(VRRP(addrlist=["10.0.0.1"])))[VRRP].ipcount == 1
+    assert RTP(bytes(RTP(sync=[7, 9])))[RTP].sync == [("id", 7), ("id", 9)]
+
+
+def test_a_group_starting_past_the_fixed_header_pays_for_the_gap():
+    """RFC 3810 §5.1 puts the source list four octets past the version 1
+    header a default query builds."""
+    built = ICMPv6MLQuery(sources=["::1", "::2"])
+    raw = bytes(built)
+    assert len(raw) == 28 + 32
+    back = ICMPv6MLQuery(raw)[ICMPv6MLQuery]
+    assert back.sources_number == 2
+    assert back.sources == [("src", "::1"), ("src", "::2")]
+
+
+def test_a_group_at_octet_zero_builds_nothing_of_its_own():
+    """RFC 2328 §A.3.4: a request packet is its list and nothing else, so an
+    empty one is empty."""
+    assert bytes(OSPF_LSReq()) == b""
+    built = OSPF_LSReq(requests=[
+        ("OSPF_LSReq_Item", [("type", 1), ("id", "10.0.0.1"),
+                             ("adrouter", "10.0.0.2")]),
+    ])
+    assert len(bytes(built)) == 12
+
+
+def test_a_record_ending_in_a_variable_field_keeps_its_bytes():
+    """RFC 4271 §4.2: an optional parameter's value is octets the record
+    carries, written after the element is grown to its declared length."""
+    built = BGPHeader(len=33) / BGPOpen(my_as=65001, opt_params=[
+        ("BGPOptParam", [("param_type", 2), ("param_length", 2),
+                         ("param_value", b"\x01\x04")]),
+    ])
+    back = BGPHeader(bytes(built))[BGPOpen]
+    assert back.my_as == 65001
+    assert named(back.opt_params[0], "param_value") == b"\x01\x04"
+
+
+def test_a_nested_ipv6_source_list_round_trips():
+    built = ICMPv6MLReport2(records=[
+        ("ICMPv6MLDMultAddrRec", [("rtype", 4), ("dst", "ff02::1"),
+                                  ("sources", ["::1", "::2"])]),
+    ])
+    back = ICMPv6MLReport2(bytes(built))[ICMPv6MLReport2]
+    assert back.records_number == 1
+    rec = back.records[0]
+    assert named(rec, "sources_number") == 2
+    assert named(rec, "sources") == [("src", "::1"), ("src", "::2")]
+
+
+def test_an_sflow_sample_writes_its_own_length():
+    built = SFlow(samples=[
+        ("SFlowSample", [("sample_type", 3), ("sample_length", 4),
+                         ("sample_data", b"\x0a\x0b\x0c\x0d")]),
+    ])
+    back = SFlow(bytes(built))[SFlow]
+    assert back.num_samples == 1
+    assert named(back.samples[0], "sample_data") == b"\x0a\x0b\x0c\x0d"
 
 
 def test_an_unknown_element_or_field_is_refused():

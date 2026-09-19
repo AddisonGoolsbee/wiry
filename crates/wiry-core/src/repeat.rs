@@ -422,6 +422,16 @@ pub fn item(g: &GroupDesc, name: &str, arg: &OptArg) -> Result<Item, String> {
     }
     if g.is_scalar_list() {
         let f = &g.fields[0];
+        // A list of bare values is how a caller writes a scalar list, and the
+        // option shape carries a bare entry as its name with no value.
+        let bare;
+        let arg = match arg {
+            OptArg::Flag => {
+                bare = OptArg::Text(name.to_string());
+                &bare
+            }
+            other => other,
+        };
         return Ok(Item {
             name: Cow::Borrowed(f.name),
             code: 0,
@@ -895,6 +905,14 @@ mod tests {
     #[test]
     fn a_scalar_list_takes_its_value_directly() {
         let it = item(&SOURCES, "srcs", &OptArg::Text("10.0.0.9".into())).unwrap();
+        assert_eq!(encode(&SOURCES, &[it]).unwrap(), vec![10, 0, 0, 9]);
+    }
+
+    /// `RIP(entries=["10.0.0.9"])` reaches here as a name with no value, which
+    /// for a scalar list is the value.
+    #[test]
+    fn a_bare_entry_in_a_scalar_list_is_its_own_value() {
+        let it = item(&SOURCES, "10.0.0.9", &OptArg::Flag).unwrap();
         assert_eq!(encode(&SOURCES, &[it]).unwrap(), vec![10, 0, 0, 9]);
     }
 

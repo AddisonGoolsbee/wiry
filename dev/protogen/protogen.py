@@ -262,6 +262,15 @@ def validate(s: dict) -> None:
                 f"{f}: group start {g.get('start', 0)} and field "
                 f"{tail['name']!r} at bit {tail['off']} disagree"
             )
+        # Construction lays the region down straight after `build_len` and pads
+        # any gap; a template longer than the start would overlap it instead.
+        build_len = s.get("build_len", s.get("min_len", 0))
+        if build_len > g.get("start", 0):
+            raise SpecError(
+                f"{f}: build_len {build_len} runs past the group's start "
+                f"{g.get('start', 0)}, so a built region would overlap the "
+                "fixed header; set build_len to the start"
+            )
 
     for p in s.get("parents", []):
         if p.get("from") not in PARENT_KINDS:
