@@ -137,7 +137,7 @@ def check_loose_matching(target, iface):
 
 def main(argv):
     if not P.capture_available():
-        sys.exit("built without the live feature; see dev/live/README.md")
+        sys.exit(P.capture_backend()["reason"])
 
     target = "1.1.1.1"
     net = None

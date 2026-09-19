@@ -22,6 +22,9 @@ impl Handle {
     pub fn set_filter(&mut self, _expr: &str) -> Result<(), CaptureError> {
         match *self {}
     }
+    pub fn reads_block(&self) -> bool {
+        match *self {}
+    }
 }
 
 pub enum CompiledFilter {}

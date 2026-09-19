@@ -1,3 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/libs/winpcapy.py, scapy/arch/libpcap.py
+//   scapy 2.7.0, upstream commit 7d69454
+//   Copyright (C) Massimo Ciani (2009), Gabriel Potter
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-09-18 — reimplemented in Rust over libloading instead of ctypes;
+//                kept scapy's library search order, its Npcap directory
+//                handling, and its create/set/activate open sequence
+
 //! libpcap, loaded at run time.
 //!
 //! wiry does not link against libpcap. A wheel that did could only be built on
@@ -98,6 +110,7 @@ struct Api {
     statustostr: Option<PcapStatustostr>,
     compile: PcapCompile,
     setfilter: PcapSetfilter,
+    setnonblock: PcapSetnonblock,
     freecode: PcapFreecode,
     offline_filter: PcapOfflineFilter,
     open_dead: PcapOpenDead,
@@ -231,6 +244,7 @@ fn load() -> Result<Api, Error> {
         statustostr: unsafe { sym(&lib, b"pcap_statustostr\0") },
         compile: required(&lib, b"pcap_compile\0", &path)?,
         setfilter: required(&lib, b"pcap_setfilter\0", &path)?,
+        setnonblock: required(&lib, b"pcap_setnonblock\0", &path)?,
         freecode: required(&lib, b"pcap_freecode\0", &path)?,
         offline_filter: required(&lib, b"pcap_offline_filter\0", &path)?,
         open_dead: required(&lib, b"pcap_open_dead\0", &path)?,
@@ -513,6 +527,31 @@ impl Handle {
             prog,
             api: self.api,
         })
+    }
+
+    /// Makes a read that finds nothing return at once instead of waiting.
+    ///
+    /// **libpcap's read timeout is not a deadline, and on Linux it is not even
+    /// a bound.** `pcap_next_ex` is documented to return 0 when the timeout
+    /// expires, but the memory-mapped Linux capture loops internally and blocks
+    /// until a frame actually arrives; a `sniff(timeout=2)` over an interface
+    /// with no traffic then never returns, and neither does Ctrl-C. In
+    /// non-blocking mode the read returns 0 immediately on every platform, and
+    /// the driver owns the waiting — which is where the deadline, the stop flag
+    /// and the signal check already live.
+    pub fn set_nonblock(&mut self, v: bool) -> Result<(), Error> {
+        let mut err = [0i8 as c_char; PCAP_ERRBUF_SIZE];
+        // SAFETY: an activated handle and a buffer of the required size.
+        let rc = unsafe { (self.api.setnonblock)(self.raw, c_int::from(v), err.as_mut_ptr()) };
+        if rc < 0 {
+            // SAFETY: on failure libpcap fills the buffer with a C string.
+            let msg = unsafe { text(err.as_ptr()) };
+            return Err(Error {
+                kind: classify(&msg, Some(rc)),
+                msg,
+            });
+        }
+        Ok(())
     }
 
     /// Installs a compiled program on this handle, so the kernel drops what

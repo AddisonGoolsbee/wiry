@@ -4,7 +4,10 @@ Driven by dev/live/netns.sh, which creates the pair. Not part of the shipped
 suite: it needs root and a real interface.
 """
 
+import os
+import signal
 import sys
+import threading
 import time
 
 import wiry as P
@@ -14,16 +17,38 @@ FAILED = []
 
 
 def check(name, cond, detail=""):
-    print(f"  {'PASS' if cond else 'FAIL'}  {name}  {detail}")
+    # Flushed, because the next line may be the one that hangs and an
+    # unflushed buffer would lose every result before it.
+    print(f"  {'PASS' if cond else 'FAIL'}  {name}  {detail}", flush=True)
     if not cond:
         FAILED.append(name)
 
 
+def timed(seconds, fn, *args, **kw):
+    """Runs fn on a worker with a deadline. A capture that never returns is
+    the failure this harness exists to catch, and a wall-clock assertion made
+    after the call cannot catch it."""
+    out, err = [], []
+
+    def go():
+        try:
+            out.append(fn(*args, **kw))
+        except BaseException as e:
+            err.append(e)
+
+    t = threading.Thread(target=go, daemon=True)
+    t0 = time.monotonic()
+    t.start()
+    t.join(seconds)
+    if t.is_alive():
+        return None, seconds, TimeoutError(f"still running after {seconds}s")
+    return (out[0] if out else None), time.monotonic() - t0, (err[0] if err else None)
+
+
 def main(veth):
     if not P.capture_available():
-        sys.exit("built without the live feature; see dev/live/README.md")
-
-    print(f"=== {veth} ===")
+        sys.exit(P.capture_backend()["reason"])
+    print(f"=== {veth} :: {P.capture_backend()['version']} ===", flush=True)
     check("interface is listed", veth in P.get_if_list())
 
     frame = bytes(
@@ -48,12 +73,21 @@ def main(veth):
               == ["Ether", "IP", "UDP", "Raw"], str(got[0].layers()))
         check("payload survived", got[0][Raw].load == b"wiry-netns-probe")
 
-    # A filter that cannot match must return nothing rather than hang.
-    t0 = time.monotonic()
-    none = P.sniff(iface=veth, filter="tcp port 9", timeout=2)
-    check("non-matching filter terminates on timeout",
-          len(none) == 0 and time.monotonic() - t0 < 5,
-          f"{time.monotonic() - t0:.1f}s")
+    # A filter that cannot match must return nothing rather than hang. This is
+    # the check that caught libpcap's read timeout not being a bound on Linux:
+    # pcap_next_ex waits for a frame there however the timeout is set, so the
+    # deadline was only ever honoured on an interface that had traffic.
+    none, took, err = timed(15, P.sniff, iface=veth, filter="tcp port 9",
+                            timeout=2)
+    check("a silent interface still honours the deadline",
+          err is None and none is not None and len(none) == 0 and took < 5,
+          f"{took:.1f}s, asked for 2" + (f", {err!r}" if err else ""))
+
+    # The same, with a count it will never reach.
+    _, took, err = timed(15, P.sniff, iface=veth, filter="tcp port 9",
+                         count=5, timeout=2)
+    check("an unreachable count still honours the deadline",
+          err is None and took < 5, f"{took:.1f}s" + (f", {err!r}" if err else ""))
 
     # sr1 against the peer, which the kernel answers from the namespace.
     ans = P.sr1(IP(dst="10.99.0.2") / ICMP(), timeout=3, iface=veth)
@@ -105,10 +139,23 @@ def main(veth):
     s2 = P.AsyncSniffer(iface=veth, filter="tcp port 9")
     s2.start()
     time.sleep(0.2)
+    _, took, err = timed(15, s2.stop)
+    check("stop() returns promptly on a silent interface",
+          err is None and took < 2, f"{took:.2f}s" + (f", {err!r}" if err else ""))
+
+    # An unbounded sniff must answer Ctrl-C. It can only do that between reads,
+    # so a read that never returns is a capture that cannot be interrupted.
+    threading.Thread(
+        target=lambda: (time.sleep(1.0), os.kill(os.getpid(), signal.SIGINT)),
+        daemon=True,
+    ).start()
     t0 = time.monotonic()
-    s2.stop()
-    check("stop() returns promptly", time.monotonic() - t0 < 2,
-          f"{time.monotonic() - t0:.2f}s")
+    try:
+        P.sniff(iface=veth, filter="tcp port 9")
+        check("an unbounded sniff answers Ctrl-C", False, "returned by itself")
+    except KeyboardInterrupt:
+        check("an unbounded sniff answers Ctrl-C",
+              time.monotonic() - t0 < 5, f"{time.monotonic() - t0:.2f}s")
 
     print()
     if FAILED:

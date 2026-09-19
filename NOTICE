@@ -69,7 +69,24 @@ per-file blocks are authoritative.
 
 | wiry file | scapy source | scapy version / commit | First taken |
 |---|---|---|---|
-| _(none yet — the relicence landed before any copying)_ | | | |
+| `crates/wiry-pcap/src/sys.rs` | `scapy/libs/winpcapy.py`, `scapy/libs/structures.py` | 2.7.0 / `7d69454` | 2026-09-18 |
+| `crates/wiry-pcap/src/lib.rs` | `scapy/libs/winpcapy.py`, `scapy/arch/libpcap.py` | 2.7.0 / `7d69454` | 2026-09-18 |
+| `crates/wiry-capture/src/pcap_backend.rs` | `scapy/interfaces.py` | 2.7.0 / `7d69454` | 2026-09-18 |
+
+
+## Third-party interfaces that are not scapy's
+
+`crates/wiry-pcap` declares libpcap's C interface. The declarations themselves
+come from libpcap's own `pcap/pcap.h` and `pcap/bpf.h`:
+
+    libpcap — https://github.com/the-tcpdump-group/libpcap
+    Copyright (c) 1993-2023 The Regents of the University of California
+    and the tcpdump.org contributors
+    Licensed BSD-3-Clause
+
+BSD-3-Clause is GPL-compatible, so those declarations may be used here. **No
+libpcap code is copied or shipped**: wiry links against nothing and loads the
+library the host already has, at run time.
 
 
 ## Licence history — the MIT period

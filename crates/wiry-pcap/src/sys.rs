@@ -1,3 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/libs/winpcapy.py, scapy/libs/structures.py
+//   scapy 2.7.0, upstream commit 7d69454
+//   Copyright (C) Massimo Ciani (2009), Gabriel Potter
+//
+// Changed by the wiry authors:
+//   2026-09-18 — translated the ctypes Structures to repr(C) Rust, and made
+//                timeval's tv_usec 32-bit on the BSDs, where scapy reads a
+//                long over four octets of padding
+
 //! The C declarations, transcribed from `pcap/pcap.h` and `pcap/bpf.h`
 //! (libpcap 1.10, BSD-3-Clause) and cross-checked against scapy's ctypes
 //! bindings in `scapy/libs/winpcapy.py` and `scapy/libs/structures.py`.
@@ -110,6 +121,7 @@ pub type PcapStatustostr = unsafe extern "C" fn(c_int) -> *const c_char;
 pub type PcapCompile =
     unsafe extern "C" fn(*mut PcapT, *mut BpfProgram, *const c_char, c_int, c_uint) -> c_int;
 pub type PcapSetfilter = unsafe extern "C" fn(*mut PcapT, *mut BpfProgram) -> c_int;
+pub type PcapSetnonblock = unsafe extern "C" fn(*mut PcapT, c_int, *mut c_char) -> c_int;
 pub type PcapFreecode = unsafe extern "C" fn(*mut BpfProgram);
 pub type PcapOfflineFilter =
     unsafe extern "C" fn(*const BpfProgram, *const PcapPkthdr, *const u8) -> c_int;

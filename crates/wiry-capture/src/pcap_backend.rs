@@ -1,3 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/interfaces.py (get_working_if)
+//   scapy 2.7.0, upstream commit 7d69454
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-09-18 — applied scapy's "an interface is usable when it has an
+//                address that is not 0.0.0.0" test to libpcap's own device
+//                list, since wiry reads no routing table to sort by
+
 use crate::error::CaptureError;
 use crate::sink::PacketMeta;
 use crate::{Interface, LiveConfig};
@@ -19,6 +30,17 @@ pub struct Handle {
     cap: raw::Handle,
     linktype: u32,
     name: String,
+    blocking: bool,
+}
+
+impl Handle {
+    /// Whether a read that finds nothing waits for a frame instead of
+    /// returning. False on every libpcap that accepted non-blocking mode,
+    /// which is all of them; a driver that sees True must not rely on the
+    /// read timeout to bound anything.
+    pub fn reads_block(&self) -> bool {
+        self.blocking
+    }
 }
 
 impl Handle {
@@ -106,9 +128,10 @@ pub fn list_interfaces() -> Result<Vec<Interface>, CaptureError> {
 /// The interface a capture with no `iface=` should use.
 ///
 /// libpcap's own `pcap_lookupdev` is deprecated, removed from some builds and
-/// documented as returning an arbitrary device; scapy stopped trusting it too.
-/// This is scapy's `get_working_if` rule instead: the first interface that is
-/// not a loopback and carries a routable IPv4 address, then the first with any
+/// documented as returning an arbitrary device. scapy's `get_working_if` asks
+/// instead whether an interface has an address that is not `0.0.0.0`; the same
+/// test applied to libpcap's device list is the first interface that is not a
+/// loopback and carries a routable IPv4 address, then the first with any
 /// address at all, and a loopback only when there is nothing else.
 pub fn default_interface() -> Result<String, CaptureError> {
     let ifs = list_interfaces()?;
@@ -144,11 +167,19 @@ pub fn open_live(cfg: &LiveConfig) -> Result<Handle, CaptureError> {
     let _ = cap.set_immediate_mode(cfg.immediate);
     cap.activate().map_err(|e| map_err(e, &dev))?;
 
+    // The read timeout is not a deadline: on Linux pcap_next_ex blocks until a
+    // frame arrives however the timeout is set, so a capture over a silent
+    // interface would never reach its own stop conditions. The driver does the
+    // waiting instead. The timeout above is still set, because it is what an
+    // older libpcap that refuses this falls back to.
+    let blocking = cap.set_nonblock(true).is_err();
+
     let linktype = cap.datalink() as u32;
     let mut h = Handle {
         cap,
         linktype,
         name: dev,
+        blocking,
     };
     if let Some(f) = &cfg.filter {
         h.set_filter(f)?;
