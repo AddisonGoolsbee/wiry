@@ -22,6 +22,7 @@ request and what the reply is, and call the instance.
 from __future__ import annotations
 
 import abc
+import socket
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -216,7 +217,7 @@ class AnsweringMachine(metaclass=ReferenceAM):
 class AnsweringMachineTCP(AnsweringMachine):
     """An answering machine over ordinary TCP sockets, one sniffer per client."""
 
-    TYPE = 1  # socket.SOCK_STREAM
+    TYPE = socket.SOCK_STREAM
 
     def parse_options(self, port: int = 80, cls: Any = None) -> None:
         self.port = port
@@ -245,12 +246,10 @@ class AnsweringMachineTCP(AnsweringMachine):
         ``sniff``: the source is a stream, not an interface, and wiry's capture
         backend does not take a socket handed in from Python.
         """
-        import socket
-
         from .capture import conf, get_if_addr
         from .supersocket import StreamSocket
 
-        ssock = socket.socket(socket.AF_INET, socket.SocketKind(self.TYPE))
+        ssock = socket.socket(socket.AF_INET, self.TYPE)
         try:
             ssock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         except OSError:
@@ -282,4 +281,4 @@ class AnsweringMachineTCP(AnsweringMachine):
 class AnsweringMachineUDP(AnsweringMachineTCP):
     """The same, over UDP."""
 
-    TYPE = 2  # socket.SOCK_DGRAM
+    TYPE = socket.SOCK_DGRAM
