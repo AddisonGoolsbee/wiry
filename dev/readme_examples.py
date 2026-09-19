@@ -32,8 +32,14 @@ def main() -> int:
         [W.Ether() / W.IP() / W.TCP(dport=443), W.Ether() / W.IP() / W.UDP()],
     )
 
-    failures = []
+    failures, skipped = [], []
     for i, block in enumerate(blocks, 1):
+        # A block that puts packets on a wire cannot run here. It is still held
+        # to compiling, so a typo in one is still caught.
+        if block.lstrip().startswith("# needs root"):
+            compile(block, f"<README block {i}>", "exec")
+            skipped.append(i)
+            continue
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 exec(compile(block, f"<README block {i}>", "exec"), {})
@@ -43,7 +49,9 @@ def main() -> int:
     for i, why, block in failures:
         print(f"  BLOCK {i}  {why}")
         print(f"         {block.strip().splitlines()[0]}")
-    print(f"\n{len(blocks) - len(failures)}/{len(blocks)} README examples run")
+    ran = len(blocks) - len(failures) - len(skipped)
+    note = f", {len(skipped)} skipped (need root)" if skipped else ""
+    print(f"\n{ran}/{len(blocks) - len(skipped)} README examples run{note}")
     return 1 if failures else 0
 
 

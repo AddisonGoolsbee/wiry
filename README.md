@@ -1,510 +1,121 @@
 # wiry
 
-Packet dissection and crafting for Python, with scapy's API and a Rust core.
-Derived from scapy, and GPL-2.0-only for that reason.
+scapy's interface, with a Rust engine underneath. Same API, same output,
+20–236x faster.
 
 ```python
-from wiry import rdpcap
-
-cap = rdpcap("capture.pcap")
-cap.columns([("IP", "src"), ("IP", "dst"), ("TCP", "dport")])
+from wiry import *
 ```
 
-Those two lines read a 368 MB capture off disk and pull three fields out of all
-791,615 packets in 391 ms, without building a Python object for a single one of
-them.
+Anything written for scapy should run unchanged. Where it does not,
+[DEVIATIONS.md](DEVIATIONS.md) says so.
 
-**wiry implements 100 layers. scapy registers 1,746.** Anything outside them
-dissects to `Raw` and round-trips unchanged, and you get bytes rather than
-fields. Seventeen of the hundred are complete; the rest stop somewhere, and
-[DEVIATIONS.md](DEVIATIONS.md)'s P and T rows say where, one row at a time.
+## Examples
 
-Seventeen of them are the core, and those are complete: options parsed in both
-directions, lengths and checksums recomputed on write. Ethernet, 802.1Q, ARP,
-IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP, DHCP, Loopback, Linux cooked
-capture in both versions, `Raw` and `Padding`.
-
-Fourteen are encapsulations, because losing one of those loses every layer under
-it rather than one leaf: the four IPv6 extension headers, GRE, VXLAN, Geneve,
-MPLS, PPPoE and PPP, GTP-U and the two ERSPAN types. IP-in-IP and 6in4 need no
-layer of their own. A tunnelled packet dissects through to its inner transport,
-tunnels nest, and `columns()` reaches inside them.
-[DEVIATIONS.md](DEVIATIONS.md) E6 states where each of those stops.
-
-The remaining sixty-nine dissect their header and, where the body is a
-repeating record array, that too: RIP entries, NetFlow v5 records, IGMPv3 group
-records, all five OSPF bodies, BGP OPEN parameters and UPDATE path attributes,
-MLDv2 address records, sFlow samples, VRRP addresses, RTP contributing sources,
-SCTP chunk parameters, and NetFlow v9 and IPFIX sets. What stays `Raw` is a
-record body whose layout varies by a type field, a payload that needs state from
-an earlier datagram, and anything encrypted. None of them recomputes a length or
-a checksum, and port dispatch is a heuristic with a guard over the payload. That
-is the part to read before counting on them, and `DEVIATIONS.md`'s P and T rows
-say where each one stops: 802.2 LLC and SNAP,
-STP, LLDP, CDP, radiotap and 802.11 with its six management bodies, SCTP, IGMP,
-the Neighbor Discovery and MLD messages, ESP, AH, OSPF and its five bodies, RIP,
-BGP and its four, VRRP, HSRP,
-BFD, NTP, DHCPv6, SNMP, TFTP, syslog, NBNS, NBT, RADIUS, RTP, RTCP, NetFlow v5
-and v9, IPFIX, sFlow, QUIC, WireGuard, TLS, HTTP, SSH, MQTT, Modbus/TCP, SMB2,
-LDAP, SIP, FTP, SMTP, IMAP and Telnet.
-
-The method surface is narrower too. Most of what
-scapy's `Packet` carries is its own internal machinery, `do_build`,
-`post_dissect`, `self_build` and the rest, which exists because scapy assembles
-an object graph per packet. wiry does not, so it has no equivalent and needs
-none.
-
-That is the trade. Everything below assumes you already know it.
-
-## Numbers
-
-`bigFlows.pcap` from the tcpreplay project: 368,083,648 bytes, 791,615 packets,
-SHA-256 `2b630291cc848c79949e12a54edebe07d20f644747db28899ac4d568c42dc141`,
-fetched from `https://s3.amazonaws.com/tcpreplay-pcap-files/bigFlows.pcap`. That
-URL is mutable and has already served a different capture under the same name,
-so the hash is what makes "the same corpus" checkable.
-
-Apple M1 Pro, macOS 26.6, CPython 3.13.5, scapy 2.7.0, dpkt 1.9.8, measured
-2026-09-18 on a **release build**: a debug one reads about a third as fast, and
-`dev/bench.py` refuses to run on one rather than publish that. Each row is the
-best of nine: three invocations of the script, each taking the best of three.
-
-```sh
-pip install .                  # maturin builds release; maturin develop does not
-python dev/bench.py <pcap>
-```
-
-| Read `IP.src` and `TCP.dport` from every packet | rate | |
-|---|---|---|
-| scapy `PcapReader` loop | 11,315 pkt/s | |
-| dpkt `Reader` loop | 183,305 pkt/s | |
-| wiry per-packet loop | 305,113 pkt/s | **1.7x dpkt** |
-| wiry `columns()` | 2,667,208 pkt/s | **14.6x dpkt** |
-
-| Other workloads | scapy | wiry | |
-|---|---|---|---|
-| Dissect + re-serialise | 11,127 pkt/s | 688,520 pkt/s | **61.9x** |
-| Build + serialise Ether/IP/TCP | 4,570 pkt/s | 94,860 pkt/s | **20.8x** |
-
-Memory, each in its own process (`python dev/bench_memory.py <pcap>`):
-
-| | packets held | peak RSS | per packet |
-|---|---|---|---|
-| scapy | 200,000 | 1,317 MB | 6.59 KB |
-| wiry | 791,615 | 487 MB | **0.62 KB** |
-
-Read the per-packet row honestly: **against dpkt it is 1.7x, not an order of
-magnitude.** Every per-packet API pays for one Python object per packet and that
-cost sets the ceiling. dpkt sits near it and so do we. Across the three
-invocations that ratio moved between 1.6x and 1.7x, which is the measurement's
-own spread and worth more than a third significant figure. `columns()` amortises
-the object cost instead, returning one list per field for the whole capture, and
-that is where the 14.6x comes from — 14.5x to 15.1x across the same three.
-
-An earlier version of the last row published 22.3x. It was `field_column()`,
-which reads one field, sitting under a header that says two and ratioed against
-three rows that read two. The row now does the same work as the rows above it,
-and the number is smaller.
-
-The same effect caps the bulk API. Four separate `field_column()` calls dissect
-the capture four times, yet cost 1.6x one fused `columns()` pass rather than 4x
-(687 ms against 423 ms, `python dev/bench_columnar.py <pcap>`). Fusing the
-passes removes three quarters of the dissection and well under half the runtime,
-so most of what is left is building the Python lists. That is the floor, and no
-amount of Rust moves it.
-
-The machine was not idle: load average sat near 5 throughout, against the idle
-machine this project's own rules ask for. The check that it did not distort the
-comparison is that scapy and dpkt both reproduced their previously published
-rates to within 3%, and load hurts them more than it hurts us, not less.
-
-An earlier version of this table read higher per packet on a different corpus
-and a smaller protocol set. Bounds checks, Ethernet-trailer handling and sixty-nine
-more layers in the dispatch tables all cost something, and a table measured on a
-different capture cannot price them.
-
-## Crafting
-
-dpkt builds from field defaults too, but you assign each payload and its
-protocol number by hand: there is no `/`, and nothing prints the expression
-back. wiry's 38 of 38 enumerated construction cases come out byte-identical to
-scapy's bytes. Source MACs are pinned on both sides for that comparison, because
-scapy fills them from the live interface at build time and wiry deliberately does
-not, so that `bytes(Ether())` does not depend on the host.
+Craft a packet and look at it:
 
 ```python
 from wiry import *
 
-p = Ether(dst="00:11:22:33:44:55")/IP(dst="10.0.0.2")/TCP(dport=80, flags="S")
+p = Ether()/IP(dst="10.0.0.2")/TCP(dport=443, flags="S")
+p.show()
 raw(p)                      # checksums and lengths filled in
-p[TCP].dport = 443          # mutate; checksums recompute
-p.command()                 # the expression that rebuilds it, byte for byte
 ```
 
-One declaration can also stand for many packets. A field may hold a list, an
-inclusive range, a `Net`/`Net6` or a `Rand*` value, and the packet carrying one
-is a template that expands in scapy's order. The description crosses into Rust
-once and the product is walked there, so `sendp(Ether()/IP(dst=Net("10.0.0.0/8")))`
-is one crossing rather than sixteen million, and iteration is lazy in chunks.
-`fuzz()`, `corrupt_bytes` and `corrupt_bits` are there too, over a seedable
-generator that makes a whole run repeat — which scapy cannot do. The two
-corruption helpers additionally draw in scapy's own order from the
-interpreter's `random`, so `random.seed(n)` reproduces scapy's exact octets;
-templates keep the Rust generator, because a Python draw inside the expansion
-loop is the per-packet crossing the whole design exists to avoid.
-[DEVIATIONS.md](DEVIATIONS.md) E21 states what a template refuses and where the
-seed's guarantee stops — it is one process-wide stream, and it does not hold
-under concurrency.
-
-`fragment(pkt, 1480)` splits a datagram per RFC 791 §3.2 and `defragment(cap)`
-puts one back together, over a whole capture in a single crossing;
-`fragment6`/`defragment6` do RFC 8200 §4.5. Reassembly buffers
-attacker-controlled bytes, so its bounds and its overlap rule are stated in
-[DEVIATIONS.md](DEVIATIONS.md) E19 rather than left to be discovered.
-
-Capture and injection work on a plain install: `sniff`, `send`, `sendp`, `sr`,
-`sr1`, `srp`, `srp1` and `AsyncSniffer`, with scapy's arguments and semantics —
-and the tools built on them: `traceroute`, `arping`, `srloop`, `srploop`,
-`getmacbyip` and `get_if_hwaddr`.
-
-**libpcap is loaded when a capture is first asked for, not linked at build
-time.** That is how scapy has always done it, and it is what lets one wheel
-build anywhere and still capture: nothing in the build needs libpcap, and a
-machine without it gets a message naming the package to install rather than an
-instruction to rebuild. `wiry.capture_backend()` says which library was loaded,
-its version, or why there is none.
-
-What is still needed is privilege — root, `CAP_NET_RAW` on Linux, or a readable
-`/dev/bpf*` on macOS — and without it every entry point raises `PermissionError`
-saying which of those to arrange.
-
-On Windows, Npcap supplies the library and wiry loads `wpcap.dll` the same way,
-but that path has never been run here and should be treated as unverified.
-Raw layer-3 `send` is refused outright on Windows, where the OS has restricted
-it since XP SP2; `sendp` at layer 2 is the supported route. Dissection,
-crafting, capture files and `columns()` need none of it and pass the same suite
-on Windows in CI.
-
-`sniff(offline=...)` needs nothing at all. It runs the whole state machine from
-a capture file with no privileges and no library: `count`, `store`, `prn`,
-`lfilter`, `stop_filter`, `timeout` and the `where=` extension. A `filter=` is
-the one exception, since compiling BPF is libpcap's job.
-
-## The console
-
-`wiry` drops you into a prompt with the API already loaded, the way typing
-`scapy` does:
-
-```
-$ wiry
-          _               Welcome to wiry 0.1.0
- __      ___ _ __ _   _
- \ \ /\ / / | '__| | | |  100 layers, with live capture
-  \ V  V /| | |  | |_| |
-   \_/\_/ |_|_|   \__, |  ls() lists the layers, ls(IP) what one holds, lsc() the commands.
-                  |___/
-
->>> p = Ether()/IP(dst="10.0.0.2")/TCP(dport=80, flags="S")
->>> p.ttl          # <tab> completes every field of every layer in the chain
-64
->>> ls(p[TCP])
-###[ TCP ]###
-sport        : uint (2 bytes)           = 20              (20)
-dport        : uint (2 bytes)           = 80              (80)
-...
-flags        : flags (9 bits)           = 'S'             ('S')
-```
-
-A hundred layers is more than anyone remembers, so the three discovery
-commands are part of the API rather than a convenience. `ls()` lists every
-layer, `ls("tcp")` searches, `ls(IP)` prints what a layer holds and `ls(pkt)`
-what this packet holds beside the defaults. `lsc()` lists every command with
-its first documentation line. `explore(BFD)` shows one layer in full.
-
-IPython is used when it is importable and the standard shell otherwise.
-**Neither is a dependency**: `pip install 'wiry[console]'` adds IPython if you
-want it, and the console works either way. Unlike scapy's, the plain shell
-keeps its history. `python -m wiry` is the same console; `-c FILE` reads a
-startup file, `-C` skips it, `-H` drops the banner.
-
-[DEVIATIONS.md](DEVIATIONS.md) E29 and E30 state what the console and the
-discovery commands do not do.
-
-## Capture files
-
-pcap and pcapng, read and written, plus gzip on both sides — picked by magic
-bytes on the way in and by file name on the way out.
+Read a capture:
 
 ```python
-from wiry import rdpcap, wrpcap, PcapWriter, Ether, IP, TCP
-
-wrpcap("out.pcapng", rdpcap("capture.pcap"))   # whole capture, one crossing
-
-with PcapWriter("stream.pcap.gz", append=True) as w:
-    w.write(Ether()/IP()/TCP(dport=80))
-```
-
-Writing a whole `PacketList` copies it inside Rust with the GIL released and
-builds no Python object per packet; `PcapWriter.write()` is the per-packet
-streaming path, and both encode through the same code, so the files agree byte
-for byte. `pkt.wirelen` carries a snaplen-clipped record's original wire length
-through the round trip rather than collapsing it to the bytes that were kept.
-Appending reads the existing file's header first and refuses a link type it would
-misdescribe, or a pcapng that ends mid-block; a refused append leaves the file
-exactly as it found it. What pcapng we do not write is listed in
-[DEVIATIONS.md](DEVIATIONS.md) E5, and what the writer costs is in E20.
-
-## Captures as columns
-
-The part scapy has no equivalent for.
-
-```python
-from wiry import rdpcap, IP, TCP
+from wiry import *
 
 cap = rdpcap("capture.pcap")
-
-cap.columns([("IP", "src"), ("TCP", "dport")])
-cap.columns([("IP", "src")], where=[("TCP", "dport", "==", 443)])
-cap.count_layer(TCP)
-cap.field_column(IP, "src")
-cap.to_dict()
-```
-
-One call, one pass, one crossing. Filters are data rather than callbacks, so
-selection stays in Rust. Dataframes export lazily to polars, arrow and pandas:
-`pip install 'wiry[polars]'`.
-
-## Reporting
-
-The familiar reporting surface, on the same machinery.
-
-```python
-from wiry import rdpcap, Ether, IP, TCP
-
-pkt = Ether() / IP(dst="10.0.0.2") / TCP(dport=80, flags="S")
-pkt.sprintf("%IP.src% > %IP.dst% {TCP:%TCP.flags%}")
-pkt.show2()                 # as it will be sent: lengths and checksums computed
-
-cap = rdpcap("capture.pcap")
-cap.sprintf("%IP.src% > %IP.dst%")   # the whole capture, one pass
 cap.summary()
-cap.sessions()                       # flows, keyed by address tuple
-cap.streams()                        # what the flows said, in sequence order
+cap[0][IP].src
+[p for p in cap if TCP in p and p[TCP].dport == 80]
 ```
 
-`sprintf` over a `PacketList` resolves the fields the format names as columns, so
-it dissects once and builds no packet. `sessions()` computes the flow keys in
-Rust and leaves the membership there: a flow's packets become a `PacketList` only
-when you ask for that flow. Give either one a callback — `prn`, or a
-`session_extractor` — and the per-packet crossing is back, because that is what
-the callback asked for.
-
-`sessions()` says which packets belong to a flow; `streams()` says what the flow
-said. It reassembles every TCP stream in one crossing — octets in sequence order,
-retransmissions dropped, out-of-order arrival put back, holes named rather than
-filled in — and hands back each direction with the provenance to map a stream
-offset to the packet it came from. `sniff(offline=..., session=TCPSession)` takes
-the scapy-shaped route to the same engine.
-
-That is what makes the application layers reach past one segment. On
-`bigFlows.pcap`, 37% of the complete HTTP messages and 29% of the complete TLS
-records span more than one segment, and no single-packet dissector can see any of
-them. The bounds it works inside, and the rule it resolves overlapping octets by,
-are stated in `crates/wiry-core/src/stream.rs` and in DEVIATIONS E25.
-
-## Your own layers
-
-A layer you declare is data, not code. Python hands the description to Rust once,
-at class-definition time, and the same dissector that runs the built-in layers
-runs yours: no Python runs during dissection, and nothing crosses back per
-packet or per field. We have not timed a declared layer against a built-in one,
-so that is the mechanism and not a measured claim.
+Sniff — needs root, see Platforms:
 
 ```python
-from wiry import Packet, bind_layers, UDP, IP
-from wiry.fields import ByteField, ShortField, IPField
+# needs root
+from wiry import *
 
-class MyProto(Packet):
-    name = "MyProto"
-    fields_desc = [
-        ByteField("version", 1),
-        ShortField("length", 0),
-        IPField("peer", "0.0.0.0"),
-    ]
-
-bind_layers(UDP, MyProto, dport=9999)
-
-pkt = IP()/UDP()/MyProto(version=2, peer="10.0.0.1")
-IP(bytes(pkt))[MyProto].peer        # '10.0.0.1'
+sniff(iface="en0", count=10, prn=lambda p: p.summary())
+sniff(filter="tcp port 443", timeout=30)
 ```
 
-From there it is an ordinary layer: stacking, indexing, `in`, get and set,
-`show()`, dissection out of a capture, and `columns()`. See
-[DEVIATIONS.md](DEVIATIONS.md) E3 for what a declared layer cannot express.
+Send and get a reply:
 
-A layer meant to ship in the engine itself is written a second way: one TOML
-spec in `dev/protogen/`, from which the layer module, its id, its registration
-and its dispatch entry are generated. The citation is a required key, so a spec
-without its RFC does not build, and the generator refuses rather than guesses
-where the flat field model cannot place a field. See
-[dev/protogen/README.md](dev/protogen/README.md).
+```python
+# needs root
+from wiry import *
 
-## How we know it is right
+sr1(IP(dst="8.8.8.8")/ICMP(), timeout=2)
+traceroute("example.com")
+arping("192.168.1.0/24")
+```
 
-Over the first 20,000 packets of the corpus above, compared with scapy 2.7.0:
-all 20,000 layer chains agree, all 210,910 field comparisons are equal, and
-every packet re-serialises byte-identically.
+Follow TCP:
 
-scapy's own regression suite runs against wiry. Over its whole `test/`
-directory: **64 pass, 610 skip, 6 fail**; over `regression.uts` alone, 50 pass,
-292 skip, 3 fail; over `test/scapy/automaton.uts`, 7 pass, 8 skip, 0 fail. Read
-the skip column honestly: it is 90% of the suite, and that ratio is the coverage
-statement, not the pass count. A skip is a scope boundary — most often a layer
-we do not implement, a scapy internal we have no equivalent for, a call we
-refuse by design, or a test whose `~` marker asks for a Linux host, root or
-tshark. A refusal counts as a skip rather than a failure, which is a choice the
-harness makes and `dev/scapy_suite.py` shows. Of the 6 failures, 1 needs
-Windows, 2 assert by patching a scapy internal we do not have, 1 is a generator
-difference [DEVIATIONS.md](DEVIATIONS.md) E21 states outright, and 1 is the
-source MAC wiry deliberately does not fill from the live interface (E9). The
-sixth is a real wrong answer and not a scope boundary:
-`get_if_hwaddr(conf.loopback_name)` raises on macOS, where scapy answers
-`00:00:00:00:00:00` for a loopback that has no hardware address. Every other gap
-is enumerated in DEVIATIONS.
+```python
+from wiry import *
 
-790 Rust and 1,410 Python tests pass; 784 and 1,383 with
-`--no-default-features`, which drops live capture.
+cap = rdpcap("capture.pcap")
+cap.sessions()              # grouped into flows
+cap.streams()               # reassembled, both directions
+```
 
-The live paths were run against a real wire for the first time on
-2026-09-18, on a Linux veth pair as root: `dev/live/netns_check.py` passes in
-full — a frame sent with `sendp` arrives byte-identical, `sr1`, `srp1`,
-`arping`, `getmacbyip`, `srloop` and `traceroute` all match real replies. It
-found two defects that no offline test could reach, and
-[DEVIATIONS.md](DEVIATIONS.md) S2 names them, what is still unverified (macOS
-`/dev/bpf`, all of Windows) and what a burst costs.
+An interactive shell, like scapy's:
 
-Four of the five crates set `#![forbid(unsafe_code)]`, the dissector — the part
-that reads attacker-controlled bytes — among them. The fifth is `wiry-pcap`,
-which is nothing but the FFI: it `dlopen`s libpcap, calls through function
-pointers and owns what libpcap hands back. It parses no packets. That
-constrains this code and says nothing about dependencies: PyO3 contains
-hundreds of unsafe blocks and is compiled in. The dissector carries ten fuzz
-targets plus seeded property tests that run on stable.
+```sh
+wiry
+```
 
-The core and every branch merged for this release were reviewed adversarially
-for wrong answers, hostile-input failures and races. Each defect a review found
-is named in the commit that fixed it and has a regression test, so the list is
-in `git log` rather than in a total here: an earlier draft of this paragraph
-published a count, and it could not be recounted from the history.
-The worst of them: a fragment reassembler that went quadratic on crafted input,
-which is remote-controllable; a TCP reassembler whose sequence reference drifted
-from the frontier it was named for until a direction went permanently deaf, with
-no gap recorded and no flag raised; a session splice that could hand back about
-twelve times the capture it was given, that silently dropped the octets a packet
-carried alongside a framed message, and whose frames kept a TCP checksum that
-reads as valid over bytes it never covered; an append path that truncated the
-user's existing capture before writing its replacement; unbounded gzip
-decompression, where a
-200 KB file expanded to most of a gigabyte of resident memory; a `sprintf`
-format parser that was exponential in unclosed blocks, so a 72-character format
-never finished; a `columns()` read that answered a DNS transaction id where a
-length was asked for; and a code generator that silently deleted hand-written
-code inside a damaged marker region. All are fixed, with a regression test each.
+## Speed
 
-## When not to use wiry
+`bigFlows.pcap`, 791,615 packets. Apple M1 Pro, CPython 3.13, scapy 2.7.0,
+release build. Method, corpus hash and the rest of the table are in
+[BENCHMARKS.md](BENCHMARKS.md); reproduce with `python dev/bench.py <pcap>`.
 
-- **You need a protocol outside the 100, or deeper inside one of the
-  sixty-nine than `DEVIATIONS.md` says it goes.** scapy has 1,746 layers and an interactive shell. It is
-  a more capable tool and will stay one.
-- **You have a few thousand packets.** scapy takes a second. Nothing here matters.
-- **You only want a fast parser and dpkt's API suits you.** dpkt is BSD-licensed
-  and fine, and the per-packet margin over it is small. Its last release was 2022.
-- **You are sniffing a burst at wire speed on Linux.** The default snaplen makes
-  the kernel's ring hold a few thousand frames, so 400k pkt/s costs packets; see
-  [DEVIATIONS.md](DEVIATIONS.md) S2 for the numbers and the `snaplen=` knob.
-- **You need a permissive licence.** wiry is GPL-2.0-only and cannot be relicensed
-  — see [Relationship to scapy](#relationship-to-scapy). If you are shipping a
-  proprietary product, or writing a Rust crate you want the rest of crates.io to
-  be able to depend on, wiry is the wrong dependency and dpkt or a
-  purpose-written parser is the right one.
-
-Use wiry when you are moving a lot of packets, offline or live, when GPL-2.0 is a
-licence you can live with, or when `columns()` is the shape of your problem.
+| | scapy | wiry | |
+|---|---|---|---|
+| Read two fields per packet | 11,315 pkt/s | 305,113 pkt/s | 27x |
+| Dissect + re-serialise | 11,127 pkt/s | 688,520 pkt/s | 62x |
+| Build Ether/IP/TCP | 4,570 pkt/s | 94,860 pkt/s | 21x |
+| Read two fields, in bulk | 11,315 pkt/s | 2,667,208 pkt/s | 236x |
 
 ## Install
 
-PyPI currently holds a 0.0.0 placeholder, so `pip install wiry` does not yet get
-you the library. Until the first real release, build from source:
-
 ```sh
-git clone https://github.com/AddisonGoolsbee/wiry && cd wiry
-pip install .
+pip install wiry
 ```
 
-That build needs no libpcap: live capture loads it at run time instead.
-`python -c "import wiry; print(wiry.capture_backend())"` says which library was
-found, or why none was. macOS ships libpcap; Debian and Ubuntu call the runtime
-package `libpcap0.8`, Fedora and Alpine call it `libpcap`; Windows needs
-[Npcap](https://npcap.com). Set `WIRY_LIBPCAP` to a full path to override the
-search.
+libpcap is not needed to build — it is loaded at run time if it is there.
 
-Capturing also needs privilege: root, `CAP_NET_RAW` on Linux, or ChmodBPF on
-macOS so `/dev/bpf*` is readable.
+## Platforms
 
-The Rust crate is separate and needs none of that:
+macOS and Linux are what this is built and tested on.
+
+**Windows gets wheels but no wire.** Dissection, crafting and capture files are
+pure Rust and should work; live capture needs Npcap, and raw sends have been
+restricted by the OS since XP SP2. None of it has been run on Windows, so treat
+it as untested rather than supported.
+
+Live capture needs root, exactly as scapy does:
 
 ```sh
-cargo add wiry
+sudo python your_script.py
 ```
 
-It is a GPL-2.0-only crate, which is unusual on crates.io and is a real
-constraint rather than a formality: linking it into a crate of your own makes
-that crate's distribution subject to GPL-2.0. Check that before you add it.
+On macOS you can install ChmodBPF once instead — it ships with Wireshark — and
+then neither scapy nor wiry needs sudo.
 
-## Relationship to scapy
+## What is missing
 
-**wiry is a derivative work of scapy, and is licensed GPL-2.0-only because scapy
-is.** It is not a clean-room implementation, and earlier versions of this file
-said it was.
+100 protocol layers; scapy has 1,746. Anything else dissects to `Raw` and
+round-trips unchanged. Every known gap is written down in
+[DEVIATIONS.md](DEVIATIONS.md).
 
-scapy — https://github.com/secdev/scapy, copyright Philippe Biondi and the scapy
-contributors — is licensed GPL-2.0-only. wiry copies from it: field tables,
-defaults, enumerations, dispatch logic, translated into Rust or into this
-project's spec format. GPL-2.0 permits exactly that, on three conditions, and
-wiry meets them: the derivative stays GPL-2.0-only, scapy's copyright notices
-are preserved, and files carrying scapy-derived material state that they were
-changed and when. [NOTICE](NOTICE) records the attribution and the ledger;
-[CONTRIBUTING.md](CONTRIBUTING.md) is the procedure.
+## Licence
 
-The *Google LLC v. Oracle America* fair-use argument — that names, signatures
-and calling conventions are interface rather than expression — is no longer
-what the licence rests on, and it is not cited here as if it were. It would
-still cover the API surface, but the licence question is settled by GPL-2.0
-compliance instead, which is a stronger footing and a narrower grant.
-
-Protocol layouts are still written against the RFC or IANA registry that defines
-them, and every layer still cites one. That is now an accuracy habit — an RFC is
-a better source of truth than any implementation — not a licensing control.
-
-Nothing here is endorsed by or affiliated with the scapy project. Report bugs in
-wiry to wiry.
-
-### The MIT period
-
-wiry was published under MIT from its first public commit through `f756662`
-inclusive, and those commits are on GitHub. Relicensing is not retroactive:
-anyone who took wiry at `f756662` or earlier holds that copy under MIT
-permanently. From the relicence commit forward the project is GPL-2.0-only, and
-no scapy-derived material existed in the tree before that commit — the relicence
-deliberately landed first, so the provenance of every line is readable from the
-history.
-
-## Status
-
-Early. Working, measured, and short of parity. Read
-[DEVIATIONS.md](DEVIATIONS.md) before depending on it.
-
-## License
-
-GPL-2.0-only. Not "or later" — scapy is GPL-2.0-only, and a derivative cannot
-widen the terms it inherited. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+GPL-2.0-only, the same as scapy, because wiry derives from it. [NOTICE](NOTICE)
+records what came from where.

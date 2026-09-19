@@ -2,6 +2,7 @@
 name = "wiry-py"
 description = "Python bindings for wiry"
 version.workspace = true
+publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

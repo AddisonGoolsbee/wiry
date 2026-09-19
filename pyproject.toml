@@ -4,14 +4,19 @@ build-backend = "maturin"
 
 [project]
 name = "wiry"
-description = "Fast packet dissection and crafting with a familiar API. Rust core, Python facade."
+description = "scapy's interface, with a Rust engine. Same API, same output, 20-236x faster."
+readme = "README.md"
 requires-python = ">=3.9"
+authors = [{ name = "Addison Goolsbee" }]
+keywords = ["scapy", "packet", "pcap", "network", "dissector", "sniffer"]
 license = { text = "GPL-2.0-only" }
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: System :: Networking :: Monitoring",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
 ]
 dynamic = ["version"]
