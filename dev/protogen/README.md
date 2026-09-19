@@ -21,13 +21,18 @@ hand is fifty chances to mistype a bit offset in a file nobody reads twice.
 hand-authored from the RFC, one field at a time, in the spec. What is automated
 is the boilerplate around it.
 
-### It strengthens the provenance rule rather than weakening it
+### It strengthens the citation rule rather than weakening it
 
 `CONTRIBUTING.md` requires every layer to cite the RFC or IANA registry its
-layout came from, and forbids reading scapy's layer sources. That was a
-convention enforced by review. Here `citation` is a **required key**: a spec
-without one does not generate, it raises. The citation is copied into the
-module's doc comment, so it stays next to the table it justifies.
+layout came from. That was a convention enforced by review. Here `citation` is a
+**required key**: a spec without one does not generate, it raises. The citation
+is copied into the module's doc comment, so it stays next to the table it
+justifies.
+
+The same file used to forbid reading scapy's layer sources. It no longer does —
+wiry is GPL-2.0-only and derives from scapy — and the citation is now an accuracy
+control rather than a licensing one. A spec whose table also came from scapy
+records that in the generated module's provenance block; `NOTICE` has the format.
 
 ### It makes CLAUDE.md §8 concretely true
 

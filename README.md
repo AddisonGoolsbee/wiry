@@ -1,7 +1,7 @@
 # wiry
 
 Packet dissection and crafting for Python, with scapy's API and a Rust core.
-MIT licensed.
+Derived from scapy, and GPL-2.0-only for that reason.
 
 ```python
 from wiry import rdpcap
@@ -342,8 +342,14 @@ code inside a damaged marker region. All are fixed, with a regression test each.
 - **You only want a fast parser and dpkt's API suits you.** dpkt is BSD-licensed
   and fine, and the per-packet margin over it is small. Its last release was 2022.
 
-Use wiry when you are moving a lot of packets offline, when you want scapy's API
-without GPL-2.0, or when `columns()` is the shape of your problem.
+- **You need a permissive licence.** wiry is GPL-2.0-only and cannot be relicensed
+  — see [Relationship to scapy](#relationship-to-scapy). If you are shipping a
+  proprietary product, or writing a Rust crate you want the rest of crates.io to
+  be able to depend on, wiry is the wrong dependency and dpkt or a
+  purpose-written parser is the right one.
+
+Use wiry when you are moving a lot of packets offline, when GPL-2.0 is a licence
+you can live with, or when `columns()` is the shape of your problem.
 
 ## Install
 
@@ -371,20 +377,47 @@ The Rust crate is separate and needs none of that:
 cargo add wiry
 ```
 
+It is a GPL-2.0-only crate, which is unusual on crates.io and is a real
+constraint rather than a formality: linking it into a crate of your own makes
+that crate's distribution subject to GPL-2.0. Check that before you add it.
+
 ## Relationship to scapy
 
-wiry is an independent clean-room implementation and shares no code with scapy.
+**wiry is a derivative work of scapy, and is licensed GPL-2.0-only because scapy
+is.** It is not a clean-room implementation, and earlier versions of this file
+said it was.
 
-scapy is GPL-2.0. Reimplementing an API is settled fair use (*Google LLC v.
-Oracle America*, 2021): names, signatures and calling conventions are interface,
-not expression. Copying an implementation is a different thing, and this project
-does not. Every protocol layout here is written from its RFC or IANA registry,
-cited at the top of each layer module, and contributors are asked not to read
-scapy's source while writing the equivalent layer. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+scapy — https://github.com/secdev/scapy, copyright Philippe Biondi and the scapy
+contributors — is licensed GPL-2.0-only. wiry copies from it: field tables,
+defaults, enumerations, dispatch logic, translated into Rust or into this
+project's spec format. GPL-2.0 permits exactly that, on three conditions, and
+wiry meets them: the derivative stays GPL-2.0-only, scapy's copyright notices
+are preserved, and files carrying scapy-derived material state that they were
+changed and when. [NOTICE](NOTICE) records the attribution and the ledger;
+[CONTRIBUTING.md](CONTRIBUTING.md) is the procedure.
 
-That is what makes the permissive licence defensible, and it is why the engine
-ships as an MIT crate with no Python and no GPL dependency in it.
+The *Google LLC v. Oracle America* fair-use argument — that names, signatures
+and calling conventions are interface rather than expression — is no longer
+what the licence rests on, and it is not cited here as if it were. It would
+still cover the API surface, but the licence question is settled by GPL-2.0
+compliance instead, which is a stronger footing and a narrower grant.
+
+Protocol layouts are still written against the RFC or IANA registry that defines
+them, and every layer still cites one. That is now an accuracy habit — an RFC is
+a better source of truth than any implementation — not a licensing control.
+
+Nothing here is endorsed by or affiliated with the scapy project. Report bugs in
+wiry to wiry.
+
+### The MIT period
+
+wiry was published under MIT from its first public commit through `f756662`
+inclusive, and those commits are on GitHub. Relicensing is not retroactive:
+anyone who took wiry at `f756662` or earlier holds that copy under MIT
+permanently. From the relicence commit forward the project is GPL-2.0-only, and
+no scapy-derived material existed in the tree before that commit — the relicence
+deliberately landed first, so the provenance of every line is readable from the
+history.
 
 ## Status
 
@@ -393,4 +426,5 @@ Early. Working, measured, and short of parity. Read
 
 ## License
 
-MIT.
+GPL-2.0-only. Not "or later" — scapy is GPL-2.0-only, and a derivative cannot
+widen the terms it inherited. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

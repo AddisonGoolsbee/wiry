@@ -1,0 +1,94 @@
+wiry
+Copyright (C) 2026 The wiry authors
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of version 2 of the GNU General Public License as published by the
+Free Software Foundation. This program is distributed WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the file `LICENSE` for the full text.
+
+SPDX-License-Identifier: GPL-2.0-only
+
+
+## Version 2 only, not "or later"
+
+wiry is a derivative work of scapy, and scapy is licensed GPL-2.0-**only**. A
+derivative cannot offer terms the original did not, so wiry is GPL-2.0-only too.
+`LICENSE` holds the GNU General Public License version 2 verbatim, including the
+FSF's "How to Apply These Terms" appendix, whose sample notice reads "either
+version 2 of the License, or (at your option) any later version". That appendix
+is part of the licence document, which may not be altered; it is not wiry's
+grant. wiry's grant is the paragraph above, the SPDX identifier in every
+manifest, and this file: **version 2 only**.
+
+
+## Derivation from scapy
+
+wiry derives from scapy.
+
+    scapy — https://github.com/secdev/scapy — https://scapy.net
+    Copyright (C) Philippe Biondi <phil@secdev.org>
+    Copyright (C) the scapy contributors
+    Licensed GPL-2.0-only
+
+Material taken from scapy — protocol field tables, dissection and payload-
+guessing logic, defaults, enumerations and anything else copied, translated into
+Rust, or paraphrased closely enough to be a derivative — is used under GPL-2.0.
+scapy's copyright notices are preserved in the files that carry its material,
+and those files state that they were changed and when, as GPL-2.0 §2(a)
+requires.
+
+Nothing here is endorsed by, affiliated with, or supported by the scapy project.
+Report bugs in wiry to wiry, not to scapy.
+
+
+## Marking derived and modified files (GPL-2.0 §2(a))
+
+Any file carrying scapy-derived material opens with a provenance block, before
+the code and after any `#!` line, in that file's comment syntax:
+
+    // SPDX-License-Identifier: GPL-2.0-only
+    //
+    // Derived from scapy: scapy/layers/<file>.py
+    //   scapy <version>, upstream commit <sha>
+    //   Copyright (C) Philippe Biondi and the scapy contributors
+    //
+    // Changed by the wiry authors:
+    //   YYYY-MM-DD — what was changed, in one line
+
+A file that is changed again gains another dated line; existing lines are never
+rewritten or removed, because the dates are the record §2(a) asks for. A file
+with no scapy-derived material carries no such block — absence is a claim that
+the file is wiry's own work, so do not add the block decoratively, and do not
+omit it from a file that needs it.
+
+`CONTRIBUTING.md` holds the full procedure. The ledger below is the index; the
+per-file blocks are authoritative.
+
+### Ledger
+
+| wiry file | scapy source | scapy version / commit | First taken |
+|---|---|---|---|
+| _(none yet — the relicence landed before any copying)_ | | | |
+
+
+## Licence history — the MIT period
+
+wiry was published under the MIT licence from its first public commit through
+commit `f756662` inclusive. Those commits are on GitHub and were distributed
+under MIT.
+
+**Relicensing is not retroactive.** Anyone who obtained wiry at `f756662` or
+earlier holds it under MIT and keeps that grant for those copies, permanently.
+MIT is irrevocable for what it covered, and nothing here withdraws it.
+
+From the relicence commit forward, wiry is GPL-2.0-only. That is the licence for
+the current tree, every release built from it, and every later commit. The two
+facts coexist: the old snapshots are MIT, this tree is GPL-2.0-only, and no
+GPL-derived material existed in the tree while it was MIT — the relicence landed
+first, deliberately, so that the provenance of every line is unambiguous from
+the history alone.
+
+The practical consequence, stated once so nobody has to work it out: a
+downstream project that needs permissive terms can still fork `f756662`, but it
+gets the tree as it stood then and none of the work after it.

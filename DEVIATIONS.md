@@ -14,17 +14,32 @@ Status key: **OPEN** = still a gap · **CLOSED** = resolved, kept for history.
 |---|---|---|---|
 | S1 | Protocol scope was Ether, Loopback (DLT_NULL/DLT_LOOP), CookedLinux (LINUX_SLL, LINUX_SLL2), ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, DHCP/BOOTP, VLAN(802.1Q), Raw, Padding; the encapsulations of E6 (the four IPv6 extension headers, GRE, VXLAN, Geneve, MPLS, PPPoE/PPP, GTP-U, ERSPAN) and sixty more layers from `dev/protogen/specs/` were added, at the depth the **Protocol coverage** table below states one row at a time | Scapy registers 1,746 layers on import and 4,160 `Packet` subclasses with contrib. Full parity is multi-person-year. This set covers the overwhelming majority of real scripts. | OPEN |
 | S2 | Live capture and injection are being added behind the `live` feature, off by default. `sniff(offline=...)` is complete and needs no feature, no privileges and no network; `sniff(iface=...)`, `AsyncSniffer`, `send`, `sendp`, `sr`, `sr1`, `srp` and `srp1` are implemented against the same state machine and need the feature; without it every one raises `CaptureUnavailable` (a subclass of `OSError`) naming the rebuild command | The capture backend needs raw sockets, root, and per-OS libraries, so it stays untestable in ordinary CI and out of the default build. Driving the whole state machine from `offline=` is what makes it testable at all: counters, deadline, the three filter stages and the callback contract are proved with zero privileges, and the live backend becomes an I/O shim over proven logic. Privileged round-trip checks live in `dev/live/`: `netns_check.py` over a veth pair on Linux, and `loopback_check.py` on macOS, where `lo0` is DLT_NULL rather than Ethernet. | PARTIAL |
-| S3 | Standalone, clean-room, no Scapy import at runtime | Scapy is GPL-2.0-only. Importing it would relicense this project and forfeit both commercial adopters and the Rust crates.io audience. | CLOSED |
+| S3 | No Scapy import at runtime. **Revised 2026-09-18**: the "clean-room" half of this decision is withdrawn — wiry is now a derivative work of Scapy, licensed GPL-2.0-only, and copies from it deliberately (`NOTICE`, `CONTRIBUTING.md`, `CLAUDE.md` §2). The no-runtime-import half stands, unchanged and for a different reason | Two reasons used to be one. **The licensing reason is gone**: under GPL-2.0 importing Scapy would be permitted, and the reach it was protecting — proprietary adopters and the permissively-licensed crates.io ecosystem — was traded away with the relicence, so it no longer argues for anything. **The architecture reason is what remains, and it was always the stronger one**: Scapy builds one Python object per layer per packet, which is the cost this engine exists to remove, so a fallback that imported Scapy for unimplemented protocols would reintroduce it at exactly the layers a user could not avoid, and would put a Python object back into the bulk paths CLAUDE.md §3 keeps object-free. It would also make the dependency's absence unobservable until a capture happened to contain the protocol. Unknown protocols dissect to `Raw` instead (S4), which is what Scapy itself does for layers it lacks. Copying Scapy's *source* into wiry's tree at build time is a licensing question, now answered yes; *importing* Scapy at run time is an engine question, still answered no | CLOSED |
 | S4 | Unimplemented protocols dissect to `Raw`, exactly as Scapy does for layers it lacks | Preserves correct round-trip bytes for everything, at any depth. | CLOSED |
 | S5 | Name `wiry` is registered on PyPI, crates.io and GitHub (`github.com/AddisonGoolsbee/wiry`), and is no longer provisional | Deliberately not squatted until the project was real. | CLOSED |
 
 ## Provenance policy (licensing-critical)
 
-See `CONTRIBUTING.md`. Summary: protocol field layouts are written from RFCs and IANA
-registries, never transcribed from `scapy/layers/*.py`. Reimplementing an API is
-settled fair use (*Google v. Oracle*, 2021); copying field-table source is not.
-Golden test vectors come from Wireshark/tshark and hand-built RFC vectors, not from
-running Scapy, because a machine-generated corpus derived from GPL code is a grey area.
+**Reversed 2026-09-18.** wiry is a derivative work of Scapy and is licensed
+GPL-2.0-only. Copying from `scapy/layers/*.py` is permitted and is the plan; what GPL
+requires instead is that the derivative stay GPL-2.0-only, that Scapy's copyright
+notices be preserved, and that files carrying derived material state that they were
+changed and when. `NOTICE` holds the attribution, the per-file block format and the
+ledger; `CONTRIBUTING.md` is the procedure; `CLAUDE.md` §2 records why the position
+changed and what it cost. The *Google v. Oracle* fair-use argument is no longer what
+the licence rests on.
+
+Two habits survive the reversal, neither of them a licensing control any more. RFC and
+IANA citations are still required (`dev/protogen/`'s `citation` key still fails the
+build when missing) because a specification is a better source of truth than any
+implementation. Golden test vectors are still hand-built from RFC examples and
+Wireshark/tshark rather than generated by running Scapy, because a suite whose
+expectations came out of Scapy cannot detect that wiry and Scapy are both wrong — a
+sharper risk now that wiry copies from Scapy, not a duller one.
+
+Commits through `f756662` were published under MIT and remain MIT for anyone who took
+them. Relicensing is not retroactive; new work from the relicence commit forward is
+GPL-2.0-only.
 
 ## Engineering shortcuts
 

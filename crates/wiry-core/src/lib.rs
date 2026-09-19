@@ -1,5 +1,6 @@
-//! Clean-room packet dissection and construction. Protocol layouts are derived
-//! from RFCs and IANA registries; see CONTRIBUTING.md.
+//! Packet dissection and construction. Protocol layouts cite the RFC or IANA
+//! registry that defines them. This crate is GPL-2.0-only and derives from
+//! scapy; see NOTICE for attribution and CONTRIBUTING.md for the procedure.
 
 #![forbid(unsafe_code)]
 

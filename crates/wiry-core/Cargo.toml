@@ -1,6 +1,6 @@
 [package]
 name = "wiry-core"
-description = "Fast, clean-room packet dissection and construction engine"
+description = "Fast packet dissection and construction engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

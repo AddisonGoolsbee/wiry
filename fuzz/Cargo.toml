@@ -2,6 +2,7 @@
 name = "wiry-fuzz"
 version = "0.0.0"
 edition = "2021"
+license = "GPL-2.0-only"
 publish = false
 
 # Standalone workspace: the fuzz crate must not join the root workspace, since
