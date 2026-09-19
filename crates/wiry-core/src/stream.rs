@@ -1195,6 +1195,18 @@ mod tests {
             assert_eq!(shown, Some("4"), "dissector on {head:?}");
             assert_eq!(http_len(&msg), Some(msg.len()), "framer on {head:?}");
         }
+
+        // Past the 256-line cap the parse carries, a header is invisible to
+        // both: the framer treats the request as bodyless exactly as `show`
+        // presents it, rather than framing on a header no one can see.
+        let mut deep = b"POST / HTTP/1.1\r\n".to_vec();
+        deep.extend(b"X: y\r\n".repeat(300));
+        deep.extend(b"Content-Length: 4\r\n\r\n");
+        let head = deep.len();
+        deep.extend_from_slice(b"abcd");
+        let items = text::message_headers(&deep[..head]);
+        assert_eq!(text::message_field(&items, "content-length"), None);
+        assert_eq!(http_len(&deep), Some(head));
     }
 
     #[test]

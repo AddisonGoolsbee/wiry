@@ -305,10 +305,10 @@ have, and 2 are
 generator differences [DEVIATIONS.md](DEVIATIONS.md) E21 states outright. Every
 gap is enumerated there.
 
-632 Rust and 1,158 Python tests pass, 638 Rust with live capture built in. All
+670 Rust and 1,196 Python tests pass, 676 Rust with live capture built in. All
 four crates set `#![forbid(unsafe_code)]`, which constrains this code and says
 nothing about dependencies: PyO3 contains hundreds of unsafe blocks and is
-compiled in. The dissector carries nine fuzz targets plus seeded property tests
+compiled in. The dissector carries ten fuzz targets plus seeded property tests
 that run on stable.
 
 The core and every branch merged for this release were reviewed adversarially
@@ -317,8 +317,14 @@ is named in the commit that fixed it and has a regression test, so the list is
 in `git log` rather than in a total here: an earlier draft of this paragraph
 published a count, and it could not be recounted from the history.
 The worst of them: a fragment reassembler that went quadratic on crafted input,
-which is remote-controllable; an append path that truncated the user's existing
-capture before writing its replacement; unbounded gzip decompression, where a
+which is remote-controllable; a TCP reassembler whose sequence reference drifted
+from the frontier it was named for until a direction went permanently deaf, with
+no gap recorded and no flag raised; a session splice that could hand back about
+twelve times the capture it was given, that silently dropped the octets a packet
+carried alongside a framed message, and whose frames kept a TCP checksum that
+reads as valid over bytes it never covered; an append path that truncated the
+user's existing capture before writing its replacement; unbounded gzip
+decompression, where a
 200 KB file expanded to most of a gigabyte of resident memory; a `sprintf`
 format parser that was exponential in unclosed blocks, so a 72-character format
 never finished; a `columns()` read that answered a DNS transaction id where a
