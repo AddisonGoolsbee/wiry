@@ -92,7 +92,7 @@ static GROUP_NESTED: GroupDesc = GroupDesc::new(
 );
 
 pub static GROUP_FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("rtype", 0, 8, 4),
+    FieldDesc::uint("rtype", 0, 8, 1),
     FieldDesc::uint("auxdlen", 8, 8, 0),
     FieldDesc::uint("numsrc", 16, 16, 0),
     FieldDesc::ipv4("maddr", 32, 0),
