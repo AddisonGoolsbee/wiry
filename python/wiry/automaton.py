@@ -9,8 +9,11 @@
 # Changed by the wiry authors:
 #   2026-09-18 — ported onto wiry's sockets and conf, `packets` collected as a
 #                plain list because wiry's PacketList is a view over a capture
-#                buffer, graph() returns DOT source, and a run is registered so
-#                the interpreter never finalises with a control thread live.
+#                buffer, graph() returns DOT source, a run is registered so the
+#                interpreter never finalises with a control thread live, and two
+#                upstream hangs fixed: build_graph now expands each name once,
+#                and a socket that fails to open is raised out of start()
+#                instead of leaving the caller on a ready event nothing sets.
 
 """State machines: states, transitions, timeouts and actions.
 
@@ -657,6 +660,7 @@ class Automaton(metaclass=Automaton_metaclass):
         self.ioout: Dict[str, Any] = {}
         self.packets: list = []
         self.final_state_output: Any = None
+        self._start_exc: Optional[BaseException] = None
         self.atmt_session = kargs.pop("session", None)
         for n in self.__class__.ionames:
             extfd = external_fd.get(n)
@@ -950,29 +954,40 @@ class Automaton(metaclass=Automaton_metaclass):
 
     def _do_start(self, *args: Any, **kargs: Any) -> None:
         ready = threading.Event()
+        self._start_exc = None
         _t = threading.Thread(target=self._do_control, args=(ready,) + args,
                               kwargs=kargs, name="wiry.automaton control",
                               daemon=True)
         _t.start()
         ready.wait()
+        if self._start_exc is not None:
+            raise self._start_exc
 
     def _do_control(self, ready: threading.Event, *args: Any,
                     **kargs: Any) -> None:
         with self.started:
             _RUNNING.add(self)
             self.threadid = threading.current_thread().ident or 0
+            try:
+                a = args + self.init_args[len(args):]
+                k = self.init_kargs.copy()
+                k.update(kargs)
+                self.parse_args(*a, **k)
 
-            a = args + self.init_args[len(args):]
-            k = self.init_kargs.copy()
-            k.update(kargs)
-            self.parse_args(*a, **k)
-
-            self.state = self.initial_states[0](self)
-            self.send_sock = self.sock or self.send_sock_class(**self.socket_kargs)
-            if self.recv_conditions:
-                # A receiving socket is only worth opening if some state listens.
-                self.listen_sock = self.sock or \
-                    self.recv_sock_class(**self.socket_kargs)
+                self.state = self.initial_states[0](self)
+                self.send_sock = self.sock or \
+                    self.send_sock_class(**self.socket_kargs)
+                if self.recv_conditions:
+                    # A receiving socket is only worth opening if a state listens.
+                    self.listen_sock = self.sock or \
+                        self.recv_sock_class(**self.socket_kargs)
+            except BaseException as exc:
+                # scapy sets `ready` only after this, so a socket that cannot be
+                # opened hangs the caller on the wait instead of telling it.
+                self._start_exc = exc
+                self.threadid = None
+                ready.set()
+                return
             self.packets = []
 
             singlestep = True

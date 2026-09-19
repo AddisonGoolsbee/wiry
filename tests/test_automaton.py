@@ -587,6 +587,19 @@ def test_a_finished_machine_leaves_no_thread_behind():
     assert threading.active_count() <= before
 
 
+def test_a_socket_that_will_not_open_is_raised_rather_than_hung_on():
+    """scapy sets its ready event only after the sockets are open, so a socket
+    that raises leaves the caller waiting on a thread that has already died."""
+    class Refuses(Counter):
+        pass
+
+    def boom(**_):
+        raise OSError("no such interface")
+
+    with pytest.raises(OSError, match="no such interface"):
+        Refuses(ll=boom, recvsock=boom)
+
+
 def test_a_machine_cannot_be_destroyed_while_it_runs():
     a = Counter(**nosock())
     with pytest.raises(ValueError, match="running"):

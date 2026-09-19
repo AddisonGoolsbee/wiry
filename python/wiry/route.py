@@ -33,7 +33,6 @@ Reading it needs no privileges and no libpcap: ``/proc/net/route`` and
 
 from __future__ import annotations
 
-import os
 import socket
 import struct
 import subprocess
@@ -46,7 +45,6 @@ __all__ = [
 ]
 
 _LINUX = sys.platform.startswith("linux")
-_DARWIN = sys.platform == "darwin"
 _BSD = sys.platform.startswith(("freebsd", "openbsd", "netbsd", "darwin"))
 
 #: An IPv4 route: (network, netmask, gateway, iface, source address, metric),
