@@ -749,10 +749,9 @@ class _Conf:
         # False drops the address pinning in answers.rs: what DHCP needs, and a
         # looser match everywhere else.
         self.checkIPaddr = True
-        # True makes a session's own failure raise instead of being reported and
-        # skipped past; the dissector itself never raises, by design.
+        # True makes a session's own failure raise rather than be skipped past.
         self.debug_dissector = False
-        # How long a state machine's select waits before looking at its timers.
+        # The wait a select takes when the caller names none.
         self.recv_poll_rate = 0.05
         self.route_autoload = True
         self.route6_autoload = True
