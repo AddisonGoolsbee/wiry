@@ -6,6 +6,7 @@ import atexit
 import contextlib
 import gzip
 import os
+import sys
 import tempfile
 import warnings
 import weakref
@@ -569,7 +570,9 @@ class _PacketMeta(type):
         ns.setdefault("__slots__", ())
         ns["_name"] = lname
         ns["__init__"] = _layer_init(lname)
-        return super().__new__(mcls, cname, bases, ns)
+        cls = super().__new__(mcls, cname, bases, ns)
+        _register(lname, cls)
+        return cls
 
 
 class Packet(metaclass=_PacketMeta):
@@ -1122,6 +1125,23 @@ def _make_layer(name: str) -> type:
 
 
 _LAYERS: dict[str, type] = {}
+
+
+def _register(name: str, cls: type) -> None:
+    """Record a layer under its name, and drop what `discover` cached about it.
+
+    A declared layer (E3) reaches here too, and one declared twice under the
+    same name replaces the first, so the cached field table and defaults would
+    otherwise describe the layer that is gone.
+    """
+    _LAYERS[name] = cls
+    _PARSED_FIELD[name] = _b.parsed_field(name)
+    discover = sys.modules.get(f"{__name__}.discover")
+    if discover is not None:
+        discover._TABLES.pop(name, None)
+        discover._DEFAULTS.pop(name, None)
+
+
 for _n in _b.known_layers():
     _LAYERS[_n] = _make_layer(_n)
     globals()[_n] = _LAYERS[_n]

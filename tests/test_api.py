@@ -288,8 +288,13 @@ def test_known_layers_matches_the_exported_classes():
     names = known_layers()
     assert names[0] == "Ether"
     assert {"IP", "IPv6", "TCP", "UDP", "ICMP", "ARP", "Raw"} <= set(names)
-    for name in wiry._LAYERS:
+    # Two sets, and they stopped being the same set once a user could declare
+    # a layer: `_LAYERS` is every layer class wiry knows, and `__all__` is the
+    # ones it ships. A declared layer is in the first and not the second.
+    for name, cls in wiry._LAYERS.items():
         assert name in names
+        assert cls._name == name
+    for name in set(wiry.__all__) & set(names):
         assert getattr(wiry, name)._name == name
 
 
@@ -409,7 +414,7 @@ def test_public_names_are_exported():
                  "hexdump", "hexdump_str", "ls", "known_layers"):
         assert name in wiry.__all__
         assert hasattr(wiry, name)
-    assert set(wiry._LAYERS) <= set(wiry.__all__)
+    assert set(wiry.__all__) & set(known_layers()) <= set(wiry._LAYERS)
 
 
 def test_raw_helper_is_the_same_as_bytes(pkt):
