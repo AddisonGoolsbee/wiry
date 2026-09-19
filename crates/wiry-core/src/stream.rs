@@ -27,6 +27,7 @@ use crate::layers::dispatch;
 use crate::layers::{http, text, tls};
 use crate::packet::dissect_spans;
 use crate::proto::ProtoId;
+use crate::work::Work;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// Concurrent streams tracked at once. Past it the least recently active is
@@ -157,6 +158,7 @@ struct Build {
     origin: u64,
     started: bool,
     open: bool,
+    work: Work,
 }
 
 impl Build {
@@ -255,6 +257,7 @@ impl Build {
     fn hold(&mut self, at: u64, src: &[u8], pkt: u32) {
         let end = at.saturating_add(src.len() as u64);
         let mut cur = at;
+        self.work.probe();
         if let Some((&ps, h)) = self.held.range(..=at).next_back() {
             let pe = ps + h.bytes.len() as u64;
             if pe >= end {
@@ -263,6 +266,7 @@ impl Build {
             cur = cur.max(pe);
         }
         while cur < end {
+            self.work.probe();
             let stop = match self.held.range(cur..).next() {
                 Some((&ks, h)) if ks < end => (ks, ks + h.bytes.len() as u64),
                 _ => (end, end),
@@ -271,6 +275,7 @@ impl Build {
                 let a = (cur - at) as usize;
                 let b = (stop.0 - at) as usize;
                 let bytes = src[a..b].to_vec();
+                self.work.copied(bytes.len());
                 self.held_bytes += bytes.len();
                 self.held.insert(cur, Held { bytes, pkt });
             }
@@ -285,6 +290,7 @@ impl Build {
     /// guess at it, and deliver what was waiting behind it. `false` when there
     /// is nothing left to wait for.
     fn give_up_on_front(&mut self) -> bool {
+        self.work.probe();
         let Some((&first, _)) = self.held.first_key_value() else {
             return false;
         };
@@ -308,6 +314,7 @@ impl Build {
 
     fn drain(&mut self) {
         while let Some((&ks, _)) = self.held.first_key_value() {
+            self.work.probe();
             if ks > self.next {
                 break;
             }
@@ -345,6 +352,7 @@ impl Build {
                 pkt,
             }),
         }
+        self.work.copied(n);
         self.half.data.extend_from_slice(&data[..n]);
         self.next = self.next.saturating_add(data.len() as u64);
     }
@@ -527,6 +535,7 @@ pub struct Reassembler {
     seq: u64,
     held: usize,
     out: Vec<Stream>,
+    work: Work,
 }
 
 impl Reassembler {
@@ -536,6 +545,7 @@ impl Reassembler {
         };
         let stamp = self.seq;
         self.seq += 1;
+        self.work.probe();
         let live = self.live.entry(s.key).or_insert_with(|| {
             // A SYN with no ACK is the side that opened the connection; with no
             // SYN in the capture the first packet's own direction stands.
@@ -556,12 +566,14 @@ impl Reassembler {
         let before = live.build[dir].held_bytes;
         live.build[dir].feed(s.seq, s.flags, &buf[s.at..s.end], pos);
         self.held = self.held + live.build[dir].held_bytes - before;
+        self.work.absorb(&mut live.build[dir].work);
         self.order.push_back((stamp, s.key));
         self.evict();
     }
 
     fn evict(&mut self) {
         while self.live.len() > MAX_STREAMS || self.held > MAX_HELD_TOTAL {
+            self.work.probe();
             let Some((stamp, key)) = self.order.pop_front() else {
                 break;
             };
@@ -575,6 +587,7 @@ impl Reassembler {
         // stream, which is what keeps this sweep amortised rather than
         // per-packet.
         if self.order.len() > 4 * self.live.len() + 4 * ORIGIN_WINDOW {
+            self.work.probes(self.order.len());
             let live = &self.live;
             self.order
                 .retain(|(s, k)| live.get(k).is_some_and(|l| l.seq == *s));
@@ -595,6 +608,13 @@ impl Reassembler {
             evicted,
             halves,
         });
+    }
+
+    /// Entries examined and octets copied by the arrivals pushed so far. Read
+    /// before `finish`, which is teardown rather than insertion.
+    #[cfg(test)]
+    fn cost(&self) -> (u64, u64) {
+        self.work.counts()
     }
 
     pub fn finish(mut self) -> Vec<Stream> {
@@ -911,6 +931,67 @@ mod tests {
         (0..n).map(|i| (i % 251) as u8).collect()
     }
 
+    type Shape = fn(usize) -> Vec<Vec<u8>>;
+
+    /// Every arrival order this module says it survives, each parameterised by
+    /// how many segments it feeds.
+    fn shapes() -> &'static [(&'static str, Shape)] {
+        &[
+            // Descending, abutting: every arrival lands in front of everything
+            // held, which is the shape that made a merging buffer quadratic.
+            ("descending", |n| {
+                (0..n).map(|i| c2s((4 * (n - i)) as u32, b"aaaa")).collect()
+            }),
+            // Descending and overlapping by one octet each time.
+            ("overlapping", |n| {
+                (0..n)
+                    .map(|i| c2s((4 * (n - i)) as u32, b"aaaaa"))
+                    .collect()
+            }),
+            // A wide segment over many small held ones, repeated: the scan over
+            // what a new segment spans must not be paid again per arrival.
+            ("wide over sparse", |n| {
+                let mut v: Vec<Vec<u8>> =
+                    (0..n).map(|i| c2s((100 + 8 * i) as u32, b"aa")).collect();
+                let wide = vec![b'z'; 4096];
+                v.extend((0..n).map(|_| c2s(100, &wide)));
+                v
+            }),
+            // Never contiguous: every arrival opens a gap the next one does not
+            // close, so the held set stays at its bound and `relieve` runs on
+            // every arrival.
+            ("sparse", |n| {
+                (0..n).map(|i| c2s((1 + 64 * i) as u32, b"aaaa")).collect()
+            }),
+            // One stream per packet: a real input, and the one that decides
+            // whether the eviction queue is amortised.
+            ("one stream each", |n| {
+                (0..n)
+                    .map(|i| seg(1, 2, (i % 60000) as u16 + 1024, 80, 1, 0x18, b"hello"))
+                    .collect()
+            }),
+            // Retransmitting the same octets forever.
+            ("retransmit", |n| {
+                (0..n).map(|_| c2s(1, b"the same octets")).collect()
+            }),
+        ]
+    }
+
+    /// Entries examined and octets copied inserting `frames`, with the payload
+    /// octets they carried. Teardown is excluded: this measures arrivals.
+    fn insert_cost(frames: &[Vec<u8>]) -> (u64, u64, u64) {
+        let mut r = Reassembler::default();
+        let mut fed = 0u64;
+        for (i, f) in frames.iter().enumerate() {
+            r.push(i as u32, f, ProtoId::Ether);
+            if let Some(s) = inspect(f, ProtoId::Ether) {
+                fed += (s.end - s.at) as u64;
+            }
+        }
+        let (probes, bytes) = r.cost();
+        (probes, bytes, fed)
+    }
+
     #[test]
     fn segments_in_order_become_one_stream() {
         let s = run(&[c2s(1000, b"GET "), c2s(1004, b"/ HTTP/1.1\r\n\r\n")]);
@@ -1216,6 +1297,61 @@ mod tests {
         arp.extend_from_slice(&[0x08, 0x06]);
         arp.extend_from_slice(&body(40));
         assert!(run(&[arp]).is_empty());
+    }
+
+    /// An insert probes the held set a bounded number of times whatever the
+    /// arrival order. `MAX_HELD_SEGS` is 64 and the search through it is
+    /// logarithmic, so six probes covers the search and the rest is the
+    /// amortised delivery of what the arrival unblocked; the worst shape here
+    /// measures 7.0. Sixteen leaves room for a constant this module might
+    /// honestly gain and still sits a quarter of the way to the held-set bound,
+    /// so an insert that examined what it holds fails.
+    const MAX_PROBES_PER_ARRIVAL: f64 = 16.0;
+
+    /// Four times the segments may cost at most five times the work. Linear is
+    /// 4.0 and every shape here measures between 4.00 and 4.05; a quadratic
+    /// term would show 16. Unlike a wall-clock ratio, nothing between 4 and 16
+    /// is noise, so the margin is about the algorithm alone.
+    const MAX_GROWTH: f64 = 5.0;
+
+    /// Every adversarial arrival order the module names, fed at two sizes.
+    ///
+    /// The cost of an insert is counted, not timed. A quadratic insert does
+    /// work proportional to what is already held, which is a property of
+    /// operations rather than of nanoseconds: a clock has to separate 4x growth
+    /// from 16x, and on a loaded machine the noise is wider than the room
+    /// between them. Counting is deterministic, and it is the stronger check —
+    /// a per-arrival bound catches an insert that walks what it holds even when
+    /// the total stays linear, which no ratio of any kind can see.
+    #[test]
+    fn no_arrival_order_makes_an_insert_cost_what_is_already_held() {
+        for (name, build) in shapes() {
+            let small = build(2000);
+            let large = build(8000);
+            let (p0, b0, fed0) = insert_cost(&small);
+            let (p1, b1, fed1) = insert_cost(&large);
+
+            let per = p1 as f64 / large.len() as f64;
+            assert!(
+                per <= MAX_PROBES_PER_ARRIVAL,
+                "{name}: an insert examined {per:.1} entries, so it costs what is held"
+            );
+            let growth = p1 as f64 / p0 as f64;
+            assert!(
+                growth <= MAX_GROWTH,
+                "{name}: 4x the segments examined {growth:.1}x the entries, which is not linear"
+            );
+            // An arriving octet is copied into the held set at most once, and
+            // out of it into the delivered stream at most once. A reassembler
+            // that concatenated what it holds would move a whole buffer per
+            // arrival and break this on the first crafted capture.
+            for (b, fed, n) in [(b0, fed0, 2000), (b1, fed1, 8000)] {
+                assert!(
+                    b <= 2 * fed,
+                    "{name} at {n}: {b} octets moved for {fed} received, so octets are recopied"
+                );
+            }
+        }
     }
 
     #[test]
