@@ -316,8 +316,16 @@ have, and 2 are
 generator differences [DEVIATIONS.md](DEVIATIONS.md) E21 states outright. Every
 gap is enumerated there.
 
-686 Rust and 1,228 Python tests pass, 661 Rust and 1,214 Python with
+686 Rust and 1,231 Python tests pass; 680 and 1,202 with
 `--no-default-features`, which drops live capture.
+
+The live paths were run against a real wire for the first time on
+2026-09-18, on a Linux veth pair as root: `dev/live/netns_check.py` passes in
+full — a frame sent with `sendp` arrives byte-identical, `sr1`, `srp1`,
+`arping`, `getmacbyip`, `srloop` and `traceroute` all match real replies. It
+found two defects that no offline test could reach, and
+[DEVIATIONS.md](DEVIATIONS.md) S2 names them, what is still unverified (macOS
+`/dev/bpf`, all of Windows) and what a burst costs.
 
 Four of the five crates set `#![forbid(unsafe_code)]`, the dissector — the part
 that reads attacker-controlled bytes — among them. The fifth is `wiry-pcap`,
@@ -355,15 +363,17 @@ code inside a damaged marker region. All are fixed, with a regression test each.
 - **You have a few thousand packets.** scapy takes a second. Nothing here matters.
 - **You only want a fast parser and dpkt's API suits you.** dpkt is BSD-licensed
   and fine, and the per-packet margin over it is small. Its last release was 2022.
-
+- **You are sniffing a burst at wire speed on Linux.** The default snaplen makes
+  the kernel's ring hold a few thousand frames, so 400k pkt/s costs packets; see
+  [DEVIATIONS.md](DEVIATIONS.md) S2 for the numbers and the `snaplen=` knob.
 - **You need a permissive licence.** wiry is GPL-2.0-only and cannot be relicensed
   — see [Relationship to scapy](#relationship-to-scapy). If you are shipping a
   proprietary product, or writing a Rust crate you want the rest of crates.io to
   be able to depend on, wiry is the wrong dependency and dpkt or a
   purpose-written parser is the right one.
 
-Use wiry when you are moving a lot of packets offline, when GPL-2.0 is a licence
-you can live with, or when `columns()` is the shape of your problem.
+Use wiry when you are moving a lot of packets, offline or live, when GPL-2.0 is a
+licence you can live with, or when `columns()` is the shape of your problem.
 
 ## Install
 

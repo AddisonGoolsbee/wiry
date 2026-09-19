@@ -150,6 +150,39 @@ def test_an_unknown_interface_address_leaves_the_arp_field_alone():
     assert C._with_src(pkt, "aa:bb:cc:dd:ee:ff", None)[ARP].psrc == "0.0.0.0"
 
 
+def test_a_datagram_with_a_real_destination_gets_a_real_source():
+    # Without this a layer-3 send carries wiry's static IP.src default of
+    # 127.0.0.1, the kernel ARPs for the destination as a martian source, and
+    # the datagram never leaves the host. Measured on a veth pair: sr1, srloop
+    # and traceroute all came back empty until this filled it in.
+    from wiry import ICMP, IP
+
+    pkt = IP(dst="10.0.0.9") / ICMP()
+    filled = C._with_src(pkt, None, "10.0.0.5")
+    assert filled[IP].src == "10.0.0.5"
+    assert pkt[IP].src == "127.0.0.1", "the caller's packet must be untouched"
+    assert bytes(IP()) == bytes(IP()), "construction stays reproducible"
+
+
+def test_an_explicit_source_survives_and_a_loopback_destination_keeps_its_own():
+    from wiry import ICMP, IP
+
+    mine = IP(src="10.0.0.7", dst="10.0.0.9") / ICMP()
+    assert C._with_src(mine, None, "10.0.0.5")[IP].src == "10.0.0.7"
+    # The default destination is the loopback, and it wants the default source:
+    # filling one of the pair and not the other would send 10.0.0.5 to 127.0.0.1.
+    for dst in (None, "127.0.0.1", "127.0.0.53"):
+        pkt = IP() / ICMP() if dst is None else IP(dst=dst) / ICMP()
+        assert C._with_src(pkt, None, "10.0.0.5")[IP].src == "127.0.0.1", dst
+
+
+def test_an_unknown_interface_address_leaves_the_datagram_alone():
+    from wiry import ICMP, IP
+
+    pkt = IP(dst="10.0.0.9") / ICMP()
+    assert C._with_src(pkt, None, None) is pkt
+
+
 def test_the_interface_address_is_unknown_off_linux_and_never_a_path():
     import sys
 
