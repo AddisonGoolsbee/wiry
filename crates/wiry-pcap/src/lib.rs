@@ -126,7 +126,6 @@ struct Api {
 // SAFETY: every field is either a plain `extern "C" fn` pointer, which is Send
 // and Sync, or the `Library` handle, which libloading documents as both.
 unsafe impl Send for Api {}
-// SAFETY: as above.
 unsafe impl Sync for Api {}
 
 /// libpcap before 1.8 kept the filter compiler's lexer in globals, so two
@@ -193,8 +192,6 @@ unsafe fn sym<T: Copy>(lib: &Library, name: &[u8]) -> Option<T> {
 }
 
 fn required<T: Copy>(lib: &Library, name: &'static [u8], path: &str) -> Result<T, Error> {
-    // SAFETY: each call site names a symbol declared in `sys` with the type
-    // `pcap.h` gives it.
     unsafe { sym::<T>(lib, name) }.ok_or_else(|| Error {
         kind: Kind::NotLoaded,
         msg: format!(
@@ -232,7 +229,6 @@ fn load() -> Result<Api, Error> {
         set_snaplen: required(&lib, b"pcap_set_snaplen\0", &path)?,
         set_promisc: required(&lib, b"pcap_set_promisc\0", &path)?,
         set_timeout: required(&lib, b"pcap_set_timeout\0", &path)?,
-        // SAFETY: `pcap_set_immediate_mode(pcap_t *, int)` where it exists.
         set_immediate_mode: unsafe { sym(&lib, b"pcap_set_immediate_mode\0") },
         activate: required(&lib, b"pcap_activate\0", &path)?,
         close: required(&lib, b"pcap_close\0", &path)?,
@@ -240,7 +236,6 @@ fn load() -> Result<Api, Error> {
         sendpacket: required(&lib, b"pcap_sendpacket\0", &path)?,
         datalink: required(&lib, b"pcap_datalink\0", &path)?,
         geterr: required(&lib, b"pcap_geterr\0", &path)?,
-        // SAFETY: `const char *pcap_statustostr(int)` where it exists.
         statustostr: unsafe { sym(&lib, b"pcap_statustostr\0") },
         compile: required(&lib, b"pcap_compile\0", &path)?,
         setfilter: required(&lib, b"pcap_setfilter\0", &path)?,
@@ -251,7 +246,6 @@ fn load() -> Result<Api, Error> {
         findalldevs: required(&lib, b"pcap_findalldevs\0", &path)?,
         freealldevs: required(&lib, b"pcap_freealldevs\0", &path)?,
         lookupnet: required(&lib, b"pcap_lookupnet\0", &path)?,
-        // SAFETY: `const char *pcap_lib_version(void)`.
         lib_version: unsafe { sym(&lib, b"pcap_lib_version\0") },
         path,
         _lib: lib,
@@ -282,7 +276,6 @@ pub fn loaded_path() -> Option<&'static str> {
 pub fn lib_version() -> Option<String> {
     let a = api().ok()?;
     let f = a.lib_version?;
-    // SAFETY: pcap_lib_version returns a pointer to a static string.
     Some(
         unsafe { CStr::from_ptr(f()) }
             .to_string_lossy()
@@ -361,7 +354,6 @@ impl Handle {
     /// link type without an interface or any privilege at all.
     pub fn open_dead(linktype: i32, snaplen: i32) -> Result<Handle, Error> {
         let api = api().map_err(|e| e.clone())?;
-        // SAFETY: no pointers; pcap_open_dead allocates or returns NULL.
         let raw = unsafe { (api.open_dead)(linktype as c_int, snaplen as c_int) };
         if raw.is_null() {
             return Err(Error::other("pcap_open_dead failed to allocate"));
@@ -375,7 +367,6 @@ impl Handle {
         let mut msg = unsafe { text((self.api.geterr)(self.raw)) };
         if msg.is_empty() {
             msg = match (code, self.api.statustostr) {
-                // SAFETY: pcap_statustostr returns a pointer to a static string.
                 (Some(c), Some(f)) => unsafe { text(f(c)) },
                 _ => format!("{ctx} failed"),
             };
@@ -393,7 +384,6 @@ impl Handle {
     }
 
     fn set(&mut self, f: PcapSetInt, v: c_int, what: &str) -> Result<(), Error> {
-        // SAFETY: a live, unactivated handle and a plain int.
         let rc = unsafe { f(self.raw, v) };
         if rc < 0 {
             Err(self.err(what, Some(rc)))
@@ -431,7 +421,6 @@ impl Handle {
     }
 
     pub fn activate(&mut self) -> Result<(), Error> {
-        // SAFETY: a live handle from pcap_create, not yet activated.
         let rc = unsafe { (self.api.activate)(self.raw) };
         // Positive is a warning that still activated: promiscuous mode refused
         // on an interface that captures anyway, a link type substituted.
@@ -446,7 +435,6 @@ impl Handle {
     }
 
     pub fn datalink(&self) -> i32 {
-        // SAFETY: a live handle.
         unsafe { (self.api.datalink)(self.raw) }
     }
 
@@ -488,7 +476,6 @@ impl Handle {
     pub fn sendpacket(&mut self, data: &[u8]) -> Result<(), Error> {
         let len = c_int::try_from(data.len())
             .map_err(|_| Error::other("a frame longer than an int cannot be sent"))?;
-        // SAFETY: libpcap reads `len` octets from `data` and does not retain it.
         let rc = unsafe { (self.api.sendpacket)(self.raw, data.as_ptr(), len) };
         if rc < 0 {
             Err(self.err("send", Some(rc)))
@@ -541,7 +528,6 @@ impl Handle {
     /// and the signal check already live.
     pub fn set_nonblock(&mut self, v: bool) -> Result<(), Error> {
         let mut err = [0i8 as c_char; PCAP_ERRBUF_SIZE];
-        // SAFETY: an activated handle and a buffer of the required size.
         let rc = unsafe { (self.api.setnonblock)(self.raw, c_int::from(v), err.as_mut_ptr()) };
         if rc < 0 {
             // SAFETY: on failure libpcap fills the buffer with a C string.
@@ -557,7 +543,6 @@ impl Handle {
     /// Installs a compiled program on this handle, so the kernel drops what
     /// does not match before it is ever copied to userland.
     pub fn set_filter(&mut self, p: &mut Program) -> Result<(), Error> {
-        // SAFETY: a live handle and a program compiled by this same libpcap.
         let rc = unsafe { (self.api.setfilter)(self.raw, &mut p.prog) };
         if rc < 0 {
             let mut e = self.err("filter", Some(rc));
@@ -585,7 +570,6 @@ pub struct Program {
 // SAFETY: the instruction array is written once by pcap_compile and only read
 // afterwards; pcap_offline_filter is a pure interpreter over it.
 unsafe impl Send for Program {}
-// SAFETY: as above.
 unsafe impl Sync for Program {}
 
 impl Program {
@@ -721,7 +705,6 @@ pub fn find_all_devs() -> Result<Vec<Device>, Error> {
         let mut addresses = Vec::new();
         let mut a = d.addresses;
         while !a.is_null() {
-            // SAFETY: as above, for the address chain hanging off this device.
             let ad = unsafe { &*a };
             // SAFETY: libpcap sizes each sockaddr for its own family.
             if let Some(s) = unsafe { sockaddr_str(ad.addr) } {
