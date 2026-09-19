@@ -8,6 +8,7 @@
 //! IDS evasion.
 
 use crate::checksum::ones_complement;
+use crate::field::wide;
 use crate::packet::dissect_spans;
 use crate::proto::ProtoId;
 use std::collections::hash_map::Entry;
@@ -427,13 +428,6 @@ struct Found {
     head: Option<Head>,
     data_at: usize,
     data_end: usize,
-}
-
-fn wide(addr: &[u8]) -> [u8; 16] {
-    let mut out = [0u8; 16];
-    let n = addr.len().min(16);
-    out[..n].copy_from_slice(&addr[..n]);
-    out
 }
 
 /// `None` when the frame carries no fragment at all.

@@ -49,17 +49,25 @@ MAX_REFRAME_GROWTH = 64 << 20
 class Half:
     """One direction of a reassembled stream."""
 
-    __slots__ = ("_s", "_i", "_d")
+    __slots__ = ("_s", "_i", "_d", "_sum")
 
     def __init__(self, s: Any, i: int, d: int):
         self._s, self._i, self._d = s, i, d
+        self._sum: tuple[int, int, int, int] | None = None
+
+    def _summary(self) -> tuple[int, int, int, int]:
+        """`data` is a copy of the whole direction, so everything answerable
+        from four numbers is answered from four numbers."""
+        if self._sum is None:
+            self._sum = self._s.summary(self._i, self._d)
+        return self._sum
 
     @property
     def data(self) -> bytes:
         return self._s.data(self._i, self._d)
 
     def __len__(self) -> int:
-        return len(self.data)
+        return self._summary()[0]
 
     def __bytes__(self) -> bytes:
         return self.data
@@ -77,17 +85,18 @@ class Half:
 
     @property
     def flags(self) -> int:
-        return self._s.state(self._i, self._d)[0]
+        return self._summary()[2]
 
     @property
     def dropped(self) -> int:
         """Octets a bound refused."""
-        return self._s.state(self._i, self._d)[1]
+        return self._summary()[3]
 
     @property
     def complete(self) -> bool:
         """No hole and no octet given up on."""
-        return not self.gaps and not self.flags & (LOSSY | TRUNCATED)
+        _, gaps, flags, _ = self._summary()
+        return not gaps and not flags & (LOSSY | TRUNCATED)
 
     def packet_at(self, offset: int) -> int | None:
         """Position of the packet the octet at `offset` came from."""
@@ -109,49 +118,57 @@ class Half:
         """Every complete application message, dissected. This is what a single
         segment could not answer: the first segment of a split request is not
         an HTTP message and does not dissect as one."""
-        app = self.app
-        if app is None:
-            return []
-        return [Packet(_rust=_b.dissect(m, app)) for m in self.messages()]
+        return [Packet(_rust=p) for p in self._s.parsed(self._i, self._d)]
 
     def __repr__(self) -> str:
-        return f"<Half: {len(self)} bytes, {len(self.gaps)} gaps>"
+        n, gaps, _, _ = self._summary()
+        return f"<Half: {n} bytes, {gaps} gaps>"
 
 
 class TCPStream:
     """One reassembled connection. Direction 0 is the side that opened it where
     a SYN says so, and otherwise the side the first captured packet came from."""
 
-    __slots__ = ("_s", "_i")
+    __slots__ = ("_s", "_i", "_ends")
 
     def __init__(self, s: Any, i: int):
         self._s, self._i = s, i
+        self._ends: tuple[str, int, str, int, bool, bool] | None = None
+
+    def _endpoints(self) -> tuple[str, int, str, int, bool, bool]:
+        if self._ends is None:
+            self._ends = self._s.endpoints(self._i)
+        return self._ends
 
     @property
     def key(self) -> str:
-        return self._s.keys()[self._i]
+        return self._s.key(self._i)
 
     @property
     def src(self) -> str:
-        return self._s.endpoints(self._i)[0]
+        return self._endpoints()[0]
 
     @property
     def sport(self) -> int:
-        return self._s.endpoints(self._i)[1]
+        return self._endpoints()[1]
 
     @property
     def dst(self) -> str:
-        return self._s.endpoints(self._i)[2]
+        return self._endpoints()[2]
 
     @property
     def dport(self) -> int:
-        return self._s.endpoints(self._i)[3]
+        return self._endpoints()[3]
+
+    @property
+    def v6(self) -> bool:
+        return self._endpoints()[4]
 
     @property
     def evicted(self) -> bool:
         """The stream was given up on to stay inside the concurrent-stream
         bound; packets on the same addresses after that start another."""
-        return self._s.endpoints(self._i)[5]
+        return self._endpoints()[5]
 
     @property
     def client(self) -> Half:
@@ -219,8 +236,9 @@ def streams(pl: Any) -> Streams:
 class DefaultSession:
     """scapy's pass-through session: every packet as it was captured."""
 
-    def __init__(self, **kw: Any):
-        self.kw = kw
+    #: Reassembly needs every packet at once, so a session that does any is
+    #: offline only. `sniff(iface=...)` asks this, not the class's name.
+    needs_capture = False
 
     def process(self, pl: Any) -> Any:
         return pl
@@ -232,8 +250,7 @@ class IPSession:
     The same engine `defragment()` uses, so the two cannot disagree.
     """
 
-    def __init__(self, **kw: Any):
-        self.kw = kw
+    needs_capture = True
 
     def process(self, pl: Any) -> Any:
         from .frag import defragment
@@ -258,15 +275,23 @@ class TCPSession:
     alone; ``PacketList.streams()`` is the surface for the octets themselves.
     """
 
-    def __init__(self, app: bool = True, **kw: Any):
+    def __init__(self, app: bool = True):
         self.app = app
-        self.kw = kw
+        self.needs_capture = app
 
     def process(self, pl: Any) -> Any:
         if not self.app:
             return pl
         new, _ = pl._list.reassembled()
         return PacketList(new)
+
+
+def needs_capture(session: Any) -> bool:
+    """Whether the session has to see every packet before any of them. A
+    session is asked, not identified by its class name: `TCPSession(app=False)`
+    reassembles nothing and so needs nothing, and an object that is not a
+    session at all defaults to needing one so `apply_session` names it."""
+    return bool(getattr(session, "needs_capture", True))
 
 
 def apply_session(session: Any, pl: Any) -> Any:

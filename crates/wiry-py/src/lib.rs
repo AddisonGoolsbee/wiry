@@ -1406,11 +1406,27 @@ pub struct PyStreams {
 }
 
 impl PyStreams {
-    fn half(&self, i: usize, dir: usize) -> PyResult<&stream::Half> {
+    fn at(&self, i: usize) -> PyResult<&stream::Stream> {
         self.inner
             .get(i)
-            .and_then(|s| s.halves.get(dir))
             .ok_or_else(|| PyIndexError::new_err("stream index out of range"))
+    }
+
+    fn half(&self, i: usize, dir: usize) -> PyResult<&stream::Half> {
+        self.at(i)?
+            .halves
+            .get(dir)
+            .ok_or_else(|| PyIndexError::new_err("stream index out of range"))
+    }
+
+    fn app_id(&self, i: usize, dir: usize) -> PyResult<Option<ProtoId>> {
+        let s = self.at(i)?;
+        let (sp, dp) = if dir == 0 {
+            (s.sport, s.dport)
+        } else {
+            (s.dport, s.sport)
+        };
+        Ok(stream::app_of(sp, dp, &self.half(i, dir)?.data))
     }
 }
 
@@ -1424,18 +1440,20 @@ impl PyStreams {
         self.keys.iter().map(|k| &**k).collect()
     }
 
+    fn key(&self, i: usize) -> PyResult<&str> {
+        self.keys
+            .get(i)
+            .map(|k| &**k)
+            .ok_or_else(|| PyIndexError::new_err("stream index out of range"))
+    }
+
     /// `(src, sport, dst, dport, ipv6, evicted)` for direction zero.
     fn endpoints(&self, i: usize) -> PyResult<(String, u16, String, u16, bool, bool)> {
-        let s = self
-            .inner
-            .get(i)
-            .ok_or_else(|| PyIndexError::new_err("stream index out of range"))?;
-        let key = s.key();
-        let (a, b) = key[4..].split_once(" > ").unwrap_or(("", ""));
+        let s = self.at(i)?;
         Ok((
-            a.rsplit_once(':').map_or(a, |(h, _)| h).to_string(),
+            stream::addr(&s.src, s.v6),
             s.sport,
-            b.rsplit_once(':').map_or(b, |(h, _)| h).to_string(),
+            stream::addr(&s.dst, s.v6),
             s.dport,
             s.v6,
             s.evicted,
@@ -1480,36 +1498,51 @@ impl PyStreams {
     /// The application protocol the direction speaks, by the same port table
     /// and content guards one segment goes through.
     fn app(&self, i: usize, dir: usize) -> PyResult<Option<&'static str>> {
-        let s = self
-            .inner
-            .get(i)
-            .ok_or_else(|| PyIndexError::new_err("stream index out of range"))?;
-        let (sp, dp) = if dir == 0 {
-            (s.sport, s.dport)
-        } else {
-            (s.dport, s.sport)
-        };
-        Ok(stream::app_of(sp, dp, &self.half(i, dir)?.data).map(|p| proto::desc(p).name))
+        Ok(self.app_id(i, dir)?.map(|p| proto::desc(p).name))
     }
 
     /// `(offset, length)` per complete application message.
     fn messages(&self, i: usize, dir: usize) -> PyResult<Vec<(u32, u32)>> {
-        let Some(app) = self.app(i, dir)? else {
+        let Some(p) = self.app_id(i, dir)? else {
             return Ok(Vec::new());
         };
-        let p = proto_by_name(app)?;
         Ok(stream::messages(p, &self.half(i, dir)?.data)
             .into_iter()
             .map(|(a, n)| (a as u32, n as u32))
             .collect())
     }
 
+    /// Every complete message, dissected, in one crossing. Going per message
+    /// would put the boundary inside a bulk path.
+    fn parsed(&self, i: usize, dir: usize) -> PyResult<Vec<PyPkt>> {
+        let Some(p) = self.app_id(i, dir)? else {
+            return Ok(Vec::new());
+        };
+        let data = &self.half(i, dir)?.data;
+        Ok(stream::messages(p, data)
+            .into_iter()
+            .map(|(a, n)| PyPkt {
+                inner: CorePacket::dissect(data[a..a + n].to_vec(), p),
+                time: 0.0,
+                wirelen: 0,
+            })
+            .collect())
+    }
+
+    /// Octets the direction reassembled to, without handing them over.
+    fn len(&self, i: usize, dir: usize) -> PyResult<usize> {
+        Ok(self.half(i, dir)?.data.len())
+    }
+
+    /// `(octets, gaps, flags, octets a bound refused)` in one crossing.
+    fn summary(&self, i: usize, dir: usize) -> PyResult<(usize, usize, u8, u64)> {
+        let h = self.half(i, dir)?;
+        Ok((h.data.len(), h.gaps.len(), h.flags, h.dropped))
+    }
+
     /// A view over the packets that contributed octets: no copy.
     fn packets(&self, py: Python<'_>, i: usize) -> PyResult<PyPktList> {
-        let s = self
-            .inner
-            .get(i)
-            .ok_or_else(|| PyIndexError::new_err("stream index out of range"))?;
+        let s = self.at(i)?;
         Ok(self.owner.borrow(py).keeping(&s.packets()))
     }
 }

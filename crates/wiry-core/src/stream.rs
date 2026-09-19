@@ -18,38 +18,28 @@
 //! can never be larger than its input. That is what keeps a crafted capture
 //! from turning a few small segments into a large allocation.
 //!
-//! Every bound is named and stated here:
-//!
-//! - `MAX_STREAMS` concurrent streams. Past that the least recently active is
-//!   evicted, finished, and reported with `EVICTED` set rather than dropped.
-//! - `MAX_STREAM` delivered octets per direction. Past that the direction stops
-//!   accepting and reports `TRUNCATED`.
-//! - `MAX_HELD_SEGS` out-of-order segments and `MAX_HELD_BYTES` octets held per
-//!   direction, and `MAX_HELD_TOTAL` octets held across every direction at once.
-//!   Past any of those the frontier is forced forward over the missing bytes,
-//!   which records a `Gap` and delivers what was waiting behind it.
-//! - `MAX_AHEAD` octets past the frontier a segment may claim. A segment
-//!   further out than that is refused and sets `LOSSY`; no window advertised by
-//!   a real stack reaches it, and without the bound one 32-bit sequence number
-//!   would decide how much a capture may allocate.
-//!
 //! Inserting a segment costs O(log h) in the segments already held plus the
 //! octets it actually contributes, and h is bounded by `MAX_HELD_SEGS`, so no
 //! arrival is linear in the stream reassembled so far.
 
+use crate::field::wide;
 use crate::layers::dispatch;
-use crate::layers::{http, tls};
+use crate::layers::{http, text, tls};
 use crate::packet::dissect_spans;
 use crate::proto::ProtoId;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
-/// Concurrent streams tracked at once.
+/// Concurrent streams tracked at once. Past it the least recently active is
+/// finished and handed back with `evicted` set, never dropped.
 pub const MAX_STREAMS: usize = 65_536;
 
-/// Delivered octets one direction may reassemble to.
+/// Delivered octets one direction may reassemble to. Past it the direction
+/// stops accepting and reports `TRUNCATED`.
 pub const MAX_STREAM: usize = 16 << 20;
 
-/// Out-of-order segments one direction may hold behind a gap.
+/// Out-of-order segments one direction may hold behind a gap. Past any of the
+/// three holding bounds the frontier is forced over the missing octets, which
+/// records a `Gap` and delivers what was waiting behind it.
 pub const MAX_HELD_SEGS: usize = 64;
 
 /// Octets one direction may hold behind a gap.
@@ -58,7 +48,9 @@ pub const MAX_HELD_BYTES: usize = 256 << 10;
 /// Octets held behind gaps across every direction at once.
 pub const MAX_HELD_TOTAL: usize = 32 << 20;
 
-/// How far past the frontier a segment may claim before it is refused.
+/// How far past the frontier a segment may claim before it is refused and
+/// `LOSSY` set. No window a real stack advertises reaches it, and without the
+/// bound one 32-bit sequence number would decide what a capture may allocate.
 pub const MAX_AHEAD: u64 = 1 << 20;
 
 /// Segments a direction may hold before its origin is fixed. A capture can
@@ -424,7 +416,9 @@ impl Stream {
     }
 }
 
-fn addr(a: &[u8; 16], v6: bool) -> String {
+/// The address as `key()` spells it, from the octets rather than from the
+/// key, so a caller reading `src` is not parsing a display string.
+pub fn addr(a: &[u8; 16], v6: bool) -> String {
     let v = if v6 {
         crate::field::FieldValue::Ipv6(*a)
     } else {
@@ -456,13 +450,6 @@ struct Segment {
     flags: u8,
     at: usize,
     end: usize,
-}
-
-fn wide(a: &[u8]) -> [u8; 16] {
-    let mut out = [0u8; 16];
-    let n = a.len().min(16);
-    out[..n].copy_from_slice(&a[..n]);
-    out
 }
 
 /// `None` when the frame carries no TCP segment this can key.
@@ -719,16 +706,14 @@ pub fn reframe_with(src: &[u8], s: &Splice, skip: u32, data: &[u8]) -> Option<Ve
     Some(f)
 }
 
-/// Which application protocol a reassembled direction speaks, decided by the
-/// same port table and the same content guards a single segment goes through,
-/// so a stream and a segment cannot disagree about what they are.
+/// The dissector's own port table and content guards, so a stream and a
+/// segment cannot disagree about what they are.
 pub fn app_of(sport: u16, dport: u16, data: &[u8]) -> Option<ProtoId> {
     dispatch::by_tcp_port(sport, dport, data)
 }
 
 /// Octets the first complete application message in `data` occupies, or `None`
-/// when the message is not all there yet. This is the whole reason reassembly
-/// pays: a message that crossed a segment boundary is one message here.
+/// when the message is not all there yet.
 pub fn message_len(app: ProtoId, data: &[u8]) -> Option<usize> {
     match app {
         ProtoId::Http => http_len(data),
@@ -752,9 +737,7 @@ pub struct Message {
     pub skip: u32,
 }
 
-/// Every complete application message in every stream, in capture order. A
-/// message that crossed a segment boundary appears once here and in no single
-/// packet, which is the whole point of reassembling.
+/// Every complete application message in every stream, in capture order.
 pub fn app_messages(streams: &[Stream]) -> Vec<Message> {
     let mut out = Vec::new();
     for (i, s) in streams.iter().enumerate() {
@@ -804,27 +787,16 @@ pub fn messages(app: ProtoId, data: &[u8]) -> Vec<(usize, usize)> {
 }
 
 fn tls_len(d: &[u8]) -> Option<usize> {
-    if !tls::looks_like(d) {
-        return None;
-    }
-    let n = 5 + u16::from_be_bytes([*d.get(3)?, *d.get(4)?]) as usize;
+    let n = tls::looks_like(d).then(|| tls::record_len(d))?;
     (d.len() >= n).then_some(n)
 }
 
 /// RFC 9112 §2.1: the header section ends at the first empty line. The walk is
-/// bounded because the line it looks for is under the sender's control.
+/// bounded because the line it looks for is under the sender's control, and it
+/// is the dissector's own scanner so the two cannot disagree about where a
+/// header block ends.
 fn head_end(d: &[u8]) -> Option<usize> {
-    let lim = d.len().min(MAX_HEAD);
-    let mut i = 0usize;
-    while i < lim {
-        let nl = i + d[i..lim].iter().position(|c| *c == b'\n')?;
-        let blank = nl == i || (nl == i + 1 && d[i] == b'\r');
-        if blank {
-            return Some(nl + 1);
-        }
-        i = nl + 1;
-    }
-    None
+    text::header_block(&d[..d.len().min(MAX_HEAD)])
 }
 
 fn header_value<'a>(head: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {

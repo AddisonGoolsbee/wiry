@@ -69,23 +69,27 @@ pub fn lines(data: &[u8]) -> Vec<&[u8]> {
 /// Offset just past the blank line that ends a header block, or the whole
 /// input when the block was clipped before it.
 pub fn headers_end(data: &[u8]) -> usize {
+    header_block(data).unwrap_or(data.len())
+}
+
+/// Offset just past the blank line that ends a header block, or `None` when
+/// the block was clipped before it. A reassembler needs to tell a clipped
+/// block from a complete one; a dissector takes what it has.
+pub fn header_block(data: &[u8]) -> Option<usize> {
     let mut i = 0usize;
     while i < data.len() {
-        let nl = match data[i..].iter().position(|c| *c == b'\n') {
-            Some(n) => i + n,
-            None => return data.len(),
-        };
+        let nl = i + data[i..].iter().position(|c| *c == b'\n')?;
         let line_len = if nl > i && data[nl - 1] == b'\r' {
             nl - 1 - i
         } else {
             nl - i
         };
         if line_len == 0 {
-            return nl + 1;
+            return Some(nl + 1);
         }
         i = nl + 1;
     }
-    data.len()
+    None
 }
 
 /// `Content-type` and `CONTENT-TYPE` are the same field name (RFC 9110 §5.1),

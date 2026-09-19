@@ -1192,29 +1192,29 @@ fn reassembled_streams(frames: &[Vec<u8>]) -> Vec<stream::Stream> {
 
 /// Every adversarial arrival order the module names, fed at two sizes. The cost
 /// of one insert must not grow with what is already held, so four times the
-/// segments must not cost sixteen times the work; the check is deliberately
-/// loose (a factor of six) because wall-clock ratios on a shared machine are
-/// noisy, and a quadratic term would show up as 16 or more.
+/// segments must cost about four times the work. The threshold sits between
+/// linear and the sixteen a quadratic term would show, with enough room for a
+/// shared machine's noise; above it the check would not catch what it is for.
 #[test]
 fn no_arrival_order_makes_an_insert_cost_what_is_already_held() {
-    type Shape = fn(usize, usize) -> Vec<Vec<u8>>;
+    type Shape = fn(usize) -> Vec<Vec<u8>>;
     let shapes: &[(&str, Shape)] = &[
         // Descending, abutting: every arrival lands in front of everything
         // held, which is the shape that made a merging buffer quadratic.
-        ("descending", |n, _| {
+        ("descending", |n| {
             (0..n)
                 .map(|i| tcp_segment(1, 1234, 80, (4 * (n - i)) as u32, 0x18, b"aaaa"))
                 .collect()
         }),
         // Descending and overlapping by one octet each time.
-        ("overlapping", |n, _| {
+        ("overlapping", |n| {
             (0..n)
                 .map(|i| tcp_segment(1, 1234, 80, (4 * (n - i)) as u32, 0x18, b"aaaaa"))
                 .collect()
         }),
         // A wide segment over many small held ones, repeated: the scan over
         // what a new segment spans must not be paid again per arrival.
-        ("wide over sparse", |n, _| {
+        ("wide over sparse", |n| {
             let mut v: Vec<Vec<u8>> = (0..n)
                 .map(|i| tcp_segment(1, 1234, 80, (100 + 8 * i) as u32, 0x18, b"aa"))
                 .collect();
@@ -1224,21 +1224,21 @@ fn no_arrival_order_makes_an_insert_cost_what_is_already_held() {
         }),
         // One stream per packet: a real input, and the one that decides whether
         // the eviction queue is amortised.
-        ("one stream each", |n, _| {
+        ("one stream each", |n| {
             (0..n)
                 .map(|i| tcp_segment(1, (i % 60000) as u16 + 1024, 80, 1, 0x18, b"hello"))
                 .collect()
         }),
         // Retransmitting the same octets forever.
-        ("retransmit", |n, _| {
+        ("retransmit", |n| {
             (0..n)
                 .map(|_| tcp_segment(1, 1234, 80, 1, 0x18, b"the same octets"))
                 .collect()
         }),
     ];
     for (name, build) in shapes {
-        let small = build(2000, 0);
-        let large = build(8000, 0);
+        let small = build(2000);
+        let large = build(8000);
         let t0 = Instant::now();
         let _ = reassembled_streams(&small);
         let base = t0.elapsed().as_secs_f64().max(1e-4);
@@ -1246,7 +1246,7 @@ fn no_arrival_order_makes_an_insert_cost_what_is_already_held() {
         let _ = reassembled_streams(&large);
         let grown = t1.elapsed().as_secs_f64();
         assert!(
-            grown < base * 24.0,
+            grown < base * 12.0,
             "{name}: 4x the segments cost {:.1}x the time, which is not linear \
              (seed {SEED:#x})",
             grown / base

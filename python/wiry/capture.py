@@ -146,8 +146,9 @@ def sniff(
     that needs the whole capture in hand, so ``session=`` is offline only.
     """
     if offline is None:
-        name = getattr(session, "__name__", type(session).__name__)
-        if session is not None and name != "DefaultSession":
+        from .stream import needs_capture
+
+        if session is not None and needs_capture(session):
             raise NotImplementedError(
                 "session= needs the whole capture at once and so works with "
                 "offline= only; sniff to a PacketList, then pass it back in"

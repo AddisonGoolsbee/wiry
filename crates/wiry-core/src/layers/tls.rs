@@ -23,7 +23,9 @@ pub fn looks_like(p: &[u8]) -> bool {
     matches!(p.first(), Some(20..=24)) && p.get(1) == Some(&3) && p.get(2).is_some_and(|m| *m <= 4)
 }
 
-fn record_len(hdr: &[u8]) -> usize {
+/// RFC 8446 §5.1: the two-octet length follows the type and version, and
+/// counts the fragment only.
+pub fn record_len(hdr: &[u8]) -> usize {
     match hdr.get(3..5) {
         Some(b) => 5 + u16::from_be_bytes([b[0], b[1]]) as usize,
         None => 5,

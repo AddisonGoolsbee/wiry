@@ -10,3 +10,9 @@ dist/
 
 # Artifacts the scapy regression suite writes into the working directory
 p0f.fp
+
+# libFuzzer writes coverage-guided corpus entries named for their SHA-1 digest:
+# forty lowercase hex characters, which no hand-built seed is. The seeds are
+# named for what they are ('empty', 'absurd_timestamp') and stay tracked.
+fuzz/corpus/*/[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]
+fuzz/artifacts/

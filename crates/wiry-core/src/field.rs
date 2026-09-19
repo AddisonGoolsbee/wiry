@@ -284,6 +284,15 @@ pub fn decode(hdr: &[u8], f: &FieldDesc) -> FieldValue {
     }
 }
 
+/// An address left-aligned in sixteen octets, so an IPv4 and an IPv6 flow key
+/// are one shape. Anything longer is cut, because nothing addresses wider.
+pub fn wide(addr: &[u8]) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    let n = addr.len().min(16);
+    out[..n].copy_from_slice(&addr[..n]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
