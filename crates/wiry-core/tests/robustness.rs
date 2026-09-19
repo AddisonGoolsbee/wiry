@@ -1125,33 +1125,6 @@ fn an_impossible_fragment_extent_buffers_nothing() {
     assert_eq!(reassembled(&[evil]), vec![frag::Piece::Incomplete(0)]);
 }
 
-/// The named caps bound how much a hostile capture may buffer; this bounds
-/// what it may cost. Non-adjacent fragments are the worst shape for the
-/// received-range list, and re-sorting that list per fragment made one datagram
-/// quadratic.
-#[test]
-fn a_datagram_fed_non_adjacent_fragments_stays_cheap() {
-    within(Duration::from_secs(20), "sparse reassembly", || {
-        let base = ip_datagram(&[], &[0u8; 8]);
-        let mut frames = Vec::new();
-        for group in 0..16u16 {
-            for at in 0..(frag::MAX_DATAGRAM / 16) {
-                let mut f = base.clone();
-                f[14 + 4..14 + 6].copy_from_slice(&group.to_be_bytes());
-                f[14 + 6..14 + 8].copy_from_slice(&(0x2000u16 | (at * 2) as u16).to_be_bytes());
-                f[14 + 10] = 0;
-                f[14 + 11] = 0;
-                let ck = checksum::ones_complement(&f[14..14 + 20]);
-                f[14 + 10..14 + 12].copy_from_slice(&ck.to_be_bytes());
-                frames.push(f);
-            }
-        }
-        let got = reassembled(&frames);
-        assert_eq!(got.len(), frames.len());
-        assert!(got.iter().all(|p| matches!(p, frag::Piece::Incomplete(_))));
-    });
-}
-
 /// Every fragment dropped by the in-flight cap is still reported.
 #[test]
 fn unfinished_datagrams_are_capped() {

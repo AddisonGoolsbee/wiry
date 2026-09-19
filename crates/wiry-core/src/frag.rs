@@ -11,8 +11,9 @@ use crate::checksum::ones_complement;
 use crate::field::wide;
 use crate::packet::dissect_spans;
 use crate::proto::ProtoId;
+use crate::work::Work;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// RFC 791 §3.1: Total Length is 16 bits, so nothing reassembles larger.
 pub const MAX_DATAGRAM: usize = 65535;
@@ -342,52 +343,64 @@ struct Group {
     at: Vec<u32>,
     head: Option<Head>,
     data: Vec<u8>,
-    /// Merged, disjoint, sorted byte ranges already received.
-    got: Vec<(usize, usize)>,
+    /// Merged, disjoint byte ranges already received, keyed on where each
+    /// starts.
+    got: BTreeMap<usize, usize>,
     total: Option<usize>,
 }
 
 impl Group {
     fn complete(&self) -> bool {
-        self.head.is_some() && self.total.is_some_and(|t| self.got.as_slice() == [(0, t)])
+        self.head.is_some()
+            && self
+                .total
+                .is_some_and(|t| self.got.iter().next() == Some((&0, &t)) && self.got.len() == 1)
     }
 
     /// First writer wins: only the parts of `[start, end)` no earlier fragment
     /// claimed are written, so an overlapping fragment cannot rewrite bytes an
     /// upstream stack has already seen.
     ///
-    /// `got` stays sorted and disjoint across calls, so the claim goes in by
-    /// binary search. Re-sorting it per fragment made a datagram fed thousands
-    /// of non-adjacent fragments cost quadratic time.
-    fn absorb(&mut self, start: usize, src: &[u8]) {
+    /// The claim is found, merged and reinserted in O(log h) plus one step per
+    /// range it swallows, and a range is swallowed once. Two earlier shapes
+    /// were linear in what is held instead: re-sorting the list per fragment,
+    /// and holding it in a `Vec` whose front insertion shifted every range
+    /// above it. Either makes one crafted datagram quadratic, and a sender
+    /// picks the arrival order.
+    fn absorb(&mut self, start: usize, src: &[u8], work: &mut Work) {
         let end = start + src.len();
         if end > self.data.len() {
             self.data.resize(end, 0);
         }
-        let first = self.got.partition_point(|&(_, b)| b < start);
-        let mut at = start;
-        for &(a, b) in &self.got[first..] {
-            if a >= end {
-                break;
+        let (mut lo, mut hi, mut at) = (start, end, start);
+        work.probe();
+        if let Some((&a, &b)) = self.got.range(..=start).next_back() {
+            if b >= start {
+                self.got.remove(&a);
+                lo = a;
+                hi = hi.max(b);
+                at = at.max(b);
             }
-            if a > at {
-                self.data[at..a].copy_from_slice(&src[at - start..a - start]);
+        }
+        loop {
+            work.probe();
+            let Some((&a, &b)) = self.got.range(start..=end).next() else {
+                break;
+            };
+            let upto = a.min(end);
+            if upto > at {
+                work.copied(upto - at);
+                self.data[at..upto].copy_from_slice(&src[at - start..upto - start]);
             }
             at = at.max(b);
-            if at >= end {
-                break;
-            }
+            hi = hi.max(b);
+            self.got.remove(&a);
         }
         if at < end {
+            work.copied(end - at);
             self.data[at..end].copy_from_slice(&src[at - start..]);
         }
-        let last = self.got.partition_point(|&(a, _)| a <= end);
-        if first < last {
-            self.got[first] = (start.min(self.got[first].0), end.max(self.got[last - 1].1));
-            self.got.drain(first + 1..last);
-        } else {
-            self.got.insert(first, (start, end));
-        }
+        self.got.insert(lo, hi);
     }
 
     fn assemble(&mut self) -> Option<Vec<u8>> {
@@ -509,6 +522,7 @@ struct Reassembler {
     seq: u64,
     buffered: usize,
     out: Vec<Piece>,
+    work: Work,
 }
 
 impl Reassembler {
@@ -523,6 +537,7 @@ impl Reassembler {
             self.out.push(Piece::Incomplete(pos));
             return;
         }
+        self.work.probe();
         let g = match self.groups.entry(f.key) {
             Entry::Occupied(o) => o.into_mut(),
             Entry::Vacant(v) => {
@@ -544,7 +559,7 @@ impl Reassembler {
             g.head = f.head;
         }
         let held = g.data.len();
-        g.absorb(f.at, &buf[f.data_at..f.data_end]);
+        g.absorb(f.at, &buf[f.data_at..f.data_end], &mut self.work);
         if !f.more && g.total.is_none() {
             g.total = Some(f.at + (f.data_end - f.data_at));
         }
@@ -565,6 +580,7 @@ impl Reassembler {
     /// the one that was about to finish.
     fn evict(&mut self) {
         while self.groups.len() > MAX_INFLIGHT || self.buffered > MAX_BUFFERED {
+            self.work.probe();
             let Some((seq, key)) = self.order.pop_front() else {
                 break;
             };
@@ -578,10 +594,18 @@ impl Reassembler {
         // no live group answers to bounds `order` at one entry per group, which
         // is what keeps this sweep amortised rather than per-fragment.
         if self.order.len() > 4 * MAX_INFLIGHT {
+            self.work.probes(self.order.len());
             let live = &self.groups;
             self.order
                 .retain(|(s, k)| live.get(k).is_some_and(|g| g.seq == *s));
         }
+    }
+
+    /// Entries touched and octets copied by the fragments pushed so far. Read
+    /// before `finish`, which is teardown rather than insertion.
+    #[cfg(test)]
+    fn cost(&self) -> (u64, u64) {
+        self.work.counts()
     }
 
     fn finish(mut self) -> Vec<Piece> {
@@ -672,6 +696,115 @@ mod tests {
         defragment(refs, ProtoId::Ether)
     }
 
+    /// One fragment of datagram `id` claiming `at` in the 8-octet units an
+    /// offset counts, carrying `len` octets.
+    fn piece(id: u16, at: u16, len: usize) -> Vec<u8> {
+        let mut f = datagram(&[], &body(len));
+        f[14 + 4..14 + 6].copy_from_slice(&id.to_be_bytes());
+        f[14 + 6..14 + 8].copy_from_slice(&(0x2000u16 | at).to_be_bytes());
+        f[14 + 10] = 0;
+        f[14 + 11] = 0;
+        let ck = ones_complement(&f[14..14 + 20]);
+        f[14 + 10..14 + 12].copy_from_slice(&ck.to_be_bytes());
+        f
+    }
+
+    type Shape = fn(usize) -> Vec<Vec<u8>>;
+
+    fn frag_shapes() -> &'static [(&'static str, Shape)] {
+        &[
+            // Half of every 8-octet unit claimed, so no two claims ever merge
+            // and the range list grows with every fragment.
+            ("ascending", |n| {
+                (0..n).map(|i| piece(1, i as u16, 4)).collect()
+            }),
+            // The same list, filled from the top: a range inserted in front of
+            // every range already held.
+            ("descending", |n| {
+                (0..n).map(|i| piece(1, (n - 1 - i) as u16, 4)).collect()
+            }),
+            // A fragment spanning everything held, repeated.
+            ("wide over sparse", |n| {
+                let mut v: Vec<Vec<u8>> = (0..n).map(|i| piece(1, i as u16, 4)).collect();
+                v.extend((0..n).map(|_| piece(1, 0, 8192)));
+                v
+            }),
+            // One datagram per fragment, past `MAX_INFLIGHT`: the shape that
+            // decides whether the eviction queue is amortised.
+            ("one datagram each", |n| {
+                (0..n).map(|i| piece(i as u16, 0, 4)).collect()
+            }),
+        ]
+    }
+
+    /// Entries touched and octets copied absorbing `frames`, with the pieces
+    /// they came back as. Teardown is excluded: this measures arrivals.
+    fn insert_cost(frames: &[Vec<u8>]) -> (u64, u64, u64, Vec<Piece>) {
+        let mut r = Reassembler::default();
+        let mut fed = 0u64;
+        for (i, f) in frames.iter().enumerate() {
+            r.push(i as u32, f, ProtoId::Ether);
+            if let Some(g) = inspect(f, ProtoId::Ether) {
+                fed += (g.data_end - g.data_at) as u64;
+            }
+        }
+        let (probes, bytes) = r.cost();
+        (probes, bytes, fed, r.finish())
+    }
+
+    /// `absorb` finds and merges a claim in O(log h) plus one step per range it
+    /// swallows, and a range is swallowed once. The worst shape here measures
+    /// 3.9 entries per fragment; twelve leaves room for a constant this module
+    /// might honestly gain and is still three orders below `MAX_FRAGS`, so a
+    /// claim that walked the list fails.
+    const MAX_PROBES_PER_FRAGMENT: f64 = 12.0;
+
+    /// Four times the fragments may touch at most six times the entries. Linear
+    /// is 4.0 and the shapes here measure 2.6 to 4.5, the spread coming from
+    /// where the eviction sweep falls; a quadratic term would show 16.
+    const MAX_GROWTH: f64 = 6.0;
+
+    /// The named caps bound how much a hostile capture may buffer; this bounds
+    /// what it may cost, counted rather than timed.
+    ///
+    /// A 20-second deadline stood here before and could not do the job. The
+    /// bug it commemorates — re-sorting the received-range list per fragment —
+    /// was measured back in at 1.5s against 0.1s, so it passed; and the shape
+    /// fed was ascending, the one order a `Vec` inserts into for free, so the
+    /// front insertion that was quadratic never ran at all. Both are visible
+    /// here in entries touched, and neither is visible in a clock.
+    #[test]
+    fn no_arrival_order_makes_a_claim_cost_what_is_already_held() {
+        for (name, build) in frag_shapes() {
+            let small = build(2000);
+            let large = build(8000);
+            let (p0, b0, fed0, _) = insert_cost(&small);
+            let (p1, b1, fed1, pieces) = insert_cost(&large);
+
+            let per = p1 as f64 / large.len() as f64;
+            assert!(
+                per <= MAX_PROBES_PER_FRAGMENT,
+                "{name}: a claim touched {per:.1} entries, so it costs what is held"
+            );
+            let growth = p1 as f64 / p0 as f64;
+            assert!(
+                growth <= MAX_GROWTH,
+                "{name}: 4x the fragments touched {growth:.1}x the entries, which is not linear"
+            );
+            // An arriving octet is written into the datagram at most once,
+            // because the first claim on it owns it.
+            for (b, fed, n) in [(b0, fed0, 2000), (b1, fed1, 8000)] {
+                assert!(
+                    b <= fed,
+                    "{name} at {n}: {b} octets moved for {fed} received, so octets are recopied"
+                );
+            }
+            // Nothing completes: every shape leaves a hole.
+            assert_eq!(pieces.len(), large.len());
+            assert!(pieces.iter().all(|p| matches!(p, Piece::Incomplete(_))));
+        }
+    }
+
     #[test]
     fn a_short_datagram_is_not_split() {
         let d = datagram(&[], &body(100));
@@ -758,8 +891,8 @@ mod tests {
 
     /// First-writer-wins, checked against the rule written out longhand: a byte
     /// belongs to the first fragment that claimed it, whatever order and
-    /// overlap the claims arrive in. `got` must stay sorted, disjoint and
-    /// merged, since the fast path binary-searches it.
+    /// overlap the claims arrive in. `got` must stay disjoint and merged, since
+    /// the fast path searches it.
     #[test]
     fn absorbing_overlapping_claims_matches_the_rule_spelled_out() {
         let mut state = 0x2545_f491_4f6c_dd1du64;
@@ -777,17 +910,17 @@ mod tests {
                 let len = (next() as usize) % 96;
                 let fill = next() as u8;
                 let src = vec![fill; len];
-                g.absorb(start, &src);
+                g.absorb(start, &src, &mut Work::default());
                 for (i, b) in src.iter().enumerate() {
                     model[start + i].get_or_insert(*b);
                 }
+                let ranges: Vec<(usize, usize)> = g.got.iter().map(|(&a, &b)| (a, b)).collect();
                 assert!(
-                    g.got.windows(2).all(|w| w[0].1 < w[1].0),
-                    "round {round}: ranges are not sorted and disjoint: {:?}",
-                    g.got
+                    ranges.windows(2).all(|w| w[0].1 < w[1].0),
+                    "round {round}: ranges are not disjoint and merged: {ranges:?}"
                 );
                 for (i, want) in model.iter().enumerate() {
-                    let held = g.got.iter().any(|&(a, b)| i >= a && i < b);
+                    let held = ranges.iter().any(|&(a, b)| i >= a && i < b);
                     assert_eq!(held, want.is_some(), "round {round}: coverage at {i}");
                     if let Some(w) = want {
                         assert_eq!(g.data[i], *w, "round {round}: byte {i} was rewritten");

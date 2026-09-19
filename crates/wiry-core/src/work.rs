@@ -17,9 +17,9 @@
 
 #[derive(Default)]
 pub(crate) struct Work {
-    /// Entries examined: held segments probed, ranges walked, queue entries
-    /// swept. One unit is one step a scan-everything implementation would
-    /// multiply.
+    /// Entries touched: held segments probed, ranges walked, queue entries
+    /// swept, list entries shifted by an insertion. One unit is one step a
+    /// scan-everything implementation would multiply.
     #[cfg(test)]
     probes: u64,
     /// Octets copied into a buffer. An implementation that concatenated what it
