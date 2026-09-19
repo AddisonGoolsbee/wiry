@@ -1,0 +1,113 @@
+name = "OSPF_DBDesc"
+id = "OspfDbDesc"
+num = 94
+module = "ospf_dbdesc"
+citation = """
+RFC 2328 §A.3.3, Database Description packet: a 16-bit interface MTU, the
+one-octet Options field of §A.2, an octet whose low three bits are I, M and MS
+(MS least significant) and whose remaining bits are reserved, a 32-bit DD
+sequence number, and then the 20-octet LSA headers of §A.4.1 to the end of the
+packet — a repeating group (`crates/wiry-core/src/repeat.rs`).
+
+RFC 4811 §3 defines bit 3 of that octet as R (OOBResync), which is the fourth
+flag named here.
+"""
+min_len = 8
+header_len = "rest"
+next = "end"
+parsed_field = "lsaheaders"
+
+[[fields]]
+name = "mtu"
+off = 0
+len = 16
+default = 1500
+
+[[fields]]
+name = "options"
+off = 16
+len = 8
+kind = "flags"
+flags = ["MT", "E", "MC", "NP", "L", "DC", "O", "DN"]
+
+[[fields]]
+name = "dbdescr"
+off = 24
+len = 8
+kind = "flags"
+flags = ["MS", "M", "I", "R", "4", "3", "2", "1"]
+
+[[fields]]
+name = "ddseq"
+off = 32
+len = 32
+default = 1
+
+[[fields]]
+name = "lsaheaders"
+off = 64
+kind = "var_bytes"
+
+[group]
+name = "OSPF_LSA_Hdr"
+start = 8
+extent = "rest"
+elem_len = 20
+
+[[group.fields]]
+name = "age"
+off = 0
+len = 16
+default = 1
+
+[[group.fields]]
+name = "options"
+off = 16
+len = 8
+kind = "flags"
+flags = ["MT", "E", "MC", "NP", "L", "DC", "O", "DN"]
+
+[[group.fields]]
+name = "type"
+off = 24
+len = 8
+default = 1
+
+[[group.fields]]
+name = "id"
+off = 32
+kind = "ipv4"
+
+[[group.fields]]
+name = "adrouter"
+off = 64
+kind = "ipv4"
+
+[[group.fields]]
+name = "seq"
+off = 96
+len = 32
+default = 0x80000001
+
+[[group.fields]]
+name = "chksum"
+off = 128
+len = 16
+
+[[group.fields]]
+name = "len"
+off = 144
+len = 16
+default = 36
+
+[vector]
+source = "RFC 2328 §A.3.3 database description, hand-built: MTU 1500, I+M+MS set, sequence 1, no LSA headers."
+bytes = [0x05, 0xdc, 0x02, 0x07, 0x00, 0x00, 0x00, 0x01]
+[vector.fields]
+mtu = 1500
+ddseq = 1
+
+[provenance]
+source = "scapy/contrib/ospf.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — OSPF_DBDesc's field table, its dbdescr flag names and its lsaheaders PacketListField transcribed as a repeating group; checked against RFC 2328 §A.3.3 and §A.4.1"]

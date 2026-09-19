@@ -1,0 +1,100 @@
+name = "BGPOpen"
+id = "BgpOpen"
+num = 98
+module = "bgp_open"
+citation = """
+RFC 4271 §4.2, OPEN message: a one-octet version (4), the 16-bit autonomous
+system number of the sender, a 16-bit hold time in seconds, the four-octet BGP
+identifier, a one-octet length of the optional parameters, and then that many
+octets of them. §4.2 gives an optional parameter a one-octet type and a
+one-octet length that counts only the value, so the parameters are a
+length-driven repeating group (`crates/wiry-core/src/repeat.rs`) whose element
+is two octets plus its own length.
+
+The parameter *value* is kept as octets rather than decoded: RFC 5492 §4 makes
+a type 2 value a list of capabilities and RFC 4271 makes a type 1 value
+authentication data, so the layout varies by the type octet, which a flat
+record table cannot express — DEVIATIONS E1.
+"""
+min_len = 10
+header_len = "rest"
+next = "end"
+parsed_field = "opt_params"
+
+[[fields]]
+name = "version"
+off = 0
+len = 8
+default = 4
+
+[[fields]]
+name = "my_as"
+off = 8
+len = 16
+
+[[fields]]
+name = "hold_time"
+off = 24
+len = 16
+
+[[fields]]
+name = "bgp_id"
+off = 40
+kind = "ipv4"
+
+[[fields]]
+name = "opt_param_len"
+off = 72
+len = 8
+
+[[fields]]
+name = "opt_params"
+off = 80
+kind = "var_bytes"
+
+[group]
+name = "BGPOptParam"
+start = 10
+extent = "length"
+len_off = 72
+len_len = 8
+elem_base = 2
+
+[[group.terms]]
+off = 8
+len = 8
+scale = 1
+
+[[group.fields]]
+name = "param_type"
+off = 0
+len = 8
+default = 2
+
+[[group.fields]]
+name = "param_length"
+off = 8
+len = 8
+
+[[group.fields]]
+name = "param_value"
+off = 16
+kind = "var_bytes"
+
+[vector]
+source = "RFC 4271 §4.2 OPEN, hand-built: version 4, AS 65001, hold time 180, id 10.0.0.1, one two-octet capability parameter."
+bytes = [
+  0x04, 0xfd, 0xe9, 0x00, 0xb4,
+  0x0a, 0x00, 0x00, 0x01,
+  0x04, 0x02, 0x02, 0x01, 0x04,
+]
+[vector.fields]
+version = 4
+my_as = 65001
+hold_time = 180
+opt_param_len = 4
+
+[provenance]
+source = "scapy/contrib/bgp.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — BGPOpen's field table and BGPOptParam's type/length transcribed as a length-driven repeating group; checked against RFC 4271 §4.2"]

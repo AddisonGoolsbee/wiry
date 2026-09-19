@@ -6,7 +6,9 @@ citation = """
 RFC 4271 §4.1: every BGP message opens with a 16-octet marker that is all ones,
 a 16-bit length covering the whole message and a one-octet type (1 OPEN,
 2 UPDATE, 3 NOTIFICATION, 4 KEEPALIVE; 5 ROUTE-REFRESH is RFC 2918). The
-per-type bodies of §4.2 onwards are left opaque.
+bodies of §4.2 onwards are separate layers reached from `type`, as scapy's
+`_bgp_dispatcher` reaches them: BGPOpen, BGPUpdate, BGPNotification and
+BGPRouteRefresh. §4.4 gives KEEPALIVE no body at all, so type 4 has no layer.
 """
 min_len = 19
 header_len = 19
@@ -31,6 +33,27 @@ off = 144
 len = 8
 default = 4
 
+[next]
+off = 144
+len = 8
+fallback = "raw"
+
+[[next.arms]]
+value = 1
+proto = "BgpOpen"
+
+[[next.arms]]
+value = 2
+proto = "BgpUpdate"
+
+[[next.arms]]
+value = 3
+proto = "BgpNotification"
+
+[[next.arms]]
+value = 5
+proto = "BgpRouteRefresh"
+
 [[parents]]
 from = "tcp_port"
 values = [179]
@@ -46,3 +69,8 @@ bytes = [
 [vector.fields]
 len = 19
 type = 4
+
+[provenance]
+source = "scapy/contrib/bgp.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — the per-type body dispatch transcribed from _bgp_dispatcher as a next table; checked against RFC 4271 §4.1"]

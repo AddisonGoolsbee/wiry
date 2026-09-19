@@ -124,7 +124,7 @@ def validate_group(f: str, g: dict, nested: bool) -> None:
         )
     if fixed is None and not g.get("terms"):
         raise SpecError(f"{f}: a computed element length needs [[...terms]]")
-    for fd in fields:
+    for i, fd in enumerate(fields):
         kind = fd.get("kind", "uint")
         if kind not in KINDS:
             raise SpecError(f"{f}: group field {fd.get('name')!r} has kind {kind!r}")
@@ -132,6 +132,21 @@ def validate_group(f: str, g: dict, nested: bool) -> None:
             raise SpecError(f"{f}: a group field needs a name and an off")
         if kind in FIXED_BITS:
             fd["len"] = FIXED_BITS[kind]
+        if kind.startswith("var_"):
+            # It reads to the end of the element, so a field after it would be
+            # inside it, and a fixed element width leaves it nothing to cover.
+            if i != len(fields) - 1:
+                raise SpecError(
+                    f"{f}: group field {fd['name']!r} is variable-length "
+                    "and must come last"
+                )
+            if fixed is not None:
+                raise SpecError(
+                    f"{f}: group field {fd['name']!r} is variable-length, so "
+                    f"group {g['name']!r} needs elem_base rather than elem_len"
+                )
+            fd["len"] = 0
+            continue
         if "len" not in fd:
             raise SpecError(f"{f}: group field {fd['name']!r} needs a bit length")
         if fixed is not None and fd["off"] + fd["len"] > fixed * 8:
@@ -417,7 +432,10 @@ def render_elem_len(g: dict) -> str:
         f"{t['off']}, bit_len: {t['len']}, scale: {t.get('scale', 1)} }}"
         for t in g["terms"]
     )
-    return f"ElemLen::Computed {{ base: {g['elem_base']}, terms: &[{terms}] }}"
+    return (
+        f"ElemLen::Computed {{ base: {g['elem_base']}, terms: &[{terms}], "
+        f"min: {g.get('elem_min', 0)} }}"
+    )
 
 
 def render_group(g: dict, const: str, vis: str) -> list[str]:

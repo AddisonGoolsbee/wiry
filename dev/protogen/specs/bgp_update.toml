@@ -1,0 +1,54 @@
+name = "BGPUpdate"
+id = "BgpUpdate"
+module = "bgp_update"
+num = 99
+citation = """
+RFC 4271 §4.3, UPDATE message: a 16-bit count of withdrawn-route octets, that
+many withdrawn routes, a 16-bit count of path-attribute octets, that many path
+attributes, and then the Network Layer Reachability Information to the end of
+the message. §4.3 encodes a route as a one-octet prefix length in *bits*
+followed by the smallest number of octets that holds it, and a path attribute
+as an attribute-flags octet, a type octet and a length that is one octet, or
+two when the flags' Extended Length bit (0x10) is set.
+
+Three variable regions in sequence, two of them at offsets no earlier field
+fixes, is outside the flat table and outside the repeating-group construct
+alike, so the whole body past `withdrawn_routes_len` is one variable field and
+the walk over it is hand-written. It answers one list under `body`, whose item
+names say which of the three regions each came from: `withdrawn` for a
+withdrawn prefix, the RFC 4271 §5 attribute name (or its code) for a path
+attribute, and `nlri` for an advertised prefix. Path attribute *values* are
+kept as octets: their layout varies by type code — DEVIATIONS E1.
+"""
+min_len = 4
+header_len = "rest"
+next = "end"
+parse_options = "hand"
+parsed_field = "body"
+
+[[fields]]
+name = "withdrawn_routes_len"
+off = 0
+len = 16
+
+[[fields]]
+name = "body"
+off = 16
+kind = "var_bytes"
+
+[vector]
+source = "RFC 4271 §4.3 UPDATE, hand-built: no withdrawn routes, ORIGIN=IGP and NEXT_HOP=10.0.0.1, advertising 192.168.1.0/24."
+bytes = [
+  0x00, 0x00,
+  0x00, 0x0b,
+  0x40, 0x01, 0x01, 0x00,
+  0x40, 0x03, 0x04, 0x0a, 0x00, 0x00, 0x01,
+  0x18, 0xc0, 0xa8, 0x01,
+]
+[vector.fields]
+withdrawn_routes_len = 0
+
+[provenance]
+source = "scapy/contrib/bgp.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — BGPUpdate's field order, BGPPathAttr's flags/type/length rule with its Extended-Length bit, and the path_attributes code table transcribed; the three regions answer one item list rather than three PacketListFields. Checked against RFC 4271 §4.3"]

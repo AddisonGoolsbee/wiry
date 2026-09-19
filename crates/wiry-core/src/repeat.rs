@@ -86,6 +86,10 @@ pub enum ElemLen {
     Computed {
         base: usize,
         terms: &'static [LenTerm],
+        /// A floor the record's own fields require: RFC 2328 §A.4.1 makes an
+        /// OSPF LSA at least its 20-octet header however small its `len` says
+        /// it is. Zero where the terms alone decide the width.
+        min: usize,
     },
 }
 
@@ -162,11 +166,15 @@ impl GroupDesc {
     fn elem_len(&self, e: &[u8]) -> usize {
         match self.elem {
             ElemLen::Fixed(n) => n,
-            ElemLen::Computed { base, terms } => terms.iter().fold(base, |a, t| {
-                a.saturating_add(
-                    (field::read_bits(e, t.bit_off, t.bit_len) as usize).saturating_mul(t.scale),
-                )
-            }),
+            ElemLen::Computed { base, terms, min } => terms
+                .iter()
+                .fold(base, |a, t| {
+                    a.saturating_add(
+                        (field::read_bits(e, t.bit_off, t.bit_len) as usize)
+                            .saturating_mul(t.scale),
+                    )
+                })
+                .max(min),
         }
     }
 
@@ -175,7 +183,7 @@ impl GroupDesc {
     fn base_len(&self) -> usize {
         match self.elem {
             ElemLen::Fixed(n) => n,
-            ElemLen::Computed { base, .. } => base,
+            ElemLen::Computed { base, min, .. } => base.max(min),
         }
     }
 
@@ -507,6 +515,9 @@ fn encode_one(g: &GroupDesc, it: &Item) -> Result<Vec<u8>, String> {
         _ => return Err(format!("a {} element takes a list of fields", g.name)),
     };
     let mut tail = Vec::new();
+    // A trailing variable-length field has nowhere to go until the element has
+    // been grown to the width its own length fields claim, so it waits.
+    let mut deferred = Vec::new();
     for v in vals {
         if let Some(n) = g.nested.filter(|n| n.name == v.name) {
             let ItemValue::Items(inner) = &v.value else {
@@ -520,6 +531,10 @@ fn encode_one(g: &GroupDesc, it: &Item) -> Result<Vec<u8>, String> {
             .iter()
             .find(|f| f.name == v.name)
             .ok_or_else(|| format!("{} has no field {:?}", g.name, v.name))?;
+        if f.kind == FieldKind::VarBytes {
+            deferred.push((f, &v.value));
+            continue;
+        }
         write_value(&mut e, f, &v.value)?;
     }
     if let Some(n) = g.nested {
@@ -534,6 +549,9 @@ fn encode_one(g: &GroupDesc, it: &Item) -> Result<Vec<u8>, String> {
             return Err(format!("{} element claims {want} octets", g.name));
         }
         e.resize(want, 0);
+    }
+    for (f, v) in deferred {
+        write_value(&mut e, f, v)?;
     }
     let pad = e.len().div_ceil(g.align.max(1)) * g.align.max(1);
     e.resize(pad, 0);
@@ -658,6 +676,7 @@ mod tests {
                 bit_len: 8,
                 scale: 4,
             }],
+            min: 0,
         },
         Extent::Rest,
         0,
@@ -763,6 +782,7 @@ mod tests {
             ElemLen::Computed {
                 base: 0,
                 terms: &[],
+                min: 0,
             },
             Extent::Rest,
             0,
@@ -890,6 +910,52 @@ mod tests {
         let mut data = [0u8, 0, 0, 1, 0, 2, 0, 3, 0, 4];
         sync(&mut data, &LENGTHED);
         assert_eq!(u16::from_be_bytes([data[0], data[1]]), 10);
+    }
+
+    static SELF_LEN_FIELDS: &[FieldDesc] = &[
+        FieldDesc::uint("len", 0, 8, 0),
+        FieldDesc::var_bytes("body", 8),
+    ];
+
+    /// The OSPF LSA shape: the element's own length field is its whole width,
+    /// with a floor its fixed fields require.
+    static SELF_LEN: GroupDesc = GroupDesc::new(
+        "S",
+        SELF_LEN_FIELDS,
+        ElemLen::Computed {
+            base: 0,
+            terms: &[LenTerm {
+                bit_off: 0,
+                bit_len: 8,
+                scale: 1,
+            }],
+            min: 2,
+        },
+        Extent::Rest,
+        0,
+    );
+
+    #[test]
+    fn a_length_below_the_floor_does_not_overlap_the_element_before_it() {
+        let data = [1u8, 0xaa, 4, 1, 2, 3];
+        let got = walk(&data, &SELF_LEN);
+        assert_eq!(got.len(), 2);
+        let ItemValue::Items(second) = &got[1].value else {
+            panic!()
+        };
+        assert_eq!(second[0].value, ItemValue::Uint(4));
+    }
+
+    #[test]
+    fn a_trailing_variable_field_survives_the_width_the_element_claims() {
+        let data = [5u8, 1, 2, 3, 4, 3, 9, 9];
+        let items = walk(&data, &SELF_LEN);
+        assert_eq!(items.len(), 2);
+        let ItemValue::Items(first) = &items[0].value else {
+            panic!()
+        };
+        assert_eq!(first[1].value, ItemValue::Bytes(vec![1, 2, 3, 4]));
+        assert_eq!(encode(&SELF_LEN, &items).unwrap(), &data[..]);
     }
 
     #[test]

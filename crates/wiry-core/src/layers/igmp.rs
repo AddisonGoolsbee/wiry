@@ -115,6 +115,7 @@ pub static GROUP: GroupDesc = GroupDesc::new(
                 scale: 4,
             },
         ],
+        min: 0,
     },
     Extent::Count {
         bit_off: 48,

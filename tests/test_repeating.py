@@ -3,14 +3,29 @@ octets they fill, and the records are read in Rust and handed over as data.
 
 Vectors are hand-built from RFC 2453 §4 (RIP route entries), Cisco's "NetFlow
 Export Datagram Formats" version 5 record, RFC 3376 §4.2 (IGMPv3 membership
-reports) and RFC 2328 §A.3.6 / §A.4.1 (OSPF acknowledgements).
+reports), RFC 2328 §A.3.2 to §A.4.1 (OSPF bodies) and RFC 4271 §4.2/§4.3 (BGP).
 """
 
 import struct
 
 import pytest
 
-from wiry import IGMP, IP, NetflowHeaderV5, OSPF_Hdr, RIP, UDP, rdpcap, wrpcap
+from wiry import (
+    BGPHeader,
+    BGPOpen,
+    BGPUpdate,
+    IGMP,
+    IP,
+    NetflowHeaderV5,
+    OSPF_Hdr,
+    OSPF_Hello,
+    OSPF_LSAck,
+    OSPF_LSUpd,
+    RIP,
+    UDP,
+    rdpcap,
+    wrpcap,
+)
 
 
 def rip_entry(af=2, addr="0.0.0.0", mask="0.0.0.0", nexthop="0.0.0.0", metric=1):
@@ -151,17 +166,57 @@ def test_a_version_two_report_carries_no_records():
 
 def test_ospf_acknowledgement_lsa_headers_stop_at_the_declared_length():
     raw = ospf_ack([lsa_header("192.168.0.1"), lsa_header("192.168.0.2")], padding=20)
-    heads = OSPF_Hdr(raw)[OSPF_Hdr].lsaheaders
+    heads = OSPF_Hdr(raw)[OSPF_LSAck].lsaheaders
     assert [h[0] for h in heads] == ["OSPF_LSA_Hdr", "OSPF_LSA_Hdr"]
     assert named(heads[1], "id") == "192.168.0.2"
     assert named(heads[0], "seq") == 0x80000001
 
 
-def test_another_ospf_type_leaves_its_body_alone():
+def test_the_ospf_type_octet_chooses_the_body_layer():
     hello = bytearray(24)
     hello[0], hello[1] = 2, 1
-    struct.pack_into("!H", hello, 2, 24)
-    assert OSPF_Hdr(bytes(hello) + b"\xaa" * 8)[OSPF_Hdr].lsaheaders == []
+    struct.pack_into("!H", hello, 2, 48)
+    body = bytes(24)
+    pkt = OSPF_Hdr(bytes(hello) + body)
+    assert pkt.haslayer(OSPF_Hello)
+    assert not pkt.haslayer(OSPF_LSAck)
+    assert pkt[OSPF_Hello].neighbors == [("neighbor", "0.0.0.0")]
+
+
+def test_an_ospf_update_reads_each_lsa_at_its_own_length():
+    lsa = bytearray(lsa_header("192.168.0.1"))
+    struct.pack_into("!H", lsa, 18, 24)
+    second = bytearray(lsa_header("192.168.0.2"))
+    struct.pack_into("!H", second, 18, 20)
+    body = struct.pack("!I", 2) + bytes(lsa) + bytes(4) + bytes(second)
+    head = bytearray(24)
+    head[0], head[1] = 2, 4
+    struct.pack_into("!H", head, 2, 24 + len(body))
+    lsas = OSPF_Hdr(bytes(head) + body)[OSPF_LSUpd].lsalist
+    assert [named(x, "id") for x in lsas] == ["192.168.0.1", "192.168.0.2"]
+    assert named(lsas[0], "lsa") == bytes(4)
+
+
+def test_a_bgp_open_reads_its_optional_parameters():
+    body = bytes([4, 0xfd, 0xe9, 0, 180, 10, 0, 0, 1, 4, 2, 2, 1, 4])
+    raw = b"\xff" * 16 + struct.pack("!HB", 19 + len(body), 1) + body
+    pkt = BGPHeader(raw)
+    assert pkt[BGPOpen].my_as == 65001
+    assert named(pkt[BGPOpen].opt_params[0], "param_value") == b"\x01\x04"
+
+
+def test_a_bgp_update_names_attributes_apart_from_prefixes():
+    body = (
+        struct.pack("!H", 0)
+        + struct.pack("!H", 11)
+        + bytes([0x40, 1, 1, 0])
+        + bytes([0x40, 3, 4, 10, 0, 0, 1])
+        + bytes([24, 192, 168, 1])
+    )
+    raw = b"\xff" * 16 + struct.pack("!HB", 19 + len(body), 2) + body
+    items = BGPHeader(raw)[BGPUpdate].body
+    assert [n for n, _ in items] == ["ORIGIN", "NEXT_HOP", "nlri"]
+    assert dict(items)["nlri"] == "192.168.1.0/24"
 
 
 def test_the_raw_region_is_still_reachable():

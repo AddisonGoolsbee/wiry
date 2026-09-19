@@ -1,0 +1,96 @@
+name = "OSPF_Hello"
+id = "OspfHello"
+num = 93
+module = "ospf_hello"
+citation = """
+RFC 2328 §A.3.2, Hello packet: a 32-bit network mask, a 16-bit HelloInterval in
+seconds, the one-octet Options field of §A.2, a one-octet router priority, a
+32-bit RouterDeadInterval, the designated router and the backup designated
+router, and then the router id of every neighbour heard from — a four-octet
+list running to the end of the packet the header's `len` declares, which is a
+repeating group (`crates/wiry-core/src/repeat.rs`).
+
+RFC 5613 §2.2 appends a Link-Local Signalling block after the packet `len` when
+the Options L bit is set. That block is outside `len`, so it arrives as trailing
+bytes rather than as a layer; see DEVIATIONS P3.
+"""
+min_len = 20
+header_len = "rest"
+next = "end"
+parsed_field = "neighbors"
+
+[[fields]]
+name = "mask"
+off = 0
+kind = "ipv4"
+
+[[fields]]
+name = "hellointerval"
+off = 32
+len = 16
+default = 10
+
+[[fields]]
+name = "options"
+off = 48
+len = 8
+kind = "flags"
+flags = ["MT", "E", "MC", "NP", "L", "DC", "O", "DN"]
+
+[[fields]]
+name = "prio"
+off = 56
+len = 8
+default = 1
+
+[[fields]]
+name = "deadinterval"
+off = 64
+len = 32
+default = 40
+
+[[fields]]
+name = "router"
+off = 96
+kind = "ipv4"
+
+[[fields]]
+name = "backup"
+off = 128
+kind = "ipv4"
+
+[[fields]]
+name = "neighbors"
+off = 160
+kind = "var_bytes"
+
+[group]
+name = "neighbors"
+start = 20
+extent = "rest"
+elem_len = 4
+
+[[group.fields]]
+name = "neighbor"
+off = 0
+kind = "ipv4"
+
+[vector]
+source = "RFC 2328 §A.3.2 hello, hand-built: mask 255.255.255.0, interval 10 s, dead interval 40 s, one neighbour 10.0.0.2."
+bytes = [
+  0xff, 0xff, 0xff, 0x00,
+  0x00, 0x0a, 0x02, 0x01,
+  0x00, 0x00, 0x00, 0x28,
+  0x0a, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x00,
+  0x0a, 0x00, 0x00, 0x02,
+]
+[vector.fields]
+hellointerval = 10
+prio = 1
+deadinterval = 40
+
+[provenance]
+source = "scapy/contrib/ospf.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — OSPF_Hello's field table and its neighbors FieldListField transcribed as a repeating group; checked against RFC 2328 §A.3.2"]

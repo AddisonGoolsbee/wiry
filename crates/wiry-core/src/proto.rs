@@ -102,6 +102,15 @@ impl ProtoId {
     pub const Smtp: ProtoId = ProtoId(90);
     pub const Imap: ProtoId = ProtoId(91);
     pub const Telnet: ProtoId = ProtoId(92);
+    pub const OspfHello: ProtoId = ProtoId(93);
+    pub const OspfDbDesc: ProtoId = ProtoId(94);
+    pub const OspfLsReq: ProtoId = ProtoId(95);
+    pub const OspfLsUpd: ProtoId = ProtoId(96);
+    pub const OspfLsAck: ProtoId = ProtoId(97);
+    pub const BgpOpen: ProtoId = ProtoId(98);
+    pub const BgpUpdate: ProtoId = ProtoId(99);
+    pub const BgpNotification: ProtoId = ProtoId(100);
+    pub const BgpRouteRefresh: ProtoId = ProtoId(101);
     // protogen:ids end
 
     pub fn name(self) -> &'static str {
@@ -255,6 +264,15 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::Smtp,
     ProtoId::Imap,
     ProtoId::Telnet,
+    ProtoId::OspfHello,
+    ProtoId::OspfDbDesc,
+    ProtoId::OspfLsReq,
+    ProtoId::OspfLsUpd,
+    ProtoId::OspfLsAck,
+    ProtoId::BgpOpen,
+    ProtoId::BgpUpdate,
+    ProtoId::BgpNotification,
+    ProtoId::BgpRouteRefresh,
     // protogen:builtins end
 ];
 
@@ -370,6 +388,15 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::Smtp.0 as usize] = &smtp::DESC;
     t[ProtoId::Imap.0 as usize] = &imap::DESC;
     t[ProtoId::Telnet.0 as usize] = &telnet::DESC;
+    t[ProtoId::OspfHello.0 as usize] = &ospf_hello::DESC;
+    t[ProtoId::OspfDbDesc.0 as usize] = &ospf_dbdesc::DESC;
+    t[ProtoId::OspfLsReq.0 as usize] = &ospf_lsreq::DESC;
+    t[ProtoId::OspfLsUpd.0 as usize] = &ospf_lsupd::DESC;
+    t[ProtoId::OspfLsAck.0 as usize] = &ospf_lsack::DESC;
+    t[ProtoId::BgpOpen.0 as usize] = &bgp_open::DESC;
+    t[ProtoId::BgpUpdate.0 as usize] = &bgp_update::DESC;
+    t[ProtoId::BgpNotification.0 as usize] = &bgp_notification::DESC;
+    t[ProtoId::BgpRouteRefresh.0 as usize] = &bgp_route_refresh::DESC;
     // protogen:desc end
     t
 };
@@ -488,9 +515,14 @@ pub fn group_of(id: ProtoId) -> Option<&'static crate::repeat::GroupDesc> {
     match id {
         // protogen:groups begin
         ProtoId::Igmp => Some(&crate::layers::igmp::GROUP),
-        ProtoId::Ospf => Some(&crate::layers::ospf::GROUP),
         ProtoId::Rip => Some(&crate::layers::rip::GROUP),
         ProtoId::NetflowV5 => Some(&crate::layers::netflow5::GROUP),
+        ProtoId::OspfHello => Some(&crate::layers::ospf_hello::GROUP),
+        ProtoId::OspfDbDesc => Some(&crate::layers::ospf_dbdesc::GROUP),
+        ProtoId::OspfLsReq => Some(&crate::layers::ospf_lsreq::GROUP),
+        ProtoId::OspfLsUpd => Some(&crate::layers::ospf_lsupd::GROUP),
+        ProtoId::OspfLsAck => Some(&crate::layers::ospf_lsack::GROUP),
+        ProtoId::BgpOpen => Some(&crate::layers::bgp_open::GROUP),
         // protogen:groups end
         _ => None,
     }
@@ -531,7 +563,6 @@ pub fn parsed_field_name(id: ProtoId) -> &'static str {
         ProtoId::Lldp => "options",
         ProtoId::Cdp => "msg",
         ProtoId::Igmp => "records",
-        ProtoId::Ospf => "lsaheaders",
         ProtoId::Rip => "entries",
         ProtoId::Snmp => "vars",
         ProtoId::Syslog => "headers",
@@ -543,6 +574,13 @@ pub fn parsed_field_name(id: ProtoId) -> &'static str {
         ProtoId::Smtp => "lines",
         ProtoId::Imap => "lines",
         ProtoId::Telnet => "lines",
+        ProtoId::OspfHello => "neighbors",
+        ProtoId::OspfDbDesc => "lsaheaders",
+        ProtoId::OspfLsReq => "requests",
+        ProtoId::OspfLsUpd => "lsalist",
+        ProtoId::OspfLsAck => "lsaheaders",
+        ProtoId::BgpOpen => "opt_params",
+        ProtoId::BgpUpdate => "body",
         // protogen:parsed end
         _ => "options",
     }

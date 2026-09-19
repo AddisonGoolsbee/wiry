@@ -1,0 +1,114 @@
+name = "OSPF_LSUpd"
+id = "OspfLsUpd"
+num = 96
+module = "ospf_lsupd"
+citation = """
+RFC 2328 §A.3.5, Link State Update packet: a 32-bit count of the LSAs that
+follow, and then that many LSAs. §A.4.1 gives every LSA a common 20-octet
+header whose last field is the LSA's own total length, so the count and that
+length together make the body a count-driven repeating group of computed width
+(`crates/wiry-core/src/repeat.rs`).
+
+The LSA header is read; the body past it is kept as octets under `lsa`, not
+decoded. §A.4.2 onwards give each LS type a different layout, which the flat
+record table cannot express — see DEVIATIONS E1. The 20-octet header is also
+the floor `elem_min` sets, so an LSA whose `len` is smaller than its own header
+neither stalls the walk nor makes the element overlap the one before it.
+"""
+min_len = 4
+header_len = "rest"
+next = "end"
+parsed_field = "lsalist"
+
+[[fields]]
+name = "lsacount"
+off = 0
+len = 32
+
+[[fields]]
+name = "lsalist"
+off = 32
+kind = "var_bytes"
+
+[group]
+name = "OSPF_LSA"
+start = 4
+extent = "count"
+count_off = 0
+count_len = 32
+elem_base = 0
+elem_min = 20
+
+[[group.terms]]
+off = 144
+len = 16
+scale = 1
+
+[[group.fields]]
+name = "age"
+off = 0
+len = 16
+default = 1
+
+[[group.fields]]
+name = "options"
+off = 16
+len = 8
+kind = "flags"
+flags = ["MT", "E", "MC", "NP", "L", "DC", "O", "DN"]
+
+[[group.fields]]
+name = "type"
+off = 24
+len = 8
+default = 1
+
+[[group.fields]]
+name = "id"
+off = 32
+kind = "ipv4"
+
+[[group.fields]]
+name = "adrouter"
+off = 64
+kind = "ipv4"
+
+[[group.fields]]
+name = "seq"
+off = 96
+len = 32
+default = 0x80000001
+
+[[group.fields]]
+name = "chksum"
+off = 128
+len = 16
+
+[[group.fields]]
+name = "len"
+off = 144
+len = 16
+default = 20
+
+[[group.fields]]
+name = "lsa"
+off = 160
+kind = "var_bytes"
+
+[vector]
+source = "RFC 2328 §A.3.5 update, hand-built: one 20-octet router LSA for 10.0.0.1."
+bytes = [
+  0x00, 0x00, 0x00, 0x01,
+  0x00, 0x01, 0x02, 0x01,
+  0x0a, 0x00, 0x00, 0x01,
+  0x0a, 0x00, 0x00, 0x01,
+  0x80, 0x00, 0x00, 0x01,
+  0x00, 0x00, 0x00, 0x14,
+]
+[vector.fields]
+lsacount = 1
+
+[provenance]
+source = "scapy/contrib/ospf.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — OSPF_LSUpd's lsacount and its lsalist PacketListField transcribed as a count-driven repeating group whose element width is the LSA's own length field; checked against RFC 2328 §A.3.5 and §A.4.1"]
