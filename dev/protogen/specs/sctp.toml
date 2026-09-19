@@ -8,6 +8,13 @@ format that follows it: a one-octet type, a one-octet flags field, a 16-bit
 length counting the type, flags and length octets themselves, and a value
 padded out to a four-octet boundary. Chunk types from the IANA "Stream Control
 Transmission Protocol (SCTP) Parameters" registry.
+
+§3.2.1 gives a chunk *parameter* the same shape at sixteen bits, and §3.3.10
+gives an error cause the same shape again with a number space of its own, so a
+chunk that carries either reads as a nested item list: INIT and INIT_ACK as
+their twenty octets of §3.3.2 followed by their parameters, HEARTBEAT and its
+acknowledgement as parameters, ABORT and ERROR as causes. Every other chunk
+keeps its octets, because nothing says they are TLVs.
 """
 min_len = 12
 header_len = "rest"
@@ -57,3 +64,8 @@ sport = 1234
 dport = 5678
 tag = 0x11223344
 chksum = 0
+
+[provenance]
+source = "scapy/layers/sctp.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — sctpchunktypes, sctpchunkparamtypes and the SCTPChunkInit field names transcribed; the chunks and their parameters are one nested item list rather than a chain of sub-packets. Checked against RFC 9260 §3.2 and §3.3"]
