@@ -175,7 +175,7 @@ list; DNS record sections need a different shape again and live in
 | Decision | Rationale |
 |---|---|
 | 91 layers: the 17 core ones (Ether, Loopback, CookedLinux and CookedLinuxV2, Dot1Q, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS, BOOTP, DHCP, Raw, Padding), 14 encapsulations, and 60 generated from `dev/protogen/specs/` at the depth `DEVIATIONS.md`'s P rows state one row at a time | scapy registers 1,746 layers and 4,160 `Packet` subclasses. Full parity is multi-person-year. dpkt does 1.35M downloads/month with ~80 protocols. A header-depth layer that says so is worth more than an implied one. |
-| **Live capture behind the `live` feature, off by default** | Needs raw sockets, root and per-OS backends. `sniff(offline=...)` drives the whole state machine without it, so the live backend is an I/O shim over proven logic rather than a second implementation. |
+| **Live capture on by default, with libpcap loaded at run time** | It was behind an off-by-default feature because linking libpcap is a build-time dependency a wheel cannot assume. scapy `dlopen`s it instead, and `wiry-pcap` is that in Rust, so the build needs nothing and a host without libpcap is told which package to install. `sniff(offline=...)` still drives the whole state machine with no library at all, which is what keeps the live backend an I/O shim over proven logic rather than a second implementation. |
 | Unknown protocols dissect to `Raw` | Bytes always round-trip, at any depth. |
 
 ## 5. Engineering conventions
@@ -283,11 +283,14 @@ Beyond parity:
   whose absence killed pypacker; do not let a Python callback into the dissection
   loop while extending it.
 - **Live capture.** `sniff(offline=...)` runs the real state machine with no
-  privileges and no feature flag. `sniff(iface=...)`, `AsyncSniffer`, `send`,
+  privileges and no library. `sniff(iface=...)`, `AsyncSniffer`, `send`,
   `sendp`, `sr`, `sr1`, `srp` and `srp1` put the wire in front of that same
-  machine behind the `live` feature, raising `CaptureUnavailable` without it.
-  Reply matching is pure logic in `answers.rs`, unit-testable offline. Privileged
-  round-trip checks live in `dev/live/`, never in `tests/`.
+  machine, on a plain install; `CaptureUnavailable` now means libpcap is not on
+  this host, and names the package. Reply matching is pure logic in
+  `answers.rs`, unit-testable offline. Privileged round-trip checks live in
+  `dev/live/`, never in `tests/`, and they must actually be run: the driver was
+  correct about everything except what `pcap_next_ex` does, and only a wire
+  showed it.
 - **Fragmentation.** `fragment`/`defragment`/`defrag` (RFC 791 §3.2) and their
   IPv6 pair (RFC 8200 §4.5) live in `frag.rs`. Reassembly over a capture is a
   bulk path: one crossing with the GIL released, and the suite asserts it agrees
@@ -305,8 +308,11 @@ Beyond parity:
   `arping`, `srloop`, `srploop`, `getmacbyip`, `get_if_hwaddr` (E18) on top of
   `sr`/`srp`. Their arithmetic is plain functions over plain data so it is
   testable with no interface and no privileges; only the exchange needs `live`.
-- **Fuzzing.** Nine libFuzzer targets plus seeded property tests on stable. All
-  four crates forbid unsafe.
+- **Fuzzing.** Nine libFuzzer targets plus seeded property tests on stable.
+  Four of the five crates forbid unsafe. The fifth is `wiry-pcap`, which is the
+  FFI and nothing else: it loads libpcap, calls through function pointers and
+  owns what comes back. It parses no packets, and nothing else in the workspace
+  may grow an unsafe block instead of asking it for one.
 - **Two parity harnesses.** `dev/parity_check.py` covers dissection over real
   captures; `dev/build_matrix.py` enumerates construction. The second exists
   because the first alone let a dropped payload survive a green suite.
@@ -320,9 +326,13 @@ Beyond parity:
   octets; DHCP counts only the payload. The wrong rule mis-decodes silently.
 - A timing assertion placed after the call it measures cannot catch a hang. Run
   the suspect work on a worker thread with a deadline.
-- A read timeout from libpcap is the driver's chance to poll its deadline and
-  stop flag, not an error. Never set it to 0: the pcap README warns it can hang
-  `next_packet` on macOS.
+- **libpcap's read timeout is not a bound.** `pcap_next_ex` is documented to
+  return 0 when it expires; on Linux the memory-mapped capture waits for a frame
+  however it is set. Every stop condition the live driver has is polled between
+  reads, so a silent interface used to mean no deadline, no `stop()` and no
+  Ctrl-C. The reads are non-blocking now and the driver does the waiting, with a
+  50µs-to-2ms backoff. Still never set the timeout to 0 — the pcap README warns
+  that can hang `next_packet` on macOS — but do not rely on it for anything.
 - A Rust thread that calls into Python after finalisation segfaults, bypassing
   the protection `panic = "abort"` is kept off to provide. Anything owning such a
   thread stops and joins it on drop, with the GIL released.

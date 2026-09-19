@@ -420,24 +420,42 @@ def _pause(inter: Any) -> float:
     return v
 
 
+def _wanted_src(name: str, fields: dict, mac: Optional[str],
+                ip: Optional[str]) -> tuple:
+    """Which source addresses this layer wants filled from the interface."""
+    if name == "Ether":
+        return (("src", mac),)
+    if name == "ARP":
+        return (("hwsrc", mac), ("psrc", ip))
+    if name == "IP":
+        # scapy computes IP.src from the route at build time. wiry's field
+        # table has a static default, 127.0.0.1, and a datagram carrying it
+        # makes the kernel ARP as 127.0.0.1, which nobody answers: sr1, srloop
+        # and traceroute all came back empty against a real peer. Only an
+        # explicit, non-loopback destination earns the fill, since the default
+        # destination is that same 127.0.0.1 and wants the default source.
+        dst = str(fields.get("dst") or "")
+        return (("src", ip),) if dst and not dst.startswith("127.") else ()
+    return ()
+
+
 def _with_src(pkt: Any, mac: Optional[str], ip: Optional[str] = None) -> Any:
     """Fill unset source addresses from the outgoing interface (E9).
 
     At send time only, and on a copy: ``bytes(Ether())`` stays reproducible and
     the build path stays free of the host it happens to run on. ``Ether.src``
-    and ``ARP.hwsrc`` take the hardware address, ``ARP.psrc`` the interface's
-    IPv4 address. Either may be ``None`` where the host will not say, and the
-    field is then left alone, which is an ordinary outcome.
+    and ``ARP.hwsrc`` take the hardware address, ``ARP.psrc`` and ``IP.src``
+    the interface's IPv4 address. Either may be ``None`` where the host will
+    not say, and the field is then left alone, which is an ordinary outcome.
 
     A dissected packet has no field spec to fill, so it goes out as captured.
     """
     if not isinstance(pkt, Packet) or not pkt._stack:
         return pkt
-    wanted = {"Ether": (("src", mac),), "ARP": (("hwsrc", mac), ("psrc", ip))}
     todo = [
         (i, field, value)
         for i, (name, fields) in enumerate(pkt._stack)
-        for field, value in wanted.get(name, ())
+        for field, value in _wanted_src(name, fields, mac, ip)
         if value and not fields.get(field)
     ]
     if not todo:
@@ -488,6 +506,9 @@ def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
     _b.capture_check()
     _refuse_unsupported(realtime, socket)
     gap = _pause(inter)
+    _, ip = _local_addrs(_iface_name(iface))
+    if isinstance(x, Packet):
+        x = _with_src(x, None, ip)
     tmpl = x.template() if isinstance(x, Packet) else None
     if tmpl is not None:
         _refuse_ipv6([x], [tmpl.frame(0)], "send")
@@ -495,7 +516,7 @@ def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
         _report(sent, verbose)
         return [x] if return_packets else None
     pkts = _as_list(x)
-    frames = [_octets(p) for p in pkts]
+    frames = [_octets(_with_src(p, None, ip)) for p in pkts]
     _refuse_ipv6(pkts, frames, "send")
     sent = _b.send_datagrams(frames, _passes(count), gap, bool(loop))
     _report(sent, verbose)
@@ -557,7 +578,8 @@ def _exchange(x: Any, l2: bool, iface: Any, filter: Optional[str],
         mac, ip = _local_addrs(name)
         frames = [_octets(_with_src(p, mac, ip)) for p in pkts]
     else:
-        frames = [_octets(p) for p in pkts]
+        _, ip = _local_addrs(name)
+        frames = [_octets(_with_src(p, None, ip)) for p in pkts]
         _refuse_ipv6(pkts, frames, what)
     recv, pairs, unans = _b.sr_live(
         frames, name, l2, filter,
