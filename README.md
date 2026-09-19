@@ -14,9 +14,10 @@ Those two lines read a 368 MB capture off disk and pull three fields out of all
 791,615 packets in 391 ms, without building a Python object for a single one of
 them.
 
-**wiry implements 91 layers, sixty of them to header depth only. scapy registers
-1,746.** Anything outside them dissects to `Raw` and round-trips unchanged, and
-you get bytes rather than fields.
+**wiry implements 100 layers. scapy registers 1,746.** Anything outside them
+dissects to `Raw` and round-trips unchanged, and you get bytes rather than
+fields. Seventeen of the hundred are complete; the rest stop somewhere, and
+[DEVIATIONS.md](DEVIATIONS.md)'s P and T rows say where, one row at a time.
 
 Seventeen of them are the core, and those are complete: options parsed in both
 directions, lengths and checksums recomputed on write. Ethernet, 802.1Q, ARP,
@@ -30,13 +31,19 @@ layer of their own. A tunnelled packet dissects through to its inner transport,
 tunnels nest, and `columns()` reaches inside them.
 [DEVIATIONS.md](DEVIATIONS.md) E6 states where each of those stops.
 
-The remaining sixty dissect their own header and leave the body as `Raw`. None
-of them recomputes a length or a checksum, repeating record arrays stay in the
-payload, encrypted bodies stay encrypted, and port dispatch is a heuristic with
-a guard over the payload. That is the part to read before counting on them, and
-`DEVIATIONS.md`'s P and T rows say where each one stops: 802.2 LLC and SNAP,
+The remaining sixty-nine dissect their header and, where the body is a
+repeating record array, that too: RIP entries, NetFlow v5 records, IGMPv3 group
+records, all five OSPF bodies, BGP OPEN parameters and UPDATE path attributes,
+MLDv2 address records, sFlow samples, VRRP addresses, RTP contributing sources,
+SCTP chunk parameters, and NetFlow v9 and IPFIX sets. What stays `Raw` is a
+record body whose layout varies by a type field, a payload that needs state from
+an earlier datagram, and anything encrypted. None of them recomputes a length or
+a checksum, and port dispatch is a heuristic with a guard over the payload. That
+is the part to read before counting on them, and `DEVIATIONS.md`'s P and T rows
+say where each one stops: 802.2 LLC and SNAP,
 STP, LLDP, CDP, radiotap and 802.11 with its six management bodies, SCTP, IGMP,
-the Neighbor Discovery and MLD messages, ESP, AH, OSPF, RIP, BGP, VRRP, HSRP,
+the Neighbor Discovery and MLD messages, ESP, AH, OSPF and its five bodies, RIP,
+BGP and its four, VRRP, HSRP,
 BFD, NTP, DHCPv6, SNMP, TFTP, syslog, NBNS, NBT, RADIUS, RTP, RTCP, NetFlow v5
 and v9, IPFIX, sFlow, QUIC, WireGuard, TLS, HTTP, SSH, MQTT, Modbus/TCP, SMB2,
 LDAP, SIP, FTP, SMTP, IMAP and Telnet.
@@ -112,7 +119,7 @@ comparison is that scapy and dpkt both reproduced their previously published
 rates to within 3%, and load hurts them more than it hurts us, not less.
 
 An earlier version of this table read higher per packet on a different corpus
-and a smaller protocol set. Bounds checks, Ethernet-trailer handling and sixty
+and a smaller protocol set. Bounds checks, Ethernet-trailer handling and sixty-nine
 more layers in the dispatch tables all cost something, and a table measured on a
 different capture cannot price them.
 
@@ -333,8 +340,8 @@ code inside a damaged marker region. All are fixed, with a regression test each.
 
 ## When not to use wiry
 
-- **You need a protocol outside the 91, or deeper inside one of the sixty than
-  its header.** scapy has 1,746 layers and an interactive shell. It is
+- **You need a protocol outside the 100, or deeper inside one of the
+  sixty-nine than `DEVIATIONS.md` says it goes.** scapy has 1,746 layers and an interactive shell. It is
   a more capable tool and will stay one.
 - **Your work is live, on a default install.** `sniff`, `send` and the `sr`
   family need a non-default build, on Linux or macOS. Offline needs nothing.

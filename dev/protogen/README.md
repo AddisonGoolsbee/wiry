@@ -94,6 +94,7 @@ len_covers = 24           # optional; octets of the extent spent before the
                           # first record, default 0
 elem_len = 20             # a fixed record width in octets, or:
 elem_base = 8             # a base width plus one term per length field
+elem_min = 20             # optional; a floor the record's own fields require
 align = 4                 # optional; records padded up to this, default 1
 when = "is_v3_report"     # optional fn(&[u8]) -> bool over the header
 
@@ -102,9 +103,9 @@ off = 16
 len = 16
 scale = 4
 
-[[group.fields]]          # the record's own flat field table
-name = "addr"
-off = 32
+[[group.fields]]          # the record's own flat field table; the last field
+name = "addr"             # may be a var_bytes, which reads to the end of the
+off = 32                  # record and is written after it has been grown
 kind = "ipv4"
 
 [group.nested]            # one level only; the same keys, minus `nested`
@@ -163,7 +164,9 @@ raise:
   table with a `var_bytes` of that name at the group's `start`, so the region is
   in the field table and `raw_options()` still reaches it
 - a group with both, or neither, of `elem_len` and `elem_base`; a record field
-  that ends past a fixed `elem_len`; a group nested inside a nested one
+  that ends past a fixed `elem_len`; a group nested inside a nested one; a
+  variable-length record field that is not last, or that sits in a group of
+  fixed `elem_len`, where it would have nothing to cover
 - a `[provenance]` table missing `source`, `version` or `changed`
 
 ## The escape hatch

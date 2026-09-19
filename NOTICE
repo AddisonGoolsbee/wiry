@@ -74,6 +74,22 @@ per-file blocks are authoritative.
 | `crates/wiry-core/src/layers/netflow5.rs` | `scapy/layers/netflow.py` | scapy 2.7.0 | 2026-09-18 |
 | `crates/wiry-core/src/layers/igmp.rs` | `scapy/contrib/igmpv3.py` | scapy 2.7.0 | 2026-09-18 |
 | `crates/wiry-core/src/layers/ospf.rs` | `scapy/contrib/ospf.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/ospf_hello.rs` | `scapy/contrib/ospf.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/ospf_dbdesc.rs` | `scapy/contrib/ospf.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/ospf_lsreq.rs` | `scapy/contrib/ospf.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/ospf_lsupd.rs` | `scapy/contrib/ospf.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/ospf_lsack.rs` | `scapy/contrib/ospf.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/bgp.rs` | `scapy/contrib/bgp.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/bgp_open.rs` | `scapy/contrib/bgp.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/bgp_update.rs` | `scapy/contrib/bgp.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/bgp_notification.rs` | `scapy/contrib/bgp.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/bgp_route_refresh.rs` | `scapy/contrib/bgp.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/mld_query.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/mld_report2.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/vrrp.rs` | `scapy/layers/vrrp.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/netflow9.rs` | `scapy/layers/netflow.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/rtp.rs` | `scapy/layers/rtp.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/sctp.rs` | `scapy/layers/sctp.py` | scapy 2.7.0 | 2026-09-18 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift
