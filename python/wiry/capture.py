@@ -111,6 +111,39 @@ def _live_args(
     )
 
 
+def _add_session(args: dict, session: Any, store: Any) -> None:
+    """Put a per-packet session between the capture filter and the callbacks,
+    where scapy runs one.
+
+    It rides ``wrap``, so ``lfilter``, ``prn`` and ``stop_filter`` all see what
+    the session produced and a packet it drops is never counted. The dissection
+    loop is untouched: the session sees a packet that already exists.
+    """
+    if session is None:
+        return
+    base, user = args["wrap"], args["lfilter"]
+
+    def wrap(rust: Any) -> Any:
+        pkt = base(rust)
+        out = session.process(pkt)
+        if store and out is not None and out is not pkt:
+            raise NotImplementedError(
+                f"{type(session).__name__} replaced a packet, and a replaced "
+                "packet cannot go into the PacketList sniff() returns: that is "
+                "a view over the capture buffer and a synthesised packet was "
+                "never in one. Sniff with store=0 and read them through prn=, "
+                "or give the session a bulk_process() as TCPSession has"
+            )
+        return out
+
+    def keep(pkt: Any) -> bool:
+        if pkt is None:
+            return False
+        return user is None or bool(user(pkt))
+
+    args["wrap"], args["lfilter"] = wrap, keep
+
+
 def sniff(
     *,
     iface: Any = None,
@@ -127,6 +160,7 @@ def sniff(
     snaplen: int = 262144,
     where: Any = None,
     session: Any = None,
+    opened_socket: Any = None,
 ) -> PacketList:
     """Capture packets, or replay a capture file through the same machine.
 
@@ -139,30 +173,48 @@ def sniff(
     ``iface``, ``promisc`` and ``snaplen`` are ignored when ``offline`` is given,
     as scapy ignores them. ``promisc=None`` reads ``conf.sniff_promisc``.
 
-    ``session=`` takes a session class or instance — ``TCPSession``,
-    ``IPSession``, ``DefaultSession`` — and runs it between the capture filter
-    and the callbacks, where scapy runs one. Reassembly over a capture is a
-    bulk path, so it happens in Rust in one crossing rather than a Python loop;
-    that needs the whole capture in hand, so ``session=`` is offline only.
-    """
-    if offline is None:
-        from .stream import needs_capture
+    ``session=`` takes a session class or instance and runs it between the
+    capture filter and the callbacks, where scapy runs one. A session with
+    scapy's per-packet ``process(pkt)`` runs on an interface as well as over a
+    file: it sees a packet the dissector has already produced, so no Python
+    enters the dissection loop. A session that reassembles — ``TCPSession``,
+    ``IPSession`` — is a whole-capture pass in Rust instead, one crossing
+    rather than a Python loop, and that needs every packet in hand, so those
+    are offline only.
 
-        if session is not None and needs_capture(session):
+    ``opened_socket=`` is refused: one state machine drives every source here,
+    it lives in Rust, and reading a Python socket through it would mean a
+    second one that could disagree. ``Automaton(recvsock=...)`` is the surface
+    that listens on a socket object.
+    """
+    from .stream import as_session, bulk_hook
+
+    if opened_socket is not None:
+        raise NotImplementedError(
+            "sniff(opened_socket=) is not supported: the sniff state machine "
+            "is one implementation in Rust and a socket handed in from Python "
+            "cannot feed it. Read the socket directly, or drive it with an "
+            "Automaton, whose recvsock= takes exactly such an object"
+        )
+
+    session = as_session(session)
+    bulk = bulk_hook(session)
+    if offline is None:
+        if bulk is not None:
             raise NotImplementedError(
                 "session= needs the whole capture at once and so works with "
                 "offline= only; sniff to a PacketList, then pass it back in"
             )
         _b.capture_check()
-        return PacketList(_b.sniff_live(**_live_args(
+        args = _live_args(
             iface=iface, count=count, store=store, prn=prn, filter=filter,
             lfilter=lfilter, timeout=timeout, stop_filter=stop_filter,
             quiet=quiet, promisc=promisc, snaplen=snaplen, where=where,
-        )))
+        )
+        _add_session(args, session, store)
+        return PacketList(_b.sniff_live(**args))
     src = _offline_source(offline)
-    if session is not None:
-        from .stream import apply_session
-
+    if bulk is not None:
         # The capture filter runs first, as libpcap's would, so a session never
         # reassembles a stream the caller filtered out.
         if filter is not None or where is not None:
@@ -172,21 +224,22 @@ def sniff(
                 lfilter=None, stop_filter=None, wrap=None,
             )
             filter, where = None, None
-        src = apply_session(session, PacketList(src))._list
-    return PacketList(
-        src.sniff_offline(
-            count=int(count),
-            store=bool(store),
-            bpf=filter,
-            layer=None,
-            conds=_normalize_where(where),
-            timeout=None if timeout is None else float(timeout),
-            prn=_printing(prn, quiet),
-            lfilter=lfilter,
-            stop_filter=stop_filter,
-            wrap=_wrap,
-        )
+        src = bulk(PacketList(src))._list
+    offline_args = dict(
+        count=int(count),
+        store=bool(store),
+        bpf=filter,
+        layer=None,
+        conds=_normalize_where(where),
+        timeout=None if timeout is None else float(timeout),
+        prn=_printing(prn, quiet),
+        lfilter=lfilter,
+        stop_filter=stop_filter,
+        wrap=_wrap,
     )
+    if bulk is None:
+        _add_session(offline_args, session, store)
+    return PacketList(src.sniff_offline(**offline_args))
 
 
 _RUNNING: "weakref.WeakSet[AsyncSniffer]" = weakref.WeakSet()
@@ -283,8 +336,19 @@ class AsyncSniffer:
             self._results = None
             self._exc = None
             if self.args.get("offline") is None:
+                from .stream import as_session, bulk_hook
+
                 _b.capture_check()
-                live = _b.LiveSniffer(**_live_args(**self.args))
+                kwargs = dict(self.args)
+                session = as_session(kwargs.pop("session", None))
+                if bulk_hook(session) is not None:
+                    raise NotImplementedError(
+                        "session= needs the whole capture at once and so works "
+                        "with offline= only"
+                    )
+                live_args = _live_args(**kwargs)
+                _add_session(live_args, session, kwargs.get("store", 1))
+                live = _b.LiveSniffer(**live_args)
                 live.start()
                 self._live = live
                 self._started = True

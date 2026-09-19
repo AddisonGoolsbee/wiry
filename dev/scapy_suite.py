@@ -25,11 +25,8 @@ from pathlib import Path
 import wiry
 
 # Names we deliberately do not provide: a scope boundary, not a defect.
-# `L3socket`/`L2socket` are the classes, not `conf.l3socket`: wiry has no socket
-# object to hand in or subclass, and the knob that would hold one says so.
 OUT_OF_SCOPE = {
-    "Automaton", "BER_Exception", "L2socket", "L3socket",
-    "answering_machine", "load_contrib", "load_layer",
+    "BER_Exception", "load_contrib", "load_layer",
     "pdfdump", "psdump", "tcpdump", "voip_play", "wireshark",
 }
 

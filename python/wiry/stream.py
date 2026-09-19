@@ -234,31 +234,65 @@ def streams(pl: Any) -> Streams:
 
 
 class DefaultSession:
-    """scapy's pass-through session: every packet as it was captured."""
+    """scapy's pass-through session: every packet as it was captured.
 
-    #: Reassembly needs every packet at once, so a session that does any is
-    #: offline only. `sniff(iface=...)` asks this, not the class's name.
+    `process` is scapy's contract — one packet in, one packet or `None` out —
+    and wiry drives it per packet, on an interface as well as over a file. The
+    crossing is this path's contract exactly as `sniff`'s `prn` is: the session
+    sees a packet the dissector has already produced, and no Python runs inside
+    the dissection loop.
+
+    A `supersession` runs after this one, as scapy's does.
+    """
+
+    #: Whether the session has to see every packet before any of them. True
+    #: means it reassembles in bulk and so is offline only; `sniff(iface=...)`
+    #: asks this, not the class's name.
     needs_capture = False
 
-    def process(self, pl: Any) -> Any:
-        return pl
+    def __init__(self, supersession: Any = None):
+        if isinstance(supersession, type):
+            supersession = supersession()
+        self.supersession = supersession
+
+    def process(self, pkt: Any) -> Any:
+        if self.supersession is not None:
+            return self.supersession.process(pkt)
+        return pkt
 
 
-class IPSession:
+class _BulkSession(DefaultSession):
+    """A session whose work is a whole-capture pass in Rust.
+
+    scapy's incremental `process(pkt)` is refused by name rather than
+    approximated: what these do is reassembly, the engine that does it is
+    incremental in Rust but reaches Python only in bulk, and a per-packet
+    Python stand-in would be a second implementation that could disagree with
+    the first. DEVIATIONS E25 states the consequence.
+    """
+
+    needs_capture = True
+
+    def process(self, pkt: Any) -> Any:
+        raise NotImplementedError(
+            f"{type(self).__name__} reassembles over a whole capture and has "
+            "no per-packet form: use sniff(offline=...), or PacketList methods"
+        )
+
+
+class IPSession(_BulkSession):
     """Reassembles fragmented IP datagrams, leaving everything else in place.
 
     The same engine `defragment()` uses, so the two cannot disagree.
     """
 
-    needs_capture = True
-
-    def process(self, pl: Any) -> Any:
+    def bulk_process(self, pl: Any) -> Any:
         from .frag import defragment
 
         return defragment(pl)
 
 
-class TCPSession:
+class TCPSession(_BulkSession):
     """Reassembles TCP streams, so a packet handed on carries a whole
     application message rather than one segment of one.
 
@@ -275,34 +309,53 @@ class TCPSession:
     alone; ``PacketList.streams()`` is the surface for the octets themselves.
     """
 
-    def __init__(self, app: bool = True):
+    def __init__(self, app: bool = True, supersession: Any = None):
+        super().__init__(supersession)
         self.app = app
         self.needs_capture = app
 
-    def process(self, pl: Any) -> Any:
-        if not self.app:
-            return pl
+    def process(self, pkt: Any) -> Any:
+        if self.app:
+            return super().process(pkt)
+        return DefaultSession.process(self, pkt)
+
+    def bulk_process(self, pl: Any) -> Any:
         new, _ = pl._list.reassembled()
         return PacketList(new)
 
 
-def needs_capture(session: Any) -> bool:
-    """Whether the session has to see every packet before any of them. A
-    session is asked, not identified by its class name: `TCPSession(app=False)`
-    reassembles nothing and so needs nothing, and an object that is not a
-    session at all defaults to needing one so `apply_session` names it."""
-    return bool(getattr(session, "needs_capture", True))
-
-
-def apply_session(session: Any, pl: Any) -> Any:
+def as_session(session: Any) -> Any:
     """`session` may be a class or an instance, as scapy's `sniff` takes it."""
     if session is None:
-        return pl
+        return None
     if isinstance(session, type):
         session = session()
-    process = getattr(session, "process", None)
-    if process is None:
+    if not callable(getattr(session, "process", None)):
         raise TypeError(
             f"{type(session).__name__} is not a session: it has no process()"
         )
-    return process(pl)
+    return session
+
+
+def needs_capture(session: Any) -> bool:
+    """Whether this session's work is a whole-capture pass."""
+    return bool(getattr(session, "needs_capture", True))
+
+
+def bulk_hook(session: Any) -> Any:
+    """The whole-capture entry point, where the session has one."""
+    if session is None or not needs_capture(session):
+        return None
+    hook = getattr(session, "bulk_process", None)
+    if hook is None:
+        raise TypeError(
+            f"{type(session).__name__} says needs_capture but has no "
+            "bulk_process(): a session is one or the other"
+        )
+    return hook
+
+
+def apply_session(session: Any, pl: Any) -> Any:
+    """Run a whole-capture session over a capture."""
+    hook = bulk_hook(as_session(session))
+    return pl if hook is None else hook(pl)
