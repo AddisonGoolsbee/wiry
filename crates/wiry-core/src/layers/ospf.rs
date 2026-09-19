@@ -153,5 +153,83 @@ mod tests {
         }
         assert_eq!(p.to_bytes().len(), n);
     }
+    use crate::options::{Item, ItemValue};
+
+    /// RFC 2328 §A.4.1 LSA header: twenty octets, its own length last.
+    fn lsa_header(id: [u8; 4], lstype: u8) -> Vec<u8> {
+        let mut v = vec![0u8, 1, 0, lstype];
+        v.extend_from_slice(&id);
+        v.extend_from_slice(&[1, 1, 1, 1]);
+        v.extend_from_slice(&0x8000_0001u32.to_be_bytes());
+        v.extend_from_slice(&[0, 0]);
+        v.extend_from_slice(&36u16.to_be_bytes());
+        v
+    }
+
+    /// RFC 2328 §A.3.6 acknowledgment; `padding` is the frame padding an
+    /// Ethernet minimum-size frame adds after the declared length.
+    fn ack(n: usize, padding: usize) -> Vec<u8> {
+        let mut v = vec![2u8, 5, 0, 0];
+        v.resize(24, 0);
+        for i in 0..n {
+            v.extend(lsa_header([192, 168, 0, i as u8], 1));
+        }
+        let len = v.len() as u16;
+        v[2..4].copy_from_slice(&len.to_be_bytes());
+        v.extend(std::iter::repeat(0u8).take(padding));
+        v
+    }
+
+    fn named<'a>(it: &'a Item, name: &str) -> &'a ItemValue {
+        let ItemValue::Items(v) = &it.value else {
+            panic!("not a record")
+        };
+        &v.iter()
+            .find(|f| f.name == name)
+            .expect("named field")
+            .value
+    }
+
+    #[test]
+    fn an_acknowledgement_reads_its_lsa_headers() {
+        let p = Packet::dissect(ack(2, 0), ProtoId::Ospf);
+        let l = p.find_layer(ProtoId::Ospf).unwrap();
+        let items = p.options(l).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "OSPF_LSA_Hdr");
+        assert_eq!(
+            named(&items[1], "id"),
+            &ItemValue::Text("192.168.0.1".into())
+        );
+        assert_eq!(named(&items[0], "seq"), &ItemValue::Uint(0x8000_0001));
+    }
+
+    /// The header length, not the buffer, ends the list: a 64-octet Ethernet
+    /// frame carries padding after a short acknowledgment, and padding is not
+    /// an LSA header.
+    #[test]
+    fn the_declared_length_stops_the_list_before_frame_padding() {
+        let p = Packet::dissect(ack(1, 20), ProtoId::Ospf);
+        let l = p.find_layer(ProtoId::Ospf).unwrap();
+        assert_eq!(p.options(l).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn another_packet_type_carries_no_group() {
+        let p = Packet::dissect(vector(), ProtoId::Ospf);
+        let l = p.find_layer(ProtoId::Ospf).unwrap();
+        assert!(p.options(l).unwrap().is_empty());
+    }
+
+    #[test]
+    fn lsa_headers_encode_back_to_the_bytes_they_came_from() {
+        let p = Packet::dissect(ack(2, 0), ProtoId::Ospf);
+        let l = p.find_layer(ProtoId::Ospf).unwrap();
+        let items = p.options(l).unwrap();
+        assert_eq!(
+            crate::repeat::encode(&GROUP, &items).unwrap(),
+            ack(2, 0)[24..]
+        );
+    }
     // protogen:tests end
 }

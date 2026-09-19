@@ -496,6 +496,25 @@ pub fn group_of(id: ProtoId) -> Option<&'static crate::repeat::GroupDesc> {
     }
 }
 
+/// The header field a group's extent reads, by name, so a caller can tell a
+/// count the user wrote from one the region should supply. `None` where the
+/// elements simply run to the end.
+pub fn group_extent_field(id: ProtoId) -> Option<&'static str> {
+    use crate::repeat::Extent;
+    let (off, len) = match group_of(id)?.extent {
+        Extent::Count { bit_off, bit_len } => (bit_off, bit_len),
+        Extent::Length {
+            bit_off, bit_len, ..
+        } => (bit_off, bit_len),
+        Extent::Rest => return None,
+    };
+    desc(id)
+        .fields
+        .iter()
+        .find(|f| f.bit_off == off && f.bit_len == len)
+        .map(|f| f.name)
+}
+
 /// Whether a layer answers its parsed field with an item list at all, by either
 /// route: an option region or a repeating group.
 #[inline]

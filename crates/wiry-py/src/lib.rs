@@ -1803,7 +1803,30 @@ pub(crate) fn apply_all_fields(
         .partition(|(l, n, _)| !is_conditional(pkt, *l, n));
     apply_fields(pkt, &plain_ints, &plain_strs, &plain_raws)?;
     pkt.refit_headers();
-    apply_fields(pkt, &cond_ints, &cond_strs, &cond_raws)
+    apply_fields(pkt, &cond_ints, &cond_strs, &cond_raws)?;
+    sync_groups(pkt, ints, strs);
+    Ok(())
+}
+
+/// A group's count is only knowable once the fields that decide whether the
+/// group is there at all have been written, so it is settled last — and never
+/// over a value the caller supplied themselves.
+fn sync_groups(
+    pkt: &mut CorePacket,
+    ints: &[(usize, String, u64)],
+    strs: &[(usize, String, String)],
+) {
+    for i in 0..pkt.layers().len() {
+        let id = pkt.layers()[i].proto;
+        let given = |n: &str| {
+            ints.iter().any(|(l, f, _)| *l == i && f == n)
+                || strs.iter().any(|(l, f, _)| *l == i && f == n)
+        };
+        if proto::group_extent_field(id).is_some_and(given) {
+            continue;
+        }
+        pkt.sync_group(i);
+    }
 }
 
 fn is_conditional(pkt: &CorePacket, layer: usize, name: &str) -> bool {

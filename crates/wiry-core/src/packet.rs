@@ -282,6 +282,22 @@ impl Packet {
         }
     }
 
+    /// Rewrite the count or extent field of a layer's repeating group from the
+    /// region that is actually there. Construction writes the fixed header
+    /// before any field the caller named, and a group may be conditional on one
+    /// of those fields, so the region cannot always be counted at build time.
+    pub fn sync_group(&mut self, layer: usize) {
+        let Some(s) = self.spans.get(layer).copied() else {
+            return;
+        };
+        let Some(g) = crate::proto::group_of(s.proto) else {
+            return;
+        };
+        let (a, b) = self.hdr_range(&s);
+        crate::repeat::sync(&mut self.buf[a..b], g);
+        self.mark_dirty(layer);
+    }
+
     fn pin(&mut self, layer: usize, proto: ProtoId, name: &'static str) {
         if !self.is_pinned(layer, name) {
             self.pinned.push((layer as u32, proto, name));

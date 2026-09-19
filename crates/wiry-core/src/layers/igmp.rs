@@ -177,5 +177,124 @@ mod tests {
         }
         assert_eq!(p.to_bytes().len(), n);
     }
+
+    use crate::options::{Item, ItemValue};
+
+    /// RFC 3376 §4.2.4 group record: type, auxiliary words, sources, address.
+    fn group_record(rtype: u8, auxd: u8, maddr: [u8; 4], srcs: &[[u8; 4]]) -> Vec<u8> {
+        let mut v = vec![rtype, auxd];
+        v.extend_from_slice(&(srcs.len() as u16).to_be_bytes());
+        v.extend_from_slice(&maddr);
+        for s in srcs {
+            v.extend_from_slice(s);
+        }
+        v.extend(std::iter::repeat(0u8).take(auxd as usize * 4));
+        v
+    }
+
+    /// RFC 3376 §4.2 membership report.
+    fn report(records: &[Vec<u8>]) -> Vec<u8> {
+        let mut v = vec![0x22u8, 0, 0, 0, 0, 0];
+        v.extend_from_slice(&(records.len() as u16).to_be_bytes());
+        for r in records {
+            v.extend_from_slice(r);
+        }
+        v
+    }
+
+    fn named<'a>(it: &'a Item, name: &str) -> &'a ItemValue {
+        let ItemValue::Items(v) = &it.value else {
+            panic!("not a record")
+        };
+        &v.iter()
+            .find(|f| f.name == name)
+            .expect("named field")
+            .value
+    }
+
+    #[test]
+    fn a_version_three_report_reads_its_group_records_and_their_sources() {
+        let data = report(&[
+            group_record(4, 0, [224, 0, 0, 251], &[[10, 0, 0, 1], [10, 0, 0, 2]]),
+            group_record(3, 0, [239, 1, 1, 1], &[]),
+        ]);
+        let p = Packet::dissect(data, ProtoId::Igmp);
+        let l = p.find_layer(ProtoId::Igmp).unwrap();
+        assert_eq!(p.get(l, "numgrp").unwrap(), FieldValue::Uint(2));
+        let items = p.options(l).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "IGMPv3gr");
+        assert_eq!(named(&items[0], "rtype"), &ItemValue::Uint(4));
+        assert_eq!(
+            named(&items[0], "maddr"),
+            &ItemValue::Text("224.0.0.251".into())
+        );
+        let ItemValue::Items(srcs) = named(&items[0], "srcaddrs") else {
+            panic!("no source list")
+        };
+        // One field and nothing nested, so each source is its own value.
+        assert_eq!(srcs.len(), 2);
+        assert_eq!(srcs[1].name, "sa");
+        assert_eq!(srcs[1].value, ItemValue::Text("10.0.0.2".into()));
+        assert!(matches!(named(&items[1], "srcaddrs"), ItemValue::Items(v) if v.is_empty()));
+    }
+
+    /// RFC 3376 §4.2.10 puts auxiliary data after the sources and counts it in
+    /// 32-bit words, so a record that carries some is longer than its sources
+    /// alone say. scapy's `IGMPv3gr` has no auxiliary field at all and reads
+    /// the next record from the wrong offset.
+    #[test]
+    fn auxiliary_data_lengthens_a_record() {
+        let data = report(&[
+            group_record(1, 2, [224, 0, 0, 1], &[[10, 0, 0, 1]]),
+            group_record(2, 0, [224, 0, 0, 2], &[]),
+        ]);
+        let p = Packet::dissect(data, ProtoId::Igmp);
+        let l = p.find_layer(ProtoId::Igmp).unwrap();
+        let items = p.options(l).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            named(&items[1], "maddr"),
+            &ItemValue::Text("224.0.0.2".into())
+        );
+    }
+
+    #[test]
+    fn a_version_two_report_has_no_group_at_all() {
+        let p = Packet::dissect(vector(), ProtoId::Igmp);
+        let l = p.find_layer(ProtoId::Igmp).unwrap();
+        assert!(p.options(l).unwrap().is_empty());
+        assert_eq!(
+            p.get(l, "gaddr").unwrap(),
+            FieldValue::Ipv4([224, 0, 0, 251])
+        );
+    }
+
+    #[test]
+    fn a_truncated_report_reads_the_records_that_arrived() {
+        let full = report(&[
+            group_record(4, 0, [224, 0, 0, 251], &[[10, 0, 0, 1]]),
+            group_record(3, 0, [239, 1, 1, 1], &[]),
+        ]);
+        for n in 0..full.len() {
+            let p = Packet::dissect(full[..n].to_vec(), ProtoId::Igmp);
+            assert_eq!(p.raw_bytes(), &full[..n]);
+        }
+        let p = Packet::dissect(full[..full.len() - 2].to_vec(), ProtoId::Igmp);
+        let l = p.find_layer(ProtoId::Igmp).unwrap();
+        assert_eq!(p.options(l).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn records_encode_back_to_the_bytes_they_came_from() {
+        let data = report(&[
+            group_record(4, 0, [224, 0, 0, 251], &[[10, 0, 0, 1], [10, 0, 0, 2]]),
+            group_record(3, 0, [239, 1, 1, 1], &[]),
+        ]);
+        let p = Packet::dissect(data.clone(), ProtoId::Igmp);
+        let l = p.find_layer(ProtoId::Igmp).unwrap();
+        let items = p.options(l).unwrap();
+        assert_eq!(crate::repeat::encode(&GROUP, &items).unwrap(), data[8..]);
+    }
     // protogen:tests end
 }

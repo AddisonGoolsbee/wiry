@@ -151,5 +151,79 @@ mod tests {
         }
         assert_eq!(p.to_bytes().len(), n);
     }
+
+    use crate::options::ItemValue;
+
+    fn record(src: [u8; 4], dst: [u8; 4], pkts: u32) -> Vec<u8> {
+        let mut v = src.to_vec();
+        v.extend_from_slice(&dst);
+        v.resize(12, 0);
+        v.extend_from_slice(&[0, 0, 0, 0]);
+        v.extend_from_slice(&pkts.to_be_bytes());
+        v.resize(48, 0);
+        v
+    }
+
+    fn export(claimed: u16, n: usize) -> Vec<u8> {
+        let mut v = vec![0u8, 5];
+        v.extend_from_slice(&claimed.to_be_bytes());
+        v.resize(24, 0);
+        for i in 0..n {
+            v.extend(record([1, 2, 3, i as u8], [5, 6, 7, 8], i as u32 + 1));
+        }
+        v
+    }
+
+    fn field_of<'a>(items: &'a [crate::options::Item], i: usize, name: &str) -> &'a ItemValue {
+        let ItemValue::Items(v) = &items[i].value else {
+            panic!("not a record")
+        };
+        &v.iter()
+            .find(|f| f.name == name)
+            .expect("named field")
+            .value
+    }
+
+    #[test]
+    fn the_count_field_drives_the_record_list() {
+        let p = Packet::dissect(export(2, 2), ProtoId::NetflowV5);
+        let l = p.find_layer(ProtoId::NetflowV5).unwrap();
+        let items = p.options(l).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "NetflowRecordV5");
+        assert_eq!(
+            field_of(&items, 0, "src"),
+            &ItemValue::Text("1.2.3.0".into())
+        );
+        assert_eq!(field_of(&items, 1, "dpkts"), &ItemValue::Uint(2));
+    }
+
+    /// A count that claims more records than the datagram carries must yield
+    /// what arrived, not what was claimed.
+    #[test]
+    fn an_over_claimed_count_yields_only_what_arrived() {
+        let p = Packet::dissect(export(0xffff, 2), ProtoId::NetflowV5);
+        let l = p.find_layer(ProtoId::NetflowV5).unwrap();
+        assert_eq!(p.options(l).unwrap().len(), 2);
+    }
+
+    /// The reverse: trailing octets past the claimed count are not records.
+    #[test]
+    fn a_short_count_stops_early() {
+        let p = Packet::dissect(export(1, 3), ProtoId::NetflowV5);
+        let l = p.find_layer(ProtoId::NetflowV5).unwrap();
+        assert_eq!(p.options(l).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn records_encode_back_to_the_bytes_they_came_from() {
+        let p = Packet::dissect(export(2, 2), ProtoId::NetflowV5);
+        let l = p.find_layer(ProtoId::NetflowV5).unwrap();
+        let items = p.options(l).unwrap();
+        assert_eq!(
+            crate::repeat::encode(&GROUP, &items).unwrap(),
+            export(2, 2)[24..]
+        );
+    }
     // protogen:tests end
 }

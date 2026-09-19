@@ -108,5 +108,70 @@ mod tests {
         }
         assert_eq!(p.to_bytes().len(), n);
     }
+
+    use crate::options::{Item, ItemValue};
+
+    fn entry(af: u16, addr: [u8; 4], mask: [u8; 4], metric: u32) -> Vec<u8> {
+        let mut v = af.to_be_bytes().to_vec();
+        v.extend_from_slice(&[0, 0]);
+        v.extend_from_slice(&addr);
+        v.extend_from_slice(&mask);
+        v.extend_from_slice(&[0, 0, 0, 0]);
+        v.extend_from_slice(&metric.to_be_bytes());
+        v
+    }
+
+    /// RFC 2453 §3.9.2 response carrying two routes.
+    fn response() -> Vec<u8> {
+        let mut v = vec![2u8, 2, 0, 0];
+        v.extend(entry(2, [192, 168, 1, 0], [255, 255, 255, 0], 1));
+        v.extend(entry(2, [10, 0, 0, 0], [255, 0, 0, 0], 16));
+        v
+    }
+
+    fn fields(it: &Item) -> Vec<(&str, ItemValue)> {
+        let ItemValue::Items(v) = &it.value else {
+            panic!("not a record")
+        };
+        v.iter()
+            .map(|f| (f.name.as_ref(), f.value.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn route_entries_read_as_a_group() {
+        let p = Packet::dissect(response(), ProtoId::Rip);
+        let l = p.find_layer(ProtoId::Rip).unwrap();
+        let items = p.options(l).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "RIPEntry");
+        let f = fields(&items[0]);
+        assert_eq!(f[0], ("AF", ItemValue::Uint(2)));
+        assert_eq!(f[2], ("addr", ItemValue::Text("192.168.1.0".into())));
+        assert_eq!(f[3], ("mask", ItemValue::Text("255.255.255.0".into())));
+        assert_eq!(fields(&items[1])[5], ("metric", ItemValue::Uint(16)));
+    }
+
+    /// RFC 2453 §3.6 caps a message at 25 entries; the wire does not, so a
+    /// trailing partial entry is dropped rather than read past.
+    #[test]
+    fn a_partial_trailing_entry_is_dropped() {
+        let mut data = response();
+        data.truncate(data.len() - 3);
+        let p = Packet::dissect(data, ProtoId::Rip);
+        let l = p.find_layer(ProtoId::Rip).unwrap();
+        assert_eq!(p.options(l).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn entries_encode_back_to_the_bytes_they_came_from() {
+        let p = Packet::dissect(response(), ProtoId::Rip);
+        let l = p.find_layer(ProtoId::Rip).unwrap();
+        let items = p.options(l).unwrap();
+        assert_eq!(
+            crate::repeat::encode(&GROUP, &items).unwrap(),
+            response()[4..]
+        );
+    }
     // protogen:tests end
 }
