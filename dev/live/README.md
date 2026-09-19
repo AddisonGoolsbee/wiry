@@ -61,6 +61,20 @@ interface's address. Unlike the namespace harness this depends on the network it
 is run on: a LAN where nothing answers ARP, or a path that drops ICMP, will fail
 honestly rather than silently.
 
+## Any host: the sockets a state machine listens on
+
+Every part of an `Automaton` that is logic — states, transitions, timers,
+actions, io events, replies — is in `tests/test_automaton.py`, driven from canned
+packets through `OfflineSocket` with no privileges. This is only whether
+`L2Socket` and `L2ListenSocket` really carry frames, whether a machine's receive
+condition fires on one, and whether its threads stop when told. It also compares
+what `conf.route` answers against `route -n get` / `ip route get`.
+
+    sudo .venv/bin/python dev/live/automaton_check.py [iface]
+
+`iface` defaults to a loopback interface, which is enough: a frame sent on
+loopback comes back.
+
 ## macOS: loopback
 
 macOS `lo0` is **DLT_NULL**, not Ethernet, which is exactly the case that

@@ -21,6 +21,7 @@ import atexit
 import math
 import os
 import threading
+import warnings
 import weakref
 from typing import Any, Callable, Optional
 
@@ -128,6 +129,51 @@ def _live_args(
     )
 
 
+def _add_session(args: dict, session: Any, store: Any) -> None:
+    """Put a per-packet session between the capture filter and the callbacks,
+    where scapy runs one.
+
+    It rides ``wrap``, so ``lfilter``, ``prn`` and ``stop_filter`` all see what
+    the session produced and a packet it drops is never counted. The dissection
+    loop is untouched: the session sees a packet that already exists.
+    """
+    if session is None:
+        return
+    base, user = args["wrap"], args["lfilter"]
+
+    def wrap(rust: Any) -> Any:
+        pkt = base(rust)
+        try:
+            out = session.process(pkt)
+        except Exception as exc:
+            # scapy reports and skips past a session's own failure so one bad
+            # packet does not end the capture; conf.debug_dissector says no.
+            if conf.debug_dissector:
+                raise
+            warnings.warn(
+                f"{type(session).__name__}.process failed with {exc!r}; "
+                "passing the packet through",
+                RuntimeWarning, stacklevel=2,
+            )
+            return pkt
+        if store and out is not None and out is not pkt:
+            raise NotImplementedError(
+                f"{type(session).__name__} replaced a packet, and a replaced "
+                "packet cannot go into the PacketList sniff() returns: that is "
+                "a view over the capture buffer and a synthesised packet was "
+                "never in one. Sniff with store=0 and read them through prn=, "
+                "or give the session a bulk_process() as TCPSession has"
+            )
+        return out
+
+    def keep(pkt: Any) -> bool:
+        if pkt is None:
+            return False
+        return user is None or bool(user(pkt))
+
+    args["wrap"], args["lfilter"] = wrap, keep
+
+
 def sniff(
     *,
     iface: Any = None,
@@ -144,6 +190,7 @@ def sniff(
     snaplen: int = 262144,
     where: Any = None,
     session: Any = None,
+    opened_socket: Any = None,
 ) -> PacketList:
     """Capture packets, or replay a capture file through the same machine.
 
@@ -156,30 +203,48 @@ def sniff(
     ``iface``, ``promisc`` and ``snaplen`` are ignored when ``offline`` is given,
     as scapy ignores them. ``promisc=None`` reads ``conf.sniff_promisc``.
 
-    ``session=`` takes a session class or instance — ``TCPSession``,
-    ``IPSession``, ``DefaultSession`` — and runs it between the capture filter
-    and the callbacks, where scapy runs one. Reassembly over a capture is a
-    bulk path, so it happens in Rust in one crossing rather than a Python loop;
-    that needs the whole capture in hand, so ``session=`` is offline only.
-    """
-    if offline is None:
-        from .stream import needs_capture
+    ``session=`` takes a session class or instance and runs it between the
+    capture filter and the callbacks, where scapy runs one. A session with
+    scapy's per-packet ``process(pkt)`` runs on an interface as well as over a
+    file: it sees a packet the dissector has already produced, so no Python
+    enters the dissection loop. A session that reassembles — ``TCPSession``,
+    ``IPSession`` — is a whole-capture pass in Rust instead, one crossing
+    rather than a Python loop, and that needs every packet in hand, so those
+    are offline only.
 
-        if session is not None and needs_capture(session):
+    ``opened_socket=`` is refused: one state machine drives every source here,
+    it lives in Rust, and reading a Python socket through it would mean a
+    second one that could disagree. ``Automaton(recvsock=...)`` is the surface
+    that listens on a socket object.
+    """
+    from .stream import as_session, bulk_hook
+
+    if opened_socket is not None:
+        raise NotImplementedError(
+            "sniff(opened_socket=) is not supported: the sniff state machine "
+            "is one implementation in Rust and a socket handed in from Python "
+            "cannot feed it. Read the socket directly, or drive it with an "
+            "Automaton, whose recvsock= takes exactly such an object"
+        )
+
+    session = as_session(session)
+    bulk = bulk_hook(session)
+    if offline is None:
+        if bulk is not None:
             raise NotImplementedError(
                 "session= needs the whole capture at once and so works with "
                 "offline= only; sniff to a PacketList, then pass it back in"
             )
         _b.capture_check()
-        return PacketList(_b.sniff_live(**_live_args(
+        args = _live_args(
             iface=iface, count=count, store=store, prn=prn, filter=filter,
             lfilter=lfilter, timeout=timeout, stop_filter=stop_filter,
             quiet=quiet, promisc=promisc, snaplen=snaplen, where=where,
-        )))
+        )
+        _add_session(args, session, store)
+        return PacketList(_b.sniff_live(**args))
     src = _offline_source(offline)
-    if session is not None:
-        from .stream import apply_session
-
+    if bulk is not None:
         # The capture filter runs first, as libpcap's would, so a session never
         # reassembles a stream the caller filtered out.
         if filter is not None or where is not None:
@@ -189,21 +254,22 @@ def sniff(
                 lfilter=None, stop_filter=None, wrap=None,
             )
             filter, where = None, None
-        src = apply_session(session, PacketList(src))._list
-    return PacketList(
-        src.sniff_offline(
-            count=int(count),
-            store=bool(store),
-            bpf=filter,
-            layer=None,
-            conds=_normalize_where(where),
-            timeout=None if timeout is None else float(timeout),
-            prn=_printing(prn, quiet),
-            lfilter=lfilter,
-            stop_filter=stop_filter,
-            wrap=_wrap,
-        )
+        src = bulk(PacketList(src))._list
+    offline_args = dict(
+        count=int(count),
+        store=bool(store),
+        bpf=filter,
+        layer=None,
+        conds=_normalize_where(where),
+        timeout=None if timeout is None else float(timeout),
+        prn=_printing(prn, quiet),
+        lfilter=lfilter,
+        stop_filter=stop_filter,
+        wrap=_wrap,
     )
+    if bulk is None:
+        _add_session(offline_args, session, store)
+    return PacketList(src.sniff_offline(**offline_args))
 
 
 _RUNNING: "weakref.WeakSet[AsyncSniffer]" = weakref.WeakSet()
@@ -300,8 +366,19 @@ class AsyncSniffer:
             self._results = None
             self._exc = None
             if self.args.get("offline") is None:
+                from .stream import as_session, bulk_hook
+
                 _b.capture_check()
-                live = _b.LiveSniffer(**_live_args(**self.args))
+                kwargs = dict(self.args)
+                session = as_session(kwargs.pop("session", None))
+                if bulk_hook(session) is not None:
+                    raise NotImplementedError(
+                        "session= needs the whole capture at once and so works "
+                        "with offline= only"
+                    )
+                live_args = _live_args(**kwargs)
+                _add_session(live_args, session, kwargs.get("store", 1))
+                live = _b.LiveSniffer(**live_args)
                 live.start()
                 self._live = live
                 self._started = True
@@ -688,62 +765,6 @@ def interfaces() -> list:
     return list(_b.list_interfaces())
 
 
-class _Route:
-    """Which interface a packet would leave by, and with what source address.
-
-    **This is not the kernel's routing table.** wiry reads no route from the
-    OS: every entry is a host route synthesised from the interface list, there
-    are no gateways and no netmasks worth the name, and ``route()`` answers the
-    loopback interface for a loopback destination and ``conf.iface`` for
-    everything else. It is enough to tell a script which interface and source
-    address it is about to use, and it must not be used to *make* a routing
-    decision. ``resync()`` drops the cache.
-    """
-
-    __slots__ = ("_table",)
-
-    def __init__(self) -> None:
-        self._table: Optional[list] = None
-
-    def resync(self) -> None:
-        self._table = None
-
-    @property
-    def routes(self) -> list:
-        """One entry per interface address, in scapy's six-tuple shape:
-        ``(network, netmask, gateway, iface, outgoing_ip, metric)``. The
-        netmask is always a host mask and the gateway always ``0.0.0.0``,
-        because neither is read from anywhere."""
-        if self._table is None:
-            self._table = [
-                (addr, "255.255.255.255", "0.0.0.0", i["name"], addr, 0)
-                for i in _b.list_interfaces()
-                for addr in i["addresses"]
-                if ":" not in addr
-            ]
-        return list(self._table)
-
-    def _loopback(self) -> Optional[str]:
-        for i in _b.list_interfaces():
-            if i["loopback"]:
-                return i["name"]
-        return None
-
-    def route(self, dst: Any = None, verbose: Any = None) -> tuple:
-        """``(iface, outgoing_ip, gateway)`` for a destination."""
-        name = None
-        if dst is not None and str(dst).split("/")[0].startswith("127."):
-            name = self._loopback()
-        name = name or conf.iface
-        return (name, get_if_addr(name), "0.0.0.0")
-
-    def __repr__(self) -> str:
-        rows = "".join(
-            f"\n  {net:<18}{iface:<12}{out}" for net, _, _, iface, out, _ in self.routes
-        )
-        return f"<route: interface addresses only, no kernel table>{rows}"
-
-
 class _Conf:
     """A small stand-in for scapy's ``conf``, carrying the knobs scripts read.
 
@@ -755,7 +776,9 @@ class _Conf:
     """
 
     __slots__ = ("verb", "promisc", "sniff_promisc", "checkIPaddr",
-                 "_iface", "_route")
+                 "debug_dissector", "recv_poll_rate", "route_autoload",
+                 "route6_autoload", "_iface", "_route", "_route6",
+                 "_l3socket", "_l2socket", "_l2listen", "_loopback")
 
     def __init__(self) -> None:
         self.verb = 2
@@ -765,8 +788,19 @@ class _Conf:
         # False drops the address pinning in answers.rs: what DHCP needs, and a
         # looser match everywhere else.
         self.checkIPaddr = True
+        # True makes a session's own failure raise rather than be skipped past.
+        self.debug_dissector = False
+        # The wait a select takes when the caller names none.
+        self.recv_poll_rate = 0.05
+        self.route_autoload = True
+        self.route6_autoload = True
         self._iface: Optional[str] = None
-        self._route: Optional[_Route] = None
+        self._route: Any = None
+        self._route6: Any = None
+        self._l3socket: Any = None
+        self._l2socket: Any = None
+        self._l2listen: Any = None
+        self._loopback: Optional[str] = None
 
     @property
     def iface(self) -> str:
@@ -780,10 +814,33 @@ class _Conf:
         self._iface = None if value is None else str(value)
 
     @property
-    def route(self) -> _Route:
+    def loopback_name(self) -> str:
+        """What this host calls its loopback interface."""
+        from .route import platform_loopback
+
+        return self._loopback or platform_loopback()
+
+    @loopback_name.setter
+    def loopback_name(self, value: Any) -> None:
+        self._loopback = None if value is None else str(value)
+
+    @property
+    def route(self) -> Any:
+        """The IPv4 routing table, read from the OS on first use."""
         if self._route is None:
-            self._route = _Route()
+            from .route import Route
+
+            self._route = Route(autoload=self.route_autoload)
         return self._route
+
+    @property
+    def route6(self) -> Any:
+        """The IPv6 routing table, read from the OS on first use."""
+        if self._route6 is None:
+            from .route import Route6
+
+            self._route6 = Route6(autoload=self.route6_autoload)
+        return self._route6
 
     @property
     def use_pcap(self) -> bool:
@@ -802,37 +859,47 @@ class _Conf:
             )
 
     @property
-    def l3socket(self) -> None:
-        """``None``, and only ``None``. wiry has no socket objects to swap: the
-        layer-3 path is a raw socket opened per call in Rust, which is also why
-        ``send(socket=...)`` is refused."""
-        return None
+    def l3socket(self) -> Any:
+        """The class a state machine opens to send layer-3 datagrams.
+
+        Set it to swap in your own; set it to ``None`` to go back to wiry's.
+        The send path of ``send()`` and ``sr()`` opens its own socket in Rust
+        and does not read this, which is why ``send(socket=...)`` is still
+        refused (E17)."""
+        from .supersocket import L3Socket
+
+        return self._l3socket or L3Socket
 
     @l3socket.setter
     def l3socket(self, value: Any) -> None:
-        if value is not None:
-            raise NotImplementedError(
-                "conf.l3socket cannot be replaced: wiry has no socket class to "
-                "swap in, and the send path opens its own socket per call"
-            )
+        self._l3socket = value
 
     @property
-    def l2socket(self) -> None:
-        """``None``, and only ``None``. See ``l3socket``: the layer-2 path is a
-        libpcap handle opened per call."""
-        return None
+    def l2socket(self) -> Any:
+        """The class a state machine opens to send layer-2 frames."""
+        from .supersocket import L2Socket
+
+        return self._l2socket or L2Socket
 
     @l2socket.setter
     def l2socket(self, value: Any) -> None:
-        if value is not None:
-            raise NotImplementedError(
-                "conf.l2socket cannot be replaced: wiry has no socket class to "
-                "swap in, and the send path opens its own handle per call"
-            )
+        self._l2socket = value
 
-    # scapy's own spelling of the same two.
+    @property
+    def l2listen(self) -> Any:
+        """The class a state machine opens to receive frames."""
+        from .supersocket import L2ListenSocket
+
+        return self._l2listen or L2ListenSocket
+
+    @l2listen.setter
+    def l2listen(self, value: Any) -> None:
+        self._l2listen = value
+
+    # scapy's own spelling of the same three.
     L3socket = l3socket
     L2socket = l2socket
+    L2listen = l2listen
 
     def __repr__(self) -> str:
         return (f"<conf iface={self._iface!r} verb={self.verb} "

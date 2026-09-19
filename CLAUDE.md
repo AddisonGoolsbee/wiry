@@ -308,6 +308,21 @@ Beyond parity:
   `arping`, `srloop`, `srploop`, `getmacbyip`, `get_if_hwaddr` (E18) on top of
   `sr`/`srp`. Their arithmetic is plain functions over plain data so it is
   testable with no interface and no privileges; only the exchange needs `live`.
+- **State machines (E27).** `Automaton` and the `ATMT` decorators, plus the
+  sockets they listen on, which is what `conf.l3socket`/`l2socket`/`l2listen`
+  now name. This is callback-driven and per-packet *by contract*, exactly as
+  `sniff`'s `prn` is; that reasoning stops there and is no licence to put
+  Python in a bulk path. `OfflineSocket` feeds a machine from a capture and
+  records what it sends, so every state, transition and timer is tested with no
+  interface and no root. Its threads stop and join through the same
+  `atexit`-over-`WeakSet` idiom the live sniffers use.
+- **Real routing (E26).** `conf.route` and `conf.route6` read the kernel's
+  tables from `/proc` or `netstat` — no libpcap, no privilege — and answer
+  `route(dst)` by longest prefix. On macOS this disagrees with scapy, whose
+  `PF_ROUTE` netmask parsing is wrong, and agrees with `route -n get`.
+- **Answering machines (E28)** and scapy's per-packet `session=` contract
+  (E25), which now runs live as well as offline because a session sees a packet
+  the dissector has already produced.
 - **Fuzzing.** Nine libFuzzer targets plus seeded property tests on stable.
   Four of the five crates forbid unsafe. The fifth is `wiry-pcap`, which is the
   FFI and nothing else: it loads libpcap, calls through function pointers and
