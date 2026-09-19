@@ -666,10 +666,14 @@ pub fn room(s: &Splice) -> usize {
 }
 
 /// `src`'s own headers carrying `data` as their TCP payload, with `skip` octets
-/// of that frame's payload ahead of where `data` starts. Lengths are
-/// recomputed and so is the IPv4 header checksum; the TCP checksum is not,
-/// because a reassembled message was never one segment and no checksum covers
-/// it.
+/// of that frame's payload ahead of where `data` starts.
+///
+/// Lengths and the IPv4 header checksum are recomputed, because the header
+/// genuinely describes the frame that comes back. The TCP checksum is set to 0:
+/// RFC 9293 §3.1's checksum covers a segment that was on a wire, and this
+/// payload never was one, so the captured value would claim to cover octets it
+/// does not and a recomputed one would assert a transmission that never
+/// happened. 0 is this project's "not computed" (DEVIATIONS P8).
 pub fn reframe(src: &[u8], link: ProtoId, skip: u32, data: &[u8]) -> Option<Vec<u8>> {
     reframe_with(src, &splice(src, link)?, skip, data)
 }
@@ -688,6 +692,8 @@ pub fn reframe_with(src: &[u8], s: &Splice, skip: u32, data: &[u8]) -> Option<Ve
     let seq = u32::from_be_bytes([f[s.tcp + 4], f[s.tcp + 5], f[s.tcp + 6], f[s.tcp + 7]])
         .wrapping_add(skip);
     f[s.tcp + 4..s.tcp + 8].copy_from_slice(&seq.to_be_bytes());
+    f[s.tcp + 16] = 0;
+    f[s.tcp + 17] = 0;
     f.extend_from_slice(data);
     if s.v6 {
         let plen = (f.len() - s.ip - 40) as u16;
@@ -799,25 +805,6 @@ fn head_end(d: &[u8]) -> Option<usize> {
     text::header_block(&d[..d.len().min(MAX_HEAD)])
 }
 
-fn header_value<'a>(head: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
-    let start = head
-        .iter()
-        .position(|c| *c == b'\n')
-        .map_or(head.len(), |n| n + 1);
-    for line in head.get(start..)?.split(|c| *c == b'\n') {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let Some(c) = line.iter().position(|b| *b == b':') else {
-            continue;
-        };
-        if line[..c].eq_ignore_ascii_case(name) {
-            let v = &line[c + 1..];
-            let a = v.iter().position(|b| !b.is_ascii_whitespace()).unwrap_or(0);
-            return Some(&v[a..]);
-        }
-    }
-    None
-}
-
 /// RFC 9112 §7.1: `<size in hex> CRLF <data> CRLF`, ending with a zero size and
 /// a trailer section.
 fn chunked_len(body: &[u8]) -> Option<usize> {
@@ -854,14 +841,15 @@ fn http_len(d: &[u8]) -> Option<usize> {
     }
     let head = head_end(d)?;
     let body = &d[head..];
-    if let Some(v) = header_value(&d[..head], b"transfer-encoding") {
-        if v.to_ascii_lowercase().windows(7).any(|w| w == b"chunked") {
+    let fields = text::message_headers(&d[..head]);
+    if let Some(v) = text::message_field(&fields, "transfer-encoding") {
+        if v.to_ascii_lowercase().contains("chunked") {
             return chunked_len(body).map(|n| head + n);
         }
     }
-    if let Some(v) = header_value(&d[..head], b"content-length") {
-        let digits = v.iter().take_while(|c| c.is_ascii_digit()).count().min(19);
-        let n: usize = std::str::from_utf8(&v[..digits]).ok()?.parse().ok()?;
+    if let Some(v) = text::message_field(&fields, "content-length") {
+        let digits = v.bytes().take_while(|c| c.is_ascii_digit()).count().min(19);
+        let n: usize = v[..digits].parse().ok()?;
         return (body.len() >= n).then_some(head + n);
     }
     // RFC 9112 §6.3: with no length and no chunking a request has no body, and
@@ -1161,6 +1149,52 @@ mod tests {
             f.len() - 14
         );
         assert_eq!(crate::checksum::ones_complement(&f[14..14 + 20]), 0);
+    }
+
+    /// A spliced frame was never on a wire, so nothing it carries is covered by
+    /// the checksum the source segment had. It comes back as 0 — this
+    /// project's "not computed" — rather than as a stale value a downstream
+    /// tool would report as valid. The IPv4 header checksum is recomputed
+    /// instead of zeroed, because that header does describe the frame.
+    #[test]
+    fn a_spliced_frame_carries_no_tcp_checksum() {
+        let mut src = c2s(7, &body(120));
+        let sp = splice(&src, ProtoId::Ether).expect("a whole frame splices");
+        src[sp.tcp + 16] = 0xbe;
+        src[sp.tcp + 17] = 0xef;
+        let data = body(64);
+        let f = reframe(&src, ProtoId::Ether, 3, &data).expect("fits");
+        assert_eq!(&f[sp.tcp + 16..sp.tcp + 18], &[0, 0]);
+        assert_eq!(crate::checksum::ones_complement(&f[14..14 + 20]), 0);
+        assert_eq!(&f[sp.payload..], &data[..]);
+
+        let mut p = crate::packet::Packet::dissect(f.clone(), ProtoId::Ether);
+        assert!(p.spans.iter().any(|s| s.proto == ProtoId::Tcp));
+        assert_eq!(p.to_bytes(), &f[..]);
+    }
+
+    /// The framer reads a header block through the dissector's own parse, so an
+    /// obs-fold cannot frame one message here and show another in `show`.
+    #[test]
+    fn the_framer_and_the_dissector_read_the_same_headers() {
+        for head in [
+            &b"POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n"[..],
+            b"POST / HTTP/1.1\r\nContent-Length:4\r\n\r\n",
+            b"POST / HTTP/1.1\r\ncontent-length: 4\r\n\r\n",
+            b"POST / HTTP/1.1\r\nCONTENT-LENGTH:  4 \r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length: 4\nHost: x\n\n",
+            b"POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length:\r\n 4\r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length: \r\n\t4\r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length: 4\r\n  \r\n\r\n",
+        ] {
+            let mut msg = head.to_vec();
+            msg.extend_from_slice(b"abcd");
+            let items = text::message_headers(&msg[..head.len()]);
+            let shown = text::message_field(&items, "content-length");
+            assert_eq!(shown, Some("4"), "dissector on {head:?}");
+            assert_eq!(http_len(&msg), Some(msg.len()), "framer on {head:?}");
+        }
     }
 
     #[test]

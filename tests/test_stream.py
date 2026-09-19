@@ -208,6 +208,18 @@ def test_an_http_request_split_over_segments_is_one_message():
     assert dict(parsed[0]["HTTP"].headers)["Host"] == "example.io"
 
 
+def test_a_folded_header_frames_the_message_it_dissects_to():
+    """RFC 9112 §5.2 forbids a sender to fold, and RFC 9110 §5.5 says a
+    receiver that does not reject one replaces it with a space. The framer and
+    the dissector read the block through the same parse, so a fold cannot mean
+    a body to one and no body to the other."""
+    msg = b"POST /u HTTP/1.1\r\nHost: x.io\r\nContent-Length:\r\n\t4\r\n\r\nabcd"
+    pl = capture(split(msg, [12, 20]))
+    s = only(pl)
+    assert s.client.messages() == [msg]
+    assert dict(s.client.parsed()[0]["HTTP"].headers)["Content-Length"] == "4"
+
+
 def test_a_tls_record_split_over_segments_is_one_record():
     pl = capture(
         [
@@ -251,6 +263,32 @@ def test_tcp_session_hands_on_one_packet_per_reassembled_message():
         assert _payload(out[0]) == REQUEST
         # The recomputed IPv4 length describes the frame it is in.
         assert out[0][IP].len == len(bytes(out[0])) - 14
+    finally:
+        os.remove(path)
+
+
+def test_a_spliced_frame_carries_no_checksum_it_never_had():
+    """A reassembled message was never one segment and no TCP checksum covers
+    it, so the splice writes 0 -- "not computed" -- rather than handing on the
+    source segment's, which a downstream tool would report as valid. The IPv4
+    header does describe the frame it is in, so that checksum is recomputed."""
+    path = tempfile.mktemp(suffix=".pcap")
+    try:
+        wrpcap(path, split(REQUEST, [10, 20, 15]))
+        assert all(p[TCP].chksum != 0 for p in rdpcap(path))
+        out = sniff(offline=path, session=TCPSession)
+        assert out[0][TCP].chksum == 0
+        raw = bytes(out[0])
+        hdr = raw[14 : 14 + (raw[14] & 0x0F) * 4]
+        total = sum(int.from_bytes(hdr[i : i + 2], "big") for i in range(0, len(hdr), 2))
+        while total >> 16:
+            total = (total & 0xFFFF) + (total >> 16)
+        assert total == 0xFFFF
+
+        again = PacketList(_wiry_dissect(raw))
+        assert again[0].layers() == ["Ether", "IP", "TCP", "HTTP"]
+        assert again[0][TCP].chksum == 0
+        assert bytes(again[0]) == raw
     finally:
         os.remove(path)
 

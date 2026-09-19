@@ -120,8 +120,15 @@ pub fn header_items(block: &[u8]) -> Vec<Item> {
         if line[0] == b' ' || line[0] == b'\t' {
             if let Some(last) = out.last_mut() {
                 if let ItemValue::Text(t) = &mut last.value {
-                    t.push(' ');
-                    t.push_str(&text(trim(line)));
+                    // RFC 9110 §5.5: the value excludes leading and trailing
+                    // whitespace, so a fold onto an empty value adds no space.
+                    let c = trim(line);
+                    if !c.is_empty() {
+                        if !t.is_empty() {
+                            t.push(' ');
+                        }
+                        t.push_str(&text(c));
+                    }
                 }
             }
             continue;
@@ -132,6 +139,26 @@ pub fn header_items(block: &[u8]) -> Vec<Item> {
         }
     }
     out
+}
+
+/// The field lines of a start-line message (HTTP, SIP), stepping over the
+/// start line, which is not one. Every reader of these headers goes through
+/// here, so a dissector and a framer cannot disagree about what a header says.
+pub fn message_headers(msg: &[u8]) -> Vec<Item> {
+    let at = msg
+        .iter()
+        .position(|c| *c == b'\n')
+        .map_or(msg.len(), |i| i + 1);
+    header_items(msg.get(at..).unwrap_or(&[]))
+}
+
+/// One field's value, by the parse `message_headers` gives. Field names are
+/// case-insensitive (RFC 9110 §5.1).
+pub fn message_field<'a>(fields: &'a [Item], name: &str) -> Option<&'a str> {
+    fields.iter().find_map(|f| match &f.value {
+        ItemValue::Text(t) if f.name.eq_ignore_ascii_case(name) => Some(t.trim()),
+        _ => None,
+    })
 }
 
 /// The three space-separated parts of an HTTP or SIP start line. A line with

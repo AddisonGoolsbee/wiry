@@ -63,11 +63,7 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
             out.push(text::named("Http-Version", c));
         }
     }
-    let at = hdr
-        .iter()
-        .position(|c| *c == b'\n')
-        .map_or(hdr.len(), |i| i + 1);
-    out.extend(text::header_items(hdr.get(at..).unwrap_or(&[])));
+    out.extend(text::message_headers(hdr));
     out
 }
 // protogen:hand end
