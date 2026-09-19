@@ -27,10 +27,13 @@ import wiry
 # Names we deliberately do not provide: a scope boundary, not a defect.
 # `L3socket`/`L2socket` are the classes, not `conf.l3socket`: wiry has no socket
 # object to hand in or subclass, and the knob that would hold one says so.
+# `restart` is scapy's "exec myself again"; wiry's console does not offer one,
+# and the test imports it from `scapy.utils` anyway, so it reads scapy's own
+# `conf` rather than wiry's however wiry answers.
 OUT_OF_SCOPE = {
     "Automaton", "BER_Exception", "L2socket", "L3socket",
     "answering_machine", "load_contrib", "load_layer",
-    "pdfdump", "psdump", "tcpdump", "voip_play", "wireshark",
+    "pdfdump", "psdump", "restart", "tcpdump", "voip_play", "wireshark",
 }
 
 

@@ -439,3 +439,117 @@ def test_an_integer_fills_the_low_order_bits_of_a_field_wider_than_64(layer, fie
     pkt = layer()
     setattr(pkt[layer], field, 1)
     assert getattr(pkt[layer], field) == expected
+
+
+# --- the surface a script reaches for ------------------------------------
+
+def test_a_packet_walks_its_own_layers(pkt):
+    assert [v.name for v in pkt.iterpayloads()] == ["Ether", "IP", "TCP"]
+    assert pkt.firstlayer().name == "Ether"
+    assert pkt.lastlayer().name == "TCP"
+    assert pkt.name == "Ether"
+
+
+def test_field_values_are_reachable_by_name(pkt):
+    assert pkt.getfieldval("ttl") == 33
+    pkt.setfieldval("ttl", 5)
+    assert pkt.ttl == 5
+    info, value = pkt.getfield_and_val("dport")
+    assert info.name == "dport" and value == 80
+    assert pkt.get_field("ttl").kind == "uint"
+    with pytest.raises(KeyError):
+        pkt.get_field("nosuch")
+
+
+def test_unsetting_a_field_puts_its_default_back():
+    p = IP(ttl=9, id=4)
+    p.delfieldval("ttl")
+    with pytest.raises(AttributeError):
+        p.delfieldval("ttl")
+    assert p.ttl == 64 and p.id == 4
+
+
+@pytest.mark.parametrize("call", [
+    lambda p: p.delfieldval("ttl"),
+    lambda p: p.hide_defaults(),
+    lambda p: p.clone_with(ttl=1),
+    lambda p: p.remove_payload(),
+])
+def test_editing_the_spec_needs_a_packet_that_is_still_a_spec(call):
+    # Reading a field builds the packet, and from then on the octets are the
+    # truth; the stack that made them is not, so these four refuse rather than
+    # quietly editing something nobody will serialise. This is fuzz()'s rule.
+    p = IP(ttl=9) / TCP()
+    p.ttl
+    with pytest.raises(NotImplementedError):
+        call(p)
+
+
+def test_hiding_defaults_leaves_only_what_was_chosen():
+    p = IP(ttl=64, id=4, dst="10.0.0.1")
+    p.hide_defaults()
+    assert p.fields == {"id": 4, "dst": "10.0.0.1"}
+    assert p.ttl == 64
+
+
+def test_clone_with_replaces_the_bottom_layers_fields():
+    p = IP(ttl=9) / TCP(dport=80)
+    clone = p.clone_with(ttl=3)
+    assert p.clone_with(ttl=3, dst="10.0.0.9") / Raw(b"x") == bytes(
+        IP(ttl=3, dst="10.0.0.9") / TCP(dport=80) / Raw(b"x")
+    )
+    assert clone.ttl == 3 and clone.dport == 80
+    assert p.ttl == 9
+
+
+def test_removing_the_payload_leaves_the_bottom_layer():
+    p = IP(ttl=9) / TCP(dport=80)
+    p.remove_payload()
+    assert p.layers() == ["IP"]
+    assert bytes(p) == bytes(IP(ttl=9))
+
+
+def test_a_packet_reports_what_its_bottom_layer_declares(pkt):
+    assert [f.name for f in pkt.fields_desc][:2] == ["dst", "src"]
+    assert pkt.default_fields["dst"] == "ff:ff:ff:ff:ff:ff"
+    assert pkt[IP].default_fields["ttl"] == 64
+    assert pkt[IP].get_field("ttl").bits == 8
+
+
+def test_a_dissected_packet_reports_the_values_its_header_holds():
+    p = IP(bytes(IP(ttl=9)))
+    assert p.fields["ttl"] == 9
+    assert p.fields["version"] == 4
+
+
+def test_from_hexcap_reads_a_pasted_dump():
+    data = bytes(Ether() / IP(ttl=9) / TCP(dport=80))
+    dump = "\n".join(
+        "%04x  %s  %s" % (
+            off,
+            " ".join(f"{b:02x}" for b in data[off:off + 16]),
+            "".join(chr(b) if 32 <= b < 127 else "." for b in data[off:off + 16]),
+        )
+        for off in range(0, len(data), 16)
+    )
+    back = Ether.from_hexcap(dump)
+    assert bytes(back) == data
+    assert back.layers() == ["Ether", "IP", "TCP"]
+    with pytest.raises(TypeError, match="call from_hexcap"):
+        wiry.Packet.from_hexcap("00")
+
+
+def test_from_hexcap_takes_a_bare_hex_run_too():
+    from wiry.describe import from_hexcap
+
+    assert from_hexcap("00 11 22\n33 44") == b"\x00\x11\x223\x44"
+    # An offset column needs a colon or two spaces after it to be one.
+    assert from_hexcap("0000:  0011 2233") == b"\x00\x11\x223"
+    assert from_hexcap("0010  00 11") == b"\x00\x11"
+
+
+def test_display_is_show(pkt):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        pkt.display()
+    assert out.getvalue() == pkt.show_str()

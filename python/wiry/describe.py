@@ -190,8 +190,13 @@ def hexdiff(a: Any, b: Any, width: int = 16) -> None:
 
 # An offset column, then up to 16 hex pairs, then whatever ASCII the tool put
 # on the right; tcpdump, Wireshark and `hexdump -C` all fit this.
+#
+# The offset is recognised only when a colon or two spaces follow it, which
+# every dumper emits. scapy accepts one space, and so reads the first octet of
+# a pasted bare hex run as an offset and drops it.
 _HEXCAP = re.compile(
-    r"^\s*(?:(?:0x)?[0-9a-fA-F]{2,}[ :\t]{1,3})?((?:[0-9a-fA-F]{2}[ \t]{0,2}){1,16})"
+    r"^\s*(?:(?:0x)?[0-9a-fA-F]{2,}(?::[ \t]*|[ \t]{2,}))?"
+    r"((?:[0-9a-fA-F]{2}[ \t]{0,2}){1,16})"
 )
 
 

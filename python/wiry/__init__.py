@@ -898,7 +898,10 @@ class Packet(metaclass=_PacketMeta):
         """Drop every assigned value that equals the layer's default, so
         `command()` prints only what the caller actually chose."""
         if self._rust is not None:
-            return
+            raise NotImplementedError(
+                "hide_defaults() takes a packet being built; a materialised "
+                "one keeps no record of which values were assigned"
+            )
         from .discover import _defaults
 
         for lname, fields in self._stack:
