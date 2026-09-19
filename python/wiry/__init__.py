@@ -6,6 +6,7 @@ import atexit
 import contextlib
 import gzip
 import os
+import sys
 import tempfile
 import warnings
 import weakref
@@ -50,10 +51,14 @@ _ANSMACHINE = ("AnsweringMachine", "AnsweringMachineTCP", "AnsweringMachineUDP")
 
 _ROUTE = ("Route", "Route6", "read_routes", "read_routes6", "in6_getifaddr")
 
+_DISCOVER = ("ls", "lsc", "explore", "field_table", "FieldInfo")
+
+_CONSOLE = ("interact", "save_session", "load_session")
+
 _EAGER = (
     "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
     "PcapReader", "PcapWriter", "PcapNgWriter", "raw", "hexdump",
-    "hexdump_str", "ls", "known_layers", "bind_layers",
+    "hexdump_str", "known_layers", "bind_layers",
     "VolatileValue", "RandNum", "RandByte", "RandShort", "RandInt", "RandLong",
     "RandIP", "RandIP6", "RandMAC", "RandString", "RandBin", "RandChoice",
     "RandEnumKeys", "Net", "Net6", "fuzz", "corrupt_bytes", "corrupt_bits",
@@ -64,11 +69,17 @@ _EAGER = (
 # invisible to dir(wiry) and to anything probing it for capability.
 __all__ = list(
     _EAGER + _COLUMNAR + _FRAG + _STREAM + _DESCRIBE + _CAPTURE + _TOOLS
-    + _SOCKETS + _AUTOMATON + _ANSMACHINE + _ROUTE
+    + _SOCKETS + _AUTOMATON + _ANSMACHINE + _ROUTE + _DISCOVER + _CONSOLE
 )
 
 
 def __getattr__(name: str) -> Any:
+    if name in _DISCOVER:
+        from . import discover
+        return getattr(discover, name)
+    if name in _CONSOLE:
+        from . import console
+        return getattr(console, name)
     if name in _COLUMNAR:
         from . import columnar
         return getattr(columnar, name)
@@ -311,6 +322,37 @@ class _LayerView:
         where this particular header has them."""
         return self._pkt._materialize().field_names(self._idx)
 
+    @property
+    def fields_desc(self) -> list:
+        """What this layer declares, conditional fields included."""
+        from .discover import field_table
+        return field_table(self._name)
+
+    @property
+    def default_fields(self) -> dict:
+        from .discover import _defaults
+        return dict(_defaults(self._name))
+
+    def get_field(self, field: str) -> Any:
+        """The field's declaration, as `fields_desc` carries it."""
+        for info in self.fields_desc:
+            if info.name == field:
+                return info
+        raise KeyError(f"{self._name} has no field {field!r}")
+
+    def getfield_and_val(self, field: str) -> tuple:
+        """The declaration and the value, which is what a caller inspecting an
+        unfamiliar layer needs at once."""
+        return self.get_field(field), getattr(self, field)
+
+    def summary(self) -> str:
+        return self._name
+
+    def __dir__(self) -> list[str]:
+        names = set(super().__dir__())
+        names.update(_b.layer_fields(self._name))
+        return sorted(names)
+
     def __getattr__(self, field: str) -> Any:
         if field.startswith("_"):
             raise AttributeError(field)
@@ -493,12 +535,51 @@ def _layer_init(name: str):
     return __init__
 
 
+def _signature_of(name: str):
+    import inspect
+
+    params = [inspect.Parameter(
+        "_data", inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None)]
+    params += [
+        inspect.Parameter(f, inspect.Parameter.KEYWORD_ONLY, default=None)
+        for f in _b.layer_fields(name)
+    ]
+    return inspect.Signature(params)
+
+
 class _PacketMeta(type):
     """Registers a subclass declaring ``fields_desc`` as a real layer."""
 
+    def __dir__(cls):
+        """Field names complete after a layer class, which is where a user at a
+        prompt reaches for them."""
+        names = set(super().__dir__())
+        if cls._name is not None:
+            names.update(_b.layer_fields(cls._name))
+        return sorted(names)
+
+    def __getattr__(cls, attr):
+        """`IP.ttl` is the field's declaration; `__signature__` makes the
+        keyword arguments complete and `help(IP)` name them."""
+        name = cls.__dict__.get("_name")
+        if name is None:
+            raise AttributeError(attr)
+        if attr == "__signature__":
+            return _signature_of(name)
+        if attr.startswith("__"):
+            raise AttributeError(attr)
+        from .discover import field_table
+
+        for info in field_table(name):
+            if info.name == attr:
+                return info
+        raise AttributeError(attr)
+
     def __new__(mcls, cname, bases, ns):
         desc = ns.get("fields_desc")
-        if desc is None:
+        # `Packet` itself carries a `fields_desc` property, which declares
+        # nothing; only a real table registers a layer.
+        if not isinstance(desc, (list, tuple)):
             return super().__new__(mcls, cname, bases, ns)
         from .fields import specs
 
@@ -513,7 +594,9 @@ class _PacketMeta(type):
         ns.setdefault("__slots__", ())
         ns["_name"] = lname
         ns["__init__"] = _layer_init(lname)
-        return super().__new__(mcls, cname, bases, ns)
+        cls = super().__new__(mcls, cname, bases, ns)
+        _register(lname, cls)
+        return cls
 
 
 class Packet(metaclass=_PacketMeta):
@@ -521,7 +604,8 @@ class Packet(metaclass=_PacketMeta):
 
     _name: str | None = None
 
-    __slots__ = ("_stack", "_payload", "_rust", "time", "wirelen", "sent_time")
+    __slots__ = ("_stack", "_payload", "_rust", "_written", "time", "wirelen",
+                 "sent_time", "sniffed_on")
 
     def __init__(
         self,
@@ -534,9 +618,11 @@ class Packet(metaclass=_PacketMeta):
         self._stack = _stack if _stack is not None else []
         self._payload = _payload
         self._rust = _rust
+        self._written = False
         self.time = time
         self.wirelen = wirelen
         self.sent_time = None
+        self.sniffed_on = None
 
     def __truediv__(self, other: "Packet") -> "Packet":
         """Stack another layer beneath this one."""
@@ -687,8 +773,30 @@ class Packet(metaclass=_PacketMeta):
             )
         return self._rust
 
+    @property
+    def _spec_live(self) -> bool:
+        """Whether the layer stack is still what this packet means.
+
+        Reading a field builds the packet and caches it, which is a cache, not
+        a change. Writing one through that cache is a change, and from then on
+        the octets are the truth and the stack is stale.
+        """
+        return bool(self._stack) and not self._written
+
+    def _edit_spec(self) -> list:
+        """The stack, for a caller about to change it. The built packet is
+        dropped so the next serialisation sees the change."""
+        if not self._spec_live:
+            raise NotImplementedError(
+                "this takes a packet being built; one whose fields have been "
+                "written through keeps no record of which values were assigned"
+            )
+        self._rust = None
+        return self._stack
+
     def _set(self, layer: int, field: str, value: Any) -> None:
         if self._rust is not None:
+            self._written = True
             if isinstance(value, (bool, FlagValue)):
                 self._rust.set_field(layer, field, int(value))
             elif isinstance(value, int):
@@ -755,6 +863,132 @@ class Packet(metaclass=_PacketMeta):
     def __contains__(self, layer: Any) -> bool:
         return self.haslayer(layer)
 
+    @property
+    def name(self) -> str:
+        """The outermost layer's name, which is what a packet answers to."""
+        names = self.layers()
+        return names[0] if names else "Packet"
+
+    @property
+    def fields_desc(self) -> list:
+        """What the outermost layer declares. A layer further up answers
+        through ``pkt[Layer].fields_desc``."""
+        names = self.layers()
+        if not names:
+            return []
+        from .discover import field_table
+        return field_table(names[0])
+
+    @property
+    def fields(self) -> dict:
+        """The outermost layer's values: what was assigned while building, or
+        what the header holds once it exists."""
+        view = self.getlayer(0)
+        if view is None:
+            return {}
+        if self._spec_live:
+            return dict(self._stack[0][1])
+        return {f: getattr(view, f) for f in view.fields()}
+
+    @property
+    def default_fields(self) -> dict:
+        names = self.layers()
+        if not names:
+            return {}
+        from .discover import _defaults
+        return dict(_defaults(names[0]))
+
+    def iterpayloads(self) -> Iterator[Any]:
+        """Each layer of the chain in turn, outermost first."""
+        for i, n in enumerate(self.layers()):
+            yield _LayerView(self, i, n)
+
+    def firstlayer(self) -> Any:
+        """The bottom layer: the one the frame starts with."""
+        return self.getlayer(0)
+
+    def lastlayer(self) -> Any:
+        """The top layer: the one carrying the payload."""
+        return self.getlayer(-1)
+
+    def get_field(self, field: str) -> Any:
+        """The declaration of a field, wherever in the chain it lives."""
+        for i, n in enumerate(self.layers()):
+            if field in _b.layer_fields(n):
+                return _LayerView(self, i, n).get_field(field)
+        raise KeyError(f"no field {field!r} in {' / '.join(self.layers())}")
+
+    def getfield_and_val(self, field: str) -> tuple:
+        return self.get_field(field), getattr(self, field)
+
+    def getfieldval(self, field: str) -> Any:
+        return getattr(self, field)
+
+    def setfieldval(self, field: str, value: Any) -> None:
+        setattr(self, field, value)
+
+    def delfieldval(self, field: str) -> None:
+        """Unset a field, so the build path writes its default again.
+
+        Only a packet still being built can do this: once the octets exist
+        there is no record of which of them the caller chose (E12).
+        """
+        for _, fields in self._edit_spec():
+            if field in fields:
+                del fields[field]
+                return
+        raise AttributeError(f"no field {field!r} was set on this packet")
+
+    def hide_defaults(self) -> None:
+        """Drop every assigned value that equals the layer's default, so
+        `command()` prints only what the caller actually chose."""
+        from .discover import _defaults
+
+        for lname, fields in self._edit_spec():
+            if lname in _OPAQUE:
+                continue
+            defaults = _defaults(lname)
+            for key in [k for k in fields if k in defaults]:
+                if fields[key] == defaults[key]:
+                    del fields[key]
+
+    def clone_with(self, payload: Any = None, **fields: Any) -> "Packet":
+        """A copy whose outermost layer carries exactly these field values."""
+        if not self._spec_live:
+            raise NotImplementedError(
+                "clone_with() takes a packet being built; one whose fields "
+                "have been written through cannot go back to a field spec"
+            )
+        stack = [(n, dict(f)) for n, f in self._stack]
+        stack[0] = (stack[0][0], dict(fields))
+        clone = Packet(_stack=stack, _payload=self._payload,
+                       time=self.time, wirelen=self.wirelen)
+        return clone if payload is None else clone / payload
+
+    def remove_payload(self) -> None:
+        """Drop everything above the bottom layer, in place."""
+        del self._edit_spec()[1:]
+        self._payload = None
+
+    @classmethod
+    def from_hexcap(cls, text: str | None = None) -> "Packet":
+        """A packet from a pasted hex dump, as tcpdump and Wireshark print one.
+
+        With no argument it reads from stdin until a blank line, which is what
+        makes it useful at a prompt: `Ether.from_hexcap()`, paste, blank line.
+        """
+        if cls._name is None:
+            raise TypeError(
+                "call from_hexcap() on a layer, which says how to read the "
+                "first header: Ether.from_hexcap()"
+            )
+        from .describe import from_hexcap
+        return cls(from_hexcap(text))
+
+    def display(self) -> None:
+        """Deprecated spelling of `show()`, kept because scripts use it."""
+        self.show()
+
     def __getitem__(self, layer: Any) -> _LayerView:
         # pkt[IP:2] is the second IP layer; pkt[IP::{"ttl": 3}] filters on
         # field values.
@@ -792,6 +1026,14 @@ class Packet(metaclass=_PacketMeta):
             time=self.time,
             wirelen=self.wirelen,
         )
+
+    def __dir__(self) -> list[str]:
+        """Every field of every layer in the chain, because that is what
+        `pkt.<tab>` reaches."""
+        names = set(super().__dir__())
+        for n in self.layers():
+            names.update(_b.layer_fields(n))
+        return sorted(names)
 
     def __getattr__(self, field: str) -> Any:
         if field.startswith("_"):
@@ -878,6 +1120,30 @@ class Packet(metaclass=_PacketMeta):
     def __hash__(self) -> int:
         return hash(bytes(self))
 
+    def __reduce__(self) -> tuple:
+        """A dissected packet travels as its octets and the layer to read them
+        as; one still being built travels as its spec, so its generators
+        survive the trip undrawn."""
+        if self._spec_live:
+            return (_from_stack, (self._stack, self._payload, self.time,
+                                  self.wirelen, self.sniffed_on))
+        names = self._rust.layer_names()
+        return (_from_bytes, (self._rust.to_bytes(), names[0] if names else "",
+                              self.time, self.wirelen, self.sniffed_on))
+
+
+def _from_stack(stack, payload, time, wirelen, sniffed_on) -> Packet:
+    pkt = Packet(_stack=stack, _payload=payload, time=time, wirelen=wirelen)
+    pkt.sniffed_on = sniffed_on
+    return pkt
+
+
+def _from_bytes(data, first, time, wirelen, sniffed_on) -> Packet:
+    pkt = Packet(_rust=_b.dissect(data, first) if first else None,
+                 time=time, wirelen=wirelen)
+    pkt.sniffed_on = sniffed_on
+    return pkt
+
 
 def _make_layer(name: str) -> type:
     return _PacketMeta(name, (Packet,), {
@@ -889,6 +1155,23 @@ def _make_layer(name: str) -> type:
 
 
 _LAYERS: dict[str, type] = {}
+
+
+def _register(name: str, cls: type) -> None:
+    """Record a layer under its name, and drop what `discover` cached about it.
+
+    A declared layer (E3) reaches here too, and one declared twice under the
+    same name replaces the first, so the cached field table and defaults would
+    otherwise describe the layer that is gone.
+    """
+    _LAYERS[name] = cls
+    _PARSED_FIELD[name] = _b.parsed_field(name)
+    discover = sys.modules.get(f"{__name__}.discover")
+    if discover is not None:
+        discover._TABLES.pop(name, None)
+        discover._DEFAULTS.pop(name, None)
+
+
 for _n in _b.known_layers():
     _LAYERS[_n] = _make_layer(_n)
     globals()[_n] = _LAYERS[_n]
@@ -902,10 +1185,17 @@ def known_layers() -> list[str]:
     return list(_b.known_layers())
 
 
+# The built-in chain is static dispatch in Rust and cannot be enumerated;
+# what was added at runtime can be, and `explore()` reports exactly that.
+_RUNTIME_BINDS: list[tuple[str, str, list]] = []
+
+
 def bind_layers(lower: Any, upper: Any, **conds: Any) -> None:
     """Make dissection reach `upper` from `lower` when every named field of
     `lower` holds the given value, and stacking write those values back."""
-    _b.bind_layer(_layer_name(lower), _layer_name(upper), list(conds.items()))
+    low, up = _layer_name(lower), _layer_name(upper)
+    _b.bind_layer(low, up, list(conds.items()))
+    _RUNTIME_BINDS.append((low, up, list(conds.items())))
 
 
 class PacketList:
@@ -1432,10 +1722,12 @@ def raw(pkt: Any) -> bytes:
 
 
 def hexdump(pkt: Any, width: int = 16) -> None:
+    """Print a packet as offset, hex and text columns."""
     print(hexdump_str(pkt, width), end="")
 
 
 def hexdump_str(pkt: Any, width: int = 16) -> str:
+    """The hex dump `hexdump()` prints, as a string."""
     data = bytes(pkt)
     out = []
     for off in range(0, len(data), width):
@@ -1444,31 +1736,6 @@ def hexdump_str(pkt: Any, width: int = 16) -> str:
         text = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
         out.append(f"{off:04x}  {hexpart:<{width * 3}} {text}\n")
     return "".join(out)
-
-
-def ls(layer: Any = None, verbose: bool = False) -> None:
-    """List known layers, the fields of one, or the fields of a packet.
-
-    `verbose` keeps the fields a header's own contents make inactive.
-    """
-    if layer is None:
-        for n in _b.known_layers():
-            print(n)
-        return
-    if isinstance(layer, Packet):
-        for i, n in enumerate(layer.layers()):
-            print(f"###[ {n} ]###")
-            for f in _ls_fields(layer, i, n, verbose):
-                print(f"  {f}")
-        return
-    for f in _b.layer_fields(_layer_name(layer)):
-        print(f"{f}")
-
-
-def _ls_fields(pkt: Packet, i: int, name: str, verbose: bool) -> Sequence[str]:
-    if verbose or pkt._rust is None:
-        return _b.layer_fields(name)
-    return pkt._rust.field_names(i)
 
 
 # Eager, unlike the capture and columnar facades: `IP(dst=[...])` has to work

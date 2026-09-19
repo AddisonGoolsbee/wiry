@@ -271,3 +271,48 @@ def test_a_layer_without_fields_desc_still_behaves_as_before():
 
     assert "Plain" not in known_layers()
     assert Plain()._stack == []
+
+
+def test_a_declared_layer_is_discoverable_like_a_built_in():
+    import io
+    import contextlib
+
+    from wiry import explore, ls
+
+    class Declared(Packet):
+        name = "Declared"
+        fields_desc = [ByteField("kind", 7), ShortField("size", 300)]
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        ls(Declared)
+        explore("Declared")
+    printed = out.getvalue()
+    # Its defaults come from the layer it declared, not from the empty table a
+    # layer missing from the registry would give.
+    assert "(7)" in printed and "(300)" in printed
+    assert "3 octets" in printed
+    assert "kind" in dir(Declared)
+    assert Declared.kind.bits == 8
+
+
+def test_redeclaring_a_name_describes_the_layer_that_won():
+    import io
+    import contextlib
+
+    from wiry import ls
+
+    class First(Packet):
+        name = "Twice"
+        fields_desc = [ByteField("a", 1)]
+
+    ls(First)
+
+    class Second(Packet):
+        name = "Twice"
+        fields_desc = [ByteField("b", 2)]
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        ls(Second)
+    assert "b" in out.getvalue() and "\na " not in out.getvalue()

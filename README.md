@@ -147,9 +147,14 @@ is a template that expands in scapy's order. The description crosses into Rust
 once and the product is walked there, so `sendp(Ether()/IP(dst=Net("10.0.0.0/8")))`
 is one crossing rather than sixteen million, and iteration is lazy in chunks.
 `fuzz()`, `corrupt_bytes` and `corrupt_bits` are there too, over a seedable
-generator that makes a whole run repeat — which scapy cannot do.
+generator that makes a whole run repeat — which scapy cannot do. The two
+corruption helpers additionally draw in scapy's own order from the
+interpreter's `random`, so `random.seed(n)` reproduces scapy's exact octets;
+templates keep the Rust generator, because a Python draw inside the expansion
+loop is the per-packet crossing the whole design exists to avoid.
 [DEVIATIONS.md](DEVIATIONS.md) E21 states what a template refuses and where the
-seed's guarantee stops.
+seed's guarantee stops — it is one process-wide stream, and it does not hold
+under concurrency.
 
 `fragment(pkt, 1480)` splits a datagram per RFC 791 §3.2 and `defragment(cap)`
 puts one back together, over a whole capture in a single crossing;
@@ -184,6 +189,46 @@ on Windows in CI.
 a capture file with no privileges and no library: `count`, `store`, `prn`,
 `lfilter`, `stop_filter`, `timeout` and the `where=` extension. A `filter=` is
 the one exception, since compiling BPF is libpcap's job.
+
+## The console
+
+`wiry` drops you into a prompt with the API already loaded, the way typing
+`scapy` does:
+
+```
+$ wiry
+          _               Welcome to wiry 0.1.0
+ __      ___ _ __ _   _
+ \ \ /\ / / | '__| | | |  91 layers, with live capture
+  \ V  V /| | |  | |_| |
+   \_/\_/ |_|_|   \__, |  ls() lists the layers, ls(IP) what one holds, lsc() the commands.
+                  |___/
+
+>>> p = Ether()/IP(dst="10.0.0.2")/TCP(dport=80, flags="S")
+>>> p.ttl          # <tab> completes every field of every layer in the chain
+64
+>>> ls(p[TCP])
+###[ TCP ]###
+sport        : uint (2 bytes)           = 20              (20)
+dport        : uint (2 bytes)           = 80              (80)
+...
+flags        : flags (9 bits)           = 'S'             ('S')
+```
+
+Ninety-one layers is more than anyone remembers, so the three discovery
+commands are part of the API rather than a convenience. `ls()` lists every
+layer, `ls("tcp")` searches, `ls(IP)` prints what a layer holds and `ls(pkt)`
+what this packet holds beside the defaults. `lsc()` lists every command with
+its first documentation line. `explore(BFD)` shows one layer in full.
+
+IPython is used when it is importable and the standard shell otherwise.
+**Neither is a dependency**: `pip install 'wiry[console]'` adds IPython if you
+want it, and the console works either way. Unlike scapy's, the plain shell
+keeps its history. `python -m wiry` is the same console; `-c FILE` reads a
+startup file, `-C` skips it, `-H` drops the banner.
+
+[DEVIATIONS.md](DEVIATIONS.md) E29 and E30 state what the console and the
+discovery commands do not do.
 
 ## Capture files
 

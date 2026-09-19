@@ -25,9 +25,12 @@ from pathlib import Path
 import wiry
 
 # Names we deliberately do not provide: a scope boundary, not a defect.
+# `restart` is scapy's "exec myself again"; wiry's console does not offer one,
+# and the test imports it from `scapy.utils` anyway, so it reads scapy's own
+# `conf` rather than wiry's however wiry answers.
 OUT_OF_SCOPE = {
     "BER_Exception", "load_contrib", "load_layer",
-    "pdfdump", "psdump", "tcpdump", "voip_play", "wireshark",
+    "pdfdump", "psdump", "restart", "tcpdump", "voip_play", "wireshark",
 }
 
 

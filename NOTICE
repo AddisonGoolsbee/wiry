@@ -98,6 +98,7 @@ per-file blocks are authoritative.
 | `python/wiry/ansmachine.py` | `scapy/ansmachine.py` | 2.7.0 / `7d69454` | 2026-09-18 |
 | `python/wiry/route.py` | `scapy/route.py`, `scapy/route6.py`, `scapy/arch/unix.py`, `scapy/arch/linux/rtnetlink.py`, `scapy/utils6.py` | 2.7.0 / `7d69454` | 2026-09-18 |
 | `python/wiry/stream.py` | `scapy/sessions.py` (the session protocol only) | 2.7.0 / `7d69454` | 2026-09-18 |
+| `python/wiry/volatile.py` | `scapy/utils.py` — `corrupt_bytes`, `corrupt_bits` | scapy 2.7.0 | 2026-09-18 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift

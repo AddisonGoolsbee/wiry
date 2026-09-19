@@ -8,7 +8,7 @@ import pytest
 import wiry
 from wiry import (
     ARP, Dot1Q, Ether, ICMP, IP, IPv6, Padding, Raw, TCP, UDP, hexdump_str,
-    known_layers, ls, raw,
+    known_layers, ls, lsc, explore, raw,
 )
 from helpers import ETHER_IP_TCP, checksum
 
@@ -288,30 +288,77 @@ def test_known_layers_matches_the_exported_classes():
     names = known_layers()
     assert names[0] == "Ether"
     assert {"IP", "IPv6", "TCP", "UDP", "ICMP", "ARP", "Raw"} <= set(names)
-    for name in wiry._LAYERS:
+    # Two sets, and they stopped being the same set once a user could declare
+    # a layer: `_LAYERS` is every layer class wiry knows, and `__all__` is the
+    # ones it ships. A declared layer is in the first and not the second.
+    for name, cls in wiry._LAYERS.items():
         assert name in names
+        assert cls._name == name
+    for name in set(wiry.__all__) & set(names):
         assert getattr(wiry, name)._name == name
 
 
-def test_ls_lists_layers_and_fields():
+def _printed(fn, *a, **kw):
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        ls()
-    assert out.getvalue().split() == known_layers()
-
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        ls(TCP)
-    assert out.getvalue().split()[:3] == ["sport", "dport", "seq"]
+        fn(*a, **kw)
+    return out.getvalue()
 
 
-def test_ls_of_a_packet_lists_each_layer(pkt):
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        ls(pkt)
-    printed = out.getvalue()
+def test_ls_lists_every_layer_with_its_shape():
+    lines = [ln for ln in _printed(ls).splitlines() if " : " in ln]
+    assert [ln.split()[0] for ln in lines] == sorted(known_layers())
+    assert "fields" in lines[0] and "octets" in lines[0]
+
+
+def test_ls_of_a_class_names_each_field_its_type_and_its_default():
+    printed = _printed(ls, TCP)
+    assert [ln.split()[0] for ln in printed.splitlines()][:3] == [
+        "sport", "dport", "seq"
+    ]
+    # A computed field has no default: it has whatever the octets make it.
+    assert "chksum" in printed and "computed" in printed
+    assert "(None)" in printed
+    assert "uint (2 bytes)" in printed and "flags (9 bits)" in printed
+
+
+def test_ls_searches_by_name_closest_match_first():
+    printed = _printed(ls, "tcp")
+    names = [ln.split()[0] for ln in printed.splitlines() if " : " in ln]
+    assert names[0] == "TCP"
+    assert "RTCP" in names
+    assert "UDP" not in names
+
+
+def test_ls_of_a_packet_lists_each_layer_with_values_and_defaults(pkt):
+    printed = _printed(ls, pkt)
     assert "###[ Ether ]###" in printed and "###[ TCP ]###" in printed
-    assert "  sport" in printed
+    assert "= 80" in printed and "(80)" in printed
+    assert "'00:11:22:33:44:55'" in printed
+
+
+def test_ls_verbose_names_the_bits_of_a_flags_field():
+    assert "F, S, R" not in _printed(ls, TCP)
+    assert "F, S, R, P, A, U, E, C, N" in _printed(ls, TCP, verbose=True)
+
+
+def test_ls_of_something_that_is_not_a_layer_says_so():
+    assert "Not a packet class" in _printed(ls, object())
+
+
+def test_lsc_lists_commands_with_their_first_doc_line():
+    printed = _printed(lsc)
+    assert "rdpcap" in printed and "sniff" in printed
+    assert "\nIP " not in printed and "RandIP " not in printed
+    assert "wrpcap" in _printed(lsc, "pcap")
+    assert "sniff" not in _printed(lsc, "pcap")
+
+
+def test_explore_shows_one_layer_in_full():
+    printed = _printed(explore, "TCP")
+    assert "###[ TCP ]###" in printed
+    assert "dataofs" in printed
+    assert "options" in printed
 
 
 def test_ls_verbose_keeps_the_fields_a_header_does_not_carry():
@@ -365,7 +412,7 @@ def test_public_names_are_exported():
                  "hexdump", "hexdump_str", "ls", "known_layers"):
         assert name in wiry.__all__
         assert hasattr(wiry, name)
-    assert set(wiry._LAYERS) <= set(wiry.__all__)
+    assert set(wiry.__all__) & set(known_layers()) <= set(wiry._LAYERS)
 
 
 def test_raw_helper_is_the_same_as_bytes(pkt):
@@ -395,3 +442,147 @@ def test_an_integer_fills_the_low_order_bits_of_a_field_wider_than_64(layer, fie
     pkt = layer()
     setattr(pkt[layer], field, 1)
     assert getattr(pkt[layer], field) == expected
+
+
+# --- the surface a script reaches for ------------------------------------
+
+def test_a_packet_walks_its_own_layers(pkt):
+    assert [v.name for v in pkt.iterpayloads()] == ["Ether", "IP", "TCP"]
+    assert pkt.firstlayer().name == "Ether"
+    assert pkt.lastlayer().name == "TCP"
+    assert pkt.name == "Ether"
+
+
+def test_field_values_are_reachable_by_name(pkt):
+    assert pkt.getfieldval("ttl") == 33
+    pkt.setfieldval("ttl", 5)
+    assert pkt.ttl == 5
+    info, value = pkt.getfield_and_val("dport")
+    assert info.name == "dport" and value == 80
+    assert pkt.get_field("ttl").kind == "uint"
+    with pytest.raises(KeyError):
+        pkt.get_field("nosuch")
+
+
+def test_unsetting_a_field_puts_its_default_back():
+    p = IP(ttl=9, id=4)
+    p.delfieldval("ttl")
+    with pytest.raises(AttributeError):
+        p.delfieldval("ttl")
+    assert p.ttl == 64 and p.id == 4
+
+
+SPEC_EDITS = [
+    lambda p: p.delfieldval("ttl"),
+    lambda p: p.hide_defaults(),
+    lambda p: p.clone_with(ttl=1),
+    lambda p: p.remove_payload(),
+    lambda p: wiry.fuzz(p),
+    lambda p: p.command(),
+]
+
+
+@pytest.mark.parametrize("call", SPEC_EDITS)
+def test_reading_a_field_does_not_take_the_spec_away(call):
+    # Building the packet to answer a read is a cache, not a change, so the
+    # stack is still what the packet means and these all keep working.
+    p = IP(ttl=9) / TCP()
+    p.ttl
+    call(p)
+
+
+@pytest.mark.parametrize("call", SPEC_EDITS[:-1])
+def test_writing_a_field_through_the_built_packet_does_take_it_away(call):
+    # A write does not reach the stack, so from here the octets are the truth
+    # and the stack is stale. Refusing is the only honest answer.
+    p = IP(ttl=9) / TCP()
+    p.ttl
+    p.ttl = 5
+    with pytest.raises(NotImplementedError):
+        call(p)
+
+
+def test_an_edit_reaches_the_octets_the_packet_serialises_to():
+    p = IP(ttl=9) / TCP(dport=80)
+    assert p.ttl == 9
+    p.delfieldval("ttl")
+    assert bytes(p) == bytes(IP() / TCP(dport=80))
+    p.remove_payload()
+    assert bytes(p) == bytes(IP())
+
+
+def test_command_says_the_same_thing_before_and_after_a_read():
+    p = IP(ttl=9) / TCP(dport=80)
+    before = p.command()
+    p.ttl
+    assert p.command() == before == "IP(ttl=9)/TCP(dport=80)"
+
+
+def test_hiding_defaults_leaves_only_what_was_chosen():
+    p = IP(ttl=64, id=4, dst="10.0.0.1")
+    p.hide_defaults()
+    assert p.fields == {"id": 4, "dst": "10.0.0.1"}
+    assert p.ttl == 64
+
+
+def test_clone_with_replaces_the_bottom_layers_fields():
+    p = IP(ttl=9) / TCP(dport=80)
+    clone = p.clone_with(ttl=3)
+    assert p.clone_with(ttl=3, dst="10.0.0.9") / Raw(b"x") == bytes(
+        IP(ttl=3, dst="10.0.0.9") / TCP(dport=80) / Raw(b"x")
+    )
+    assert clone.ttl == 3 and clone.dport == 80
+    assert p.ttl == 9
+
+
+def test_removing_the_payload_leaves_the_bottom_layer():
+    p = IP(ttl=9) / TCP(dport=80)
+    p.remove_payload()
+    assert p.layers() == ["IP"]
+    assert bytes(p) == bytes(IP(ttl=9))
+
+
+def test_a_packet_reports_what_its_bottom_layer_declares(pkt):
+    assert [f.name for f in pkt.fields_desc][:2] == ["dst", "src"]
+    assert pkt.default_fields["dst"] == "ff:ff:ff:ff:ff:ff"
+    assert pkt[IP].default_fields["ttl"] == 64
+    assert pkt[IP].get_field("ttl").bits == 8
+
+
+def test_a_dissected_packet_reports_the_values_its_header_holds():
+    p = IP(bytes(IP(ttl=9)))
+    assert p.fields["ttl"] == 9
+    assert p.fields["version"] == 4
+
+
+def test_from_hexcap_reads_a_pasted_dump():
+    data = bytes(Ether() / IP(ttl=9) / TCP(dport=80))
+    dump = "\n".join(
+        "%04x  %s  %s" % (
+            off,
+            " ".join(f"{b:02x}" for b in data[off:off + 16]),
+            "".join(chr(b) if 32 <= b < 127 else "." for b in data[off:off + 16]),
+        )
+        for off in range(0, len(data), 16)
+    )
+    back = Ether.from_hexcap(dump)
+    assert bytes(back) == data
+    assert back.layers() == ["Ether", "IP", "TCP"]
+    with pytest.raises(TypeError, match="call from_hexcap"):
+        wiry.Packet.from_hexcap("00")
+
+
+def test_from_hexcap_takes_a_bare_hex_run_too():
+    from wiry.describe import from_hexcap
+
+    assert from_hexcap("00 11 22\n33 44") == b"\x00\x11\x223\x44"
+    # An offset column needs a colon or two spaces after it to be one.
+    assert from_hexcap("0000:  0011 2233") == b"\x00\x11\x223"
+    assert from_hexcap("0010  00 11") == b"\x00\x11"
+
+
+def test_display_is_show(pkt):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        pkt.display()
+    assert out.getvalue() == pkt.show_str()

@@ -67,6 +67,18 @@ def _wrap(rust: Any) -> Packet:
     return Packet(_rust=rust, time=rust.time, wirelen=rust.wirelen)
 
 
+def _wrap_from(iface: str) -> Callable:
+    """The live path knows which interface a packet arrived on, so it records
+    it; a capture file does not, and leaves ``sniffed_on`` None."""
+
+    def wrap(rust: Any) -> Packet:
+        pkt = _wrap(rust)
+        pkt.sniffed_on = iface
+        return pkt
+
+    return wrap
+
+
 def _printing(prn: Optional[Callable], quiet: bool) -> Optional[Callable]:
     """Scapy prints whatever ``prn`` returns; ``quiet`` suppresses that."""
     if prn is None or quiet:
@@ -112,8 +124,9 @@ def _live_args(
     signature is what makes an unknown keyword a ``TypeError`` there too."""
     if offline is not None:
         raise ValueError("the live driver takes no offline source")
+    name = _iface_name(iface)
     return dict(
-        iface=_iface_name(iface),
+        iface=name,
         count=int(count),
         store=bool(store),
         filter=filter,
@@ -125,7 +138,7 @@ def _live_args(
         prn=_printing(prn, quiet),
         lfilter=lfilter,
         stop_filter=stop_filter,
-        wrap=_wrap,
+        wrap=_wrap_from(name),
     )
 
 
@@ -777,7 +790,8 @@ class _Conf:
 
     __slots__ = ("verb", "promisc", "sniff_promisc", "checkIPaddr",
                  "debug_dissector", "recv_poll_rate", "route_autoload",
-                 "route6_autoload", "_iface", "_route", "_route6",
+                 "route6_autoload", "interactive", "histfile", "startup_file",
+                 "session", "_iface", "_route", "_route6",
                  "_l3socket", "_l2socket", "_l2listen", "_loopback")
 
     def __init__(self) -> None:
@@ -794,6 +808,12 @@ class _Conf:
         self.recv_poll_rate = 0.05
         self.route_autoload = True
         self.route6_autoload = True
+        # True only while `wiry.interact()` is running its prompt.
+        self.interactive = False
+        # Empty means the console picks its XDG default; a path overrides it.
+        self.histfile = ""
+        self.startup_file = ""
+        self.session = ""
         self._iface: Optional[str] = None
         self._route: Any = None
         self._route6: Any = None
