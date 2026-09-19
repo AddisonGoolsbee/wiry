@@ -448,3 +448,38 @@ def test_the_message_splice_cannot_outgrow_the_capture_without_a_bound():
     assert kinds.count(0) > 0, "the bound never engaged, so it is untested"
     # Every octet of payload is still somewhere in the result.
     assert sum(len(bytes(p)) - 54 for p in got) == len(payload) * len(frames)
+
+
+def test_a_response_framed_as_if_it_had_a_body_still_loses_nothing():
+    """A 204 carries `Content-Length` describing a body it does not have, so
+    it is framed over the octets of the response behind it. E25 states that
+    gap. What it must not do is take those octets out of the capture: they
+    belong to a message, just not that one."""
+    bogus = b"HTTP/1.1 204 No Content\r\nContent-Length: 10\r\n\r\n"
+    real = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"
+    pl = capture(
+        [
+            seg(1, bogus, sport=80, dport=1234),
+            seg(1 + len(bogus), real, sport=80, dport=1234),
+        ]
+    )
+    out, kinds = pl._list.reassembled()
+    got = b"".join(bytes(p)[54:] for p in PacketList(out))
+    assert sorted(got) == sorted(bogus + real)
+    # The mis-framing does not spread: the response behind it is left unframed
+    # rather than framed wrongly.
+    half = only(pl).client
+    assert len(half.messages()) == 1
+
+
+def test_a_response_with_no_length_frames_nothing_and_keeps_everything():
+    """RFC 9112 §6.3: with no length and no chunking a response runs to a close
+    nothing announces. It never completes, and the octets stay in the capture."""
+    a = b"HTTP/1.1 200 OK\r\nServer: x\r\n\r\nBODYBODY"
+    b = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"
+    pl = capture(
+        [seg(1, a, sport=80, dport=1234), seg(1 + len(a), b, sport=80, dport=1234)]
+    )
+    assert only(pl).client.messages() == []
+    out, _ = pl._list.reassembled()
+    assert b"".join(bytes(p)[54:] for p in PacketList(out)) == a + b
