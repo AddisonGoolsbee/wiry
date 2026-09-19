@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/contrib/ospf.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-09-18 — OSPF_LSA_Hdr's field table and OSPF_LSAck's length_from rule transcribed as a length-driven repeating group; checked against RFC 2328 §A.3.6 and §A.4.1
+
 //! RFC 2328 §A.3.1: every OSPF version 2 packet opens with a one-octet version, a
 //! one-octet type, a 16-bit packet length, the 32-bit router id, the 32-bit area
 //! id, a 16-bit checksum, a 16-bit authentication type and 64 bits of

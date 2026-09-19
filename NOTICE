@@ -69,7 +69,16 @@ per-file blocks are authoritative.
 
 | wiry file | scapy source | scapy version / commit | First taken |
 |---|---|---|---|
-| _(none yet — the relicence landed before any copying)_ | | | |
+| `crates/wiry-core/src/repeat.rs` | `scapy/fields.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/rip.rs` | `scapy/layers/rip.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/netflow5.rs` | `scapy/layers/netflow.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/igmp.rs` | `scapy/contrib/igmpv3.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/ospf.rs` | `scapy/contrib/ospf.py` | scapy 2.7.0 | 2026-09-18 |
+
+A generated layer's block comes from the `[provenance]` table in its
+`dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift
+apart. A spec with no such table generates a file with no block, which is the
+claim that its layout came from the RFC alone.
 
 
 ## Licence history — the MIT period

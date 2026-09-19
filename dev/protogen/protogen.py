@@ -448,13 +448,39 @@ def render_group(g: dict, const: str, vis: str) -> list[str]:
     return out
 
 
+def render_provenance(s: dict) -> list[str]:
+    """GPL-2.0 §2(a) attribution for a table taken from scapy. NOTICE defines
+    the shape; absence of a block is a claim that the file is wiry's own work,
+    so it is emitted only where the spec declares a source."""
+    pr = s.get("provenance")
+    if not pr:
+        return []
+    for k in ("source", "version", "changed"):
+        if not pr.get(k):
+            raise SpecError(f"{s['_file']}: [provenance] needs {k!r}")
+    out = [
+        "// SPDX-License-Identifier: GPL-2.0-only",
+        "//",
+        f"// Derived from scapy: {pr['source']}",
+        f"//   {pr['version']}",
+        "//   Copyright (C) Philippe Biondi and the scapy contributors",
+        "//",
+        "// Changed by the wiry authors:",
+    ]
+    changed = pr["changed"]
+    for line in ([changed] if isinstance(changed, str) else changed):
+        out.append(f"//   {line}")
+    out.append("")
+    return out
+
+
 def render_layer(s: dict, existing: str) -> str:
     hl = s["header_len"]
     fixed = hl if isinstance(hl, int) else None
     min_len = s.get("min_len", fixed if fixed is not None else 0)
     build_len = s.get("build_len", fixed if fixed is not None else min_len)
 
-    lines = []
+    lines = render_provenance(s)
     for line in s["citation"].strip().splitlines():
         lines.append(("//! " + line).rstrip())
     lines.append("//!")

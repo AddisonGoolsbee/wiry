@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/rip.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-09-18 — RIPEntry's field table (AF, RouteTag, addr, mask, nextHop, metric) transcribed as a repeating group rather than a chain of sub-packets; checked against RFC 2453 §4
+
 //! RFC 1058 §3.1 and RFC 2453 §3.6: a RIP message is a one-octet command, a
 //! one-octet version and two octets that must be zero, followed by up to 25 route
 //! entries. RFC 2453 §4 gives an entry as a 16-bit address family, a 16-bit route

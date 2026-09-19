@@ -98,3 +98,8 @@ bytes = [
 cmd = 1
 version = 2
 null = 0
+
+[provenance]
+source = "scapy/layers/rip.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — RIPEntry's field table (AF, RouteTag, addr, mask, nextHop, metric) transcribed as a repeating group rather than a chain of sub-packets; checked against RFC 2453 §4"]

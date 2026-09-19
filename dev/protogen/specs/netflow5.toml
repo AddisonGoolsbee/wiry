@@ -215,3 +215,8 @@ flowSequence = 0
 engineType = 0
 engineID = 0
 samplingInterval = 0
+
+[provenance]
+source = "scapy/layers/netflow.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — NetflowRecordV5's 48-octet field table transcribed as a count-driven repeating group; wiry keeps the version word in the same layer, where scapy splits off NetflowHeader"]

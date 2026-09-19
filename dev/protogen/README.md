@@ -81,6 +81,49 @@ fallback = "raw"
 value = 0xaa
 proto = "Snap"
 
+[group]                   # a repeating payload: "N of these follow"
+name = "RIPEntry"         # what one record is called
+start = 4                 # octets from the header start to the first record
+extent = "rest"           # "count" | "length" | "rest"
+count_off = 16            # bits; the field holding the record count
+count_len = 16
+len_off = 16              # bits; the field holding a byte extent, for "length"
+len_len = 16
+len_scale = 1             # optional; units the extent counts, default 1
+len_covers = 24           # optional; octets of the extent spent before the
+                          # first record, default 0
+elem_len = 20             # a fixed record width in octets, or:
+elem_base = 8             # a base width plus one term per length field
+align = 4                 # optional; records padded up to this, default 1
+when = "is_v3_report"     # optional fn(&[u8]) -> bool over the header
+
+[[group.terms]]           # base plus the sum of (field x scale), per record
+off = 16
+len = 16
+scale = 4
+
+[[group.fields]]          # the record's own flat field table
+name = "addr"
+off = 32
+kind = "ipv4"
+
+[group.nested]            # one level only; the same keys, minus `nested`
+name = "srcaddrs"
+start = 8
+extent = "count"
+count_off = 16
+count_len = 16
+elem_len = 4
+[[group.nested.fields]]
+name = "sa"
+off = 0
+kind = "ipv4"
+
+[provenance]              # GPL-2.0 §2(a) block, where a table came from scapy
+source = "scapy/layers/rip.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — what was taken and what changed"]
+
 [[parents]]               # how dissection reaches this layer
 from = "udp_port"         # ethertype ipproto udp_port tcp_port llc_sap icmpv6_type
 values = [3784, 3785, 4784]
@@ -114,12 +157,21 @@ raise:
   `overlaps = true`
 - a field that ends past a **fixed** `header_len` — the flat model cannot place
   it, and the error says to use a hand-written hook instead
+- a `[group]` under a fixed `header_len`: the walk is handed the header, so
+  records outside it would be invisible. `"rest"` or `"hand"` is required
+- a `[group]` whose spec does not also name `parsed_field` and end the field
+  table with a `var_bytes` of that name at the group's `start`, so the region is
+  in the field table and `raw_options()` still reaches it
+- a group with both, or neither, of `elem_len` and `elem_base`; a record field
+  that ends past a fixed `elem_len`; a group nested inside a nested one
+- a `[provenance]` table missing `source`, `version` or `changed`
 
 ## The escape hatch
 
-`DEVIATIONS.md` E1 (type-dependent and variable-length structure), E2 (option
-regions) and computed lengths and checksums are all outside the flat
-`FieldDesc` model. Where a protocol needs one, the spec says `"hand"` for that
+`DEVIATIONS.md` E1 (type-dependent structure), E2 (option regions) and computed
+lengths and checksums are outside the flat `FieldDesc` model. A repeating payload
+is not: `[group]` declares one and the generator emits both the `GroupDesc` and
+its registration. Where a protocol needs one, the spec says `"hand"` for that
 hook and the code goes in the region the generated file marks:
 
 ```rust

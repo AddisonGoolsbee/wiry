@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/netflow.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-09-18 — NetflowRecordV5's 48-octet field table transcribed as a count-driven repeating group; wiry keeps the version word in the same layer, where scapy splits off NetflowHeader
+
 //! Cisco Systems, "NetFlow Export Datagram Formats", version 5 header: a 16-bit
 //! version (5), a 16-bit record count, the 32-bit system uptime in milliseconds,
 //! the 32-bit UNIX seconds and nanoseconds of the export, a 32-bit flow sequence

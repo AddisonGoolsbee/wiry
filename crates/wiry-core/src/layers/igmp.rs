@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/contrib/igmpv3.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-09-18 — IGMPv3gr's group record and its srcaddrs list transcribed as a nested repeating group; the auxiliary-data length is counted into the record, which scapy does not do
+
 //! RFC 2236 §2 (IGMPv2) and RFC 1112 Appendix I (IGMPv1) give the same eight
 //! octets: a one-octet type, a one-octet max response time, a 16-bit checksum and
 //! a group address. RFC 3376 §4.1 keeps that prefix for a version 3 Membership

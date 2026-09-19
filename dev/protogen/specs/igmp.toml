@@ -146,3 +146,8 @@ bytes = [0x16, 0x00, 0x09, 0x04, 0xe0, 0x00, 0x00, 0xfb]
 type = 0x16
 mrcode = 0
 chksum = 0x0904
+
+[provenance]
+source = "scapy/contrib/igmpv3.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — IGMPv3gr's group record and its srcaddrs list transcribed as a nested repeating group; the auxiliary-data length is counted into the record, which scapy does not do"]

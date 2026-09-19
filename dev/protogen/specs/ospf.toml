@@ -148,3 +148,8 @@ type = 1
 len = 24
 chksum = 0
 authtype = 0
+
+[provenance]
+source = "scapy/contrib/ospf.py"
+version = "scapy 2.7.0"
+changed = ["2026-09-18 — OSPF_LSA_Hdr's field table and OSPF_LSAck's length_from rule transcribed as a length-driven repeating group; checked against RFC 2328 §A.3.6 and §A.4.1"]
