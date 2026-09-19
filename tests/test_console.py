@@ -105,7 +105,6 @@ def test_a_session_round_trips_the_names_you_made(tmp_path, pkt):
     console.load_session(path, session=back)
     assert back["n"] == 7
     assert bytes(back["p"]) == bytes(pkt)
-    # The preloaded API and private names come from the import, not the file.
     assert "IP" not in back and "_hidden" not in back
 
 

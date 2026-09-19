@@ -185,8 +185,8 @@ def _print_fields(rows: Sequence[tuple], with_value: bool,
 
 
 def _print_layer(pkt: Any, idx: int, name: str, verbose: bool) -> None:
-    # scapy separates layers with a bare `--`; naming each one costs nothing
-    # and is what a reader is looking for.
+    # scapy separates layers with a bare `--`; naming each one is what a
+    # reader is looking for.
     print(f"###[ {name} ]###")
     defaults = _defaults(name)
     _print_fields(

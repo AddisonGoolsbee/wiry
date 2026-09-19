@@ -333,7 +333,6 @@ def test_ls_searches_by_name_closest_match_first():
 def test_ls_of_a_packet_lists_each_layer_with_values_and_defaults(pkt):
     printed = _printed(ls, pkt)
     assert "###[ Ether ]###" in printed and "###[ TCP ]###" in printed
-    # value first, then the default it was compared against
     assert "= 80" in printed and "(80)" in printed
     assert "'00:11:22:33:44:55'" in printed
 
@@ -350,7 +349,6 @@ def test_ls_of_something_that_is_not_a_layer_says_so():
 def test_lsc_lists_commands_with_their_first_doc_line():
     printed = _printed(lsc)
     assert "rdpcap" in printed and "sniff" in printed
-    # Layers and value classes are not commands.
     assert "\nIP " not in printed and "RandIP " not in printed
     assert "wrpcap" in _printed(lsc, "pcap")
     assert "sniff" not in _printed(lsc, "pcap")
