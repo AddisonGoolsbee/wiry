@@ -69,7 +69,9 @@ def namespace():
     return ns
 
 
-IDENT = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\b")
+# A name after a dot is an attribute, not a global: `a.restart()` must not read
+# as the out-of-scope function `restart()`.
+IDENT = re.compile(r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\b")
 
 # `~` keywords scapy uses to gate a test on its host. We honour the ones that
 # describe an environment we are not in; a test we skip for this reason says so.

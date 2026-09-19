@@ -265,8 +265,8 @@ an earlier draft did. `dev/protogen/README.md` is the contract; `protogen.py
 All 17 core layers are complete, including TCP/IPv4/DHCP options in both
 directions (RFC 3046 sub-options, RFC 3396 joining and RFC 2131 overload
 included), DNS record sections with name compression and DNS over TCP, and pcap
-plus pcapng in both directions. Around them are 14 encapsulations and 60
-generated layers, 91 in all; `known_layers()` is the authority and
+plus pcapng in both directions. Around them are 14 encapsulations and 69
+generated layers, 100 in all; `known_layers()` is the authority and
 `DEVIATIONS.md` states the depth of each generated one. Field names match scapy
 exactly across every audited layer.
 
@@ -323,7 +323,7 @@ Beyond parity:
 - **Answering machines (E28)** and scapy's per-packet `session=` contract
   (E25), which now runs live as well as offline because a session sees a packet
   the dissector has already produced.
-- **Fuzzing.** Nine libFuzzer targets plus seeded property tests on stable.
+- **Fuzzing.** Ten libFuzzer targets plus seeded property tests on stable.
   Four of the five crates forbid unsafe. The fifth is `wiry-pcap`, which is the
   FFI and nothing else: it loads libpcap, calls through function pointers and
   owns what comes back. It parses no packets, and nothing else in the workspace

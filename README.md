@@ -199,7 +199,7 @@ the one exception, since compiling BPF is libpcap's job.
 $ wiry
           _               Welcome to wiry 0.1.0
  __      ___ _ __ _   _
- \ \ /\ / / | '__| | | |  91 layers, with live capture
+ \ \ /\ / / | '__| | | |  100 layers, with live capture
   \ V  V /| | |  | |_| |
    \_/\_/ |_|_|   \__, |  ls() lists the layers, ls(IP) what one holds, lsc() the commands.
                   |___/
@@ -215,7 +215,7 @@ dport        : uint (2 bytes)           = 80              (80)
 flags        : flags (9 bits)           = 'S'             ('S')
 ```
 
-Ninety-one layers is more than anyone remembers, so the three discovery
+A hundred layers is more than anyone remembers, so the three discovery
 commands are part of the API rather than a convenience. `ls()` lists every
 layer, `ls("tcp")` searches, `ls(IP)` prints what a layer holds and `ls(pkt)`
 what this packet holds beside the defaults. `lsc()` lists every command with
@@ -356,19 +356,23 @@ all 20,000 layer chains agree, all 210,910 field comparisons are equal, and
 every packet re-serialises byte-identically.
 
 scapy's own regression suite runs against wiry. Over its whole `test/`
-directory: **59 pass, 616 skip, 5 fail**; over `regression.uts` alone, 47 pass,
-294 skip, 4 fail; over `test/scapy/automaton.uts`, 7 pass, 8 skip, 0 fail. Read
+directory: **64 pass, 610 skip, 6 fail**; over `regression.uts` alone, 50 pass,
+292 skip, 3 fail; over `test/scapy/automaton.uts`, 7 pass, 8 skip, 0 fail. Read
 the skip column honestly: it is 90% of the suite, and that ratio is the coverage
 statement, not the pass count. A skip is a scope boundary — most often a layer
 we do not implement, a scapy internal we have no equivalent for, a call we
 refuse by design, or a test whose `~` marker asks for a Linux host, root or
 tshark. A refusal counts as a skip rather than a failure, which is a choice the
-harness makes and `dev/scapy_suite.py` shows. Of the 5 failures, 1 needs
-Windows, 2 assert by patching a scapy internal we do not have, and 2 are
-generator differences [DEVIATIONS.md](DEVIATIONS.md) E21 states outright. Every
-gap is enumerated there.
+harness makes and `dev/scapy_suite.py` shows. Of the 6 failures, 1 needs
+Windows, 2 assert by patching a scapy internal we do not have, 1 is a generator
+difference [DEVIATIONS.md](DEVIATIONS.md) E21 states outright, and 1 is the
+source MAC wiry deliberately does not fill from the live interface (E9). The
+sixth is a real wrong answer and not a scope boundary:
+`get_if_hwaddr(conf.loopback_name)` raises on macOS, where scapy answers
+`00:00:00:00:00:00` for a loopback that has no hardware address. Every other gap
+is enumerated in DEVIATIONS.
 
-686 Rust and 1,231 Python tests pass; 680 and 1,202 with
+790 Rust and 1,410 Python tests pass; 784 and 1,383 with
 `--no-default-features`, which drops live capture.
 
 The live paths were run against a real wire for the first time on
