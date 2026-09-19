@@ -234,8 +234,21 @@ def _plain(ns: dict, text: str) -> None:
     code.InteractiveConsole(locals=ns).interact(banner=text, exitmsg="")
 
 
+def _hist_file(histfile: str) -> Any:
+    """IPython 9 types `hist_file` as a `Path` and IPython 8 as a `str`. The
+    wrong one raises deep inside the shell's constructor, where the only thing
+    a caller can do is fall back silently — so it is settled here."""
+    import IPython
+
+    return pathlib.Path(histfile) if IPython.version_info[0] >= 9 else histfile
+
+
 def _ipython(ns: dict, text: str, histfile: str) -> bool:
-    """True when IPython ran. False means it is not installed, or refused."""
+    """True when IPython ran. False means it is not installed, or refused.
+
+    A refusal is announced. A shell that quietly drops to the plain one is how
+    an incompatibility survives a release unnoticed.
+    """
     try:
         from IPython import embed
     except ImportError:
@@ -248,14 +261,25 @@ def _ipython(ns: dict, text: str, histfile: str) -> bool:
         cfg.InteractiveShellEmbed.confirm_exit = False
         cfg.InteractiveShell.banner1 = text + "\n"
         cfg.TerminalInteractiveShell.term_title_format = f"wiry {wiry.__version__}"
+        # `pkt[TCP].<tab>` is the idiom this library is for, and it completes
+        # only when the completer evaluates the subscript rather than reasoning
+        # about it statically. Both knobs are needed: jedi cannot run a
+        # `__dir__` that is computed, and `limited` refuses `__getitem__` on
+        # anything but a builtin container.
+        cfg.Completer.use_jedi = False
+        cfg.Completer.evaluation = "unsafe"
         if histfile:
-            cfg.HistoryAccessor.hist_file = histfile
+            cfg.HistoryAccessor.hist_file = _hist_file(histfile)
         kw = {"config": cfg, "user_ns": ns}
     except ImportError:
         kw["banner1"] = text + "\n"
     try:
         embed(**kw)
-    except (AttributeError, TypeError):
+    except Exception as exc:
+        sys.stderr.write(
+            f"IPython is installed but would not start ({type(exc).__name__}: "
+            f"{exc}); using the standard Python shell.\n"
+        )
         return False
     return True
 

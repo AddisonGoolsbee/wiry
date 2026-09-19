@@ -191,21 +191,26 @@ def _run_console(script, extra=()):
     )
 
 
+def _banner_of(out):
+    """The plain interpreter writes its banner to stderr and IPython to
+    stdout, and which one runs depends on what is installed."""
+    return out.stdout + out.stderr
+
+
 def test_the_console_starts_and_runs_a_packet_through():
     out = _run_console(
         'p = Ether()/IP(dst="10.0.0.2")/TCP(dport=80)\n'
         'print(p.summary())\n'
         'print(len(raw(p)))\n'
     )
-    # The banner goes where the plain interpreter puts its own: stderr.
-    assert "Welcome to wiry" in out.stderr
+    assert "Welcome to wiry" in _banner_of(out)
     assert "Ether / IP / TCP" in out.stdout
     assert "54" in out.stdout
 
 
 def test_the_console_can_be_started_without_a_banner():
     out = _run_console("print('ran')\n", extra=["-H"])
-    assert "Welcome to wiry" not in out.stderr
+    assert "Welcome to wiry" not in _banner_of(out)
     assert "ran" in out.stdout
 
 
@@ -213,3 +218,44 @@ def test_ls_and_lsc_work_at_the_prompt():
     out = _run_console("ls(IP)\nlsc('rdpcap')\n")
     assert "ttl" in out.stdout
     assert "rdpcap" in out.stdout
+
+
+def _ipython_completer(ns):
+    IPython = pytest.importorskip("IPython", reason="IPython is optional")
+    from IPython.terminal.interactiveshell import TerminalInteractiveShell
+
+    shell = TerminalInteractiveShell.instance(user_ns=ns)
+    comp = shell.Completer
+    comp.use_jedi = False
+    comp.evaluation = "unsafe"
+    assert IPython.version_info[0] >= 8
+    return comp
+
+
+def test_ipython_completes_a_field_through_a_layer_subscript(pkt):
+    """`pkt[TCP].<tab>` is the idiom, and it needs the two completer settings
+    the console sets. Asserted against IPython itself, not against what the
+    settings are called."""
+    ns = console.namespace({"p": pkt})
+    comp = _ipython_completer(ns)
+    from IPython.core.completer import provisionalcompleter
+
+    with provisionalcompleter():
+        def done(text):
+            return [c.text for c in comp.completions(text, len(text))]
+
+        assert ".window" in done("p[TCP].wi")
+        assert ".dport" in done("p.dpo")
+        assert "ttl=" in done("IP(tt")
+        assert ".ttl" in done("IP.tt")
+
+
+def test_the_history_file_is_typed_the_way_this_ipython_wants_it():
+    import pathlib
+
+    pytest.importorskip("IPython", reason="IPython is optional")
+    from IPython.core.history import HistoryAccessor
+
+    value = console._hist_file("/tmp/h")
+    HistoryAccessor(hist_file=value)
+    assert isinstance(value, (str, pathlib.Path))
