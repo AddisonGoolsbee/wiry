@@ -4,12 +4,21 @@ num = 77
 citation = """
 RFC 7011 §3.1: a 16-bit version (10), a 16-bit length covering the whole
 message, a 32-bit export time in seconds, a 32-bit sequence number and a 32-bit
-observation domain id. The Sets that follow (§3.3) need the template the
-exporter sent earlier, so they stay in the payload (DEVIATIONS P6).
+observation domain id. §3.3.2 gives every Set the same two leading fields — a
+16-bit Set id (2 template, 3 options template, 256 and up data) and a 16-bit
+length covering both of them and the records — so the Sets are a repeating
+group whose element width is its own length field
+(`crates/wiry-core/src/repeat.rs`), running to the end of the message.
+
+The Set *contents* are not decoded: a data Set needs the template the exporter
+sent in an earlier message, which is per-session state this dissector does not
+keep (DEVIATIONS P6).
 """
 min_len = 16
-header_len = 16
+header_len = "hand"
+build_len = 16
 content_len = "hand"
+parsed_field = "sets"
 
 [[fields]]
 name = "version"
@@ -38,6 +47,40 @@ name = "observationDomainID"
 off = 96
 len = 32
 
+[[fields]]
+name = "sets"
+off = 128
+kind = "var_bytes"
+
+[group]
+name = "IPFIXSet"
+start = 16
+extent = "rest"
+elem_base = 0
+elem_min = 4
+
+[[group.terms]]
+off = 16
+len = 16
+scale = 1
+
+[[group.fields]]
+name = "setID"
+off = 0
+len = 16
+default = 2
+
+[[group.fields]]
+name = "length"
+off = 16
+len = 16
+default = 4
+
+[[group.fields]]
+name = "content"
+off = 32
+kind = "var_bytes"
+
 [[parents]]
 from = "udp_port"
 values = [4739, 2055, 9995, 9996]
@@ -45,16 +88,17 @@ guard = "crate::layers::ipfix::looks_like"
 bind = 4739
 
 [vector]
-source = "RFC 7011 §3.1 message header, hand-built: version 10, length 16, sequence 1."
+source = "RFC 7011 §3.1 message, hand-built: version 10, sequence 1, one eight-octet template Set."
 bytes = [
-  0x00, 0x0a, 0x00, 0x10,
+  0x00, 0x0a, 0x00, 0x18,
   0x00, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x01,
   0x00, 0x00, 0x00, 0x00,
+  0x00, 0x02, 0x00, 0x08, 0x01, 0x00, 0x00, 0x01,
 ]
 [vector.fields]
 version = 10
-length = 16
+length = 24
 exportTime = 0
 sequenceNumber = 1
 observationDomainID = 0
