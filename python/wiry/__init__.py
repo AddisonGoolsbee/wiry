@@ -38,6 +38,17 @@ _TOOLS = (
     "getmacbyip",
 )
 
+_SOCKETS = (
+    "SuperSocket", "OfflineSocket", "StreamSocket", "L2Socket",
+    "L2ListenSocket", "L3Socket", "ObjectPipe", "select_objects", "MTU",
+)
+
+_AUTOMATON = ("ATMT", "Automaton")
+
+_ANSMACHINE = ("AnsweringMachine", "AnsweringMachineTCP", "AnsweringMachineUDP")
+
+_ROUTE = ("Route", "Route6", "read_routes", "read_routes6", "in6_getifaddr")
+
 _EAGER = (
     "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
     "PcapReader", "PcapWriter", "PcapNgWriter", "raw", "hexdump",
@@ -52,6 +63,7 @@ _EAGER = (
 # invisible to dir(wiry) and to anything probing it for capability.
 __all__ = list(
     _EAGER + _COLUMNAR + _FRAG + _STREAM + _DESCRIBE + _CAPTURE + _TOOLS
+    + _SOCKETS + _AUTOMATON + _ANSMACHINE + _ROUTE
 )
 
 
@@ -74,6 +86,18 @@ def __getattr__(name: str) -> Any:
     if name in _TOOLS:
         from . import tools
         return getattr(tools, name)
+    if name in _SOCKETS:
+        from . import supersocket
+        return getattr(supersocket, name)
+    if name in _AUTOMATON:
+        from . import automaton
+        return getattr(automaton, name)
+    if name in _ANSMACHINE:
+        from . import ansmachine
+        return getattr(ansmachine, name)
+    if name in _ROUTE:
+        from . import route
+        return getattr(route, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

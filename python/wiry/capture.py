@@ -649,62 +649,6 @@ def interfaces() -> list:
     return list(_b.list_interfaces())
 
 
-class _Route:
-    """Which interface a packet would leave by, and with what source address.
-
-    **This is not the kernel's routing table.** wiry reads no route from the
-    OS: every entry is a host route synthesised from the interface list, there
-    are no gateways and no netmasks worth the name, and ``route()`` answers the
-    loopback interface for a loopback destination and ``conf.iface`` for
-    everything else. It is enough to tell a script which interface and source
-    address it is about to use, and it must not be used to *make* a routing
-    decision. ``resync()`` drops the cache.
-    """
-
-    __slots__ = ("_table",)
-
-    def __init__(self) -> None:
-        self._table: Optional[list] = None
-
-    def resync(self) -> None:
-        self._table = None
-
-    @property
-    def routes(self) -> list:
-        """One entry per interface address, in scapy's six-tuple shape:
-        ``(network, netmask, gateway, iface, outgoing_ip, metric)``. The
-        netmask is always a host mask and the gateway always ``0.0.0.0``,
-        because neither is read from anywhere."""
-        if self._table is None:
-            self._table = [
-                (addr, "255.255.255.255", "0.0.0.0", i["name"], addr, 0)
-                for i in _b.list_interfaces()
-                for addr in i["addresses"]
-                if ":" not in addr
-            ]
-        return list(self._table)
-
-    def _loopback(self) -> Optional[str]:
-        for i in _b.list_interfaces():
-            if i["loopback"]:
-                return i["name"]
-        return None
-
-    def route(self, dst: Any = None, verbose: Any = None) -> tuple:
-        """``(iface, outgoing_ip, gateway)`` for a destination."""
-        name = None
-        if dst is not None and str(dst).split("/")[0].startswith("127."):
-            name = self._loopback()
-        name = name or conf.iface
-        return (name, get_if_addr(name), "0.0.0.0")
-
-    def __repr__(self) -> str:
-        rows = "".join(
-            f"\n  {net:<18}{iface:<12}{out}" for net, _, _, iface, out, _ in self.routes
-        )
-        return f"<route: interface addresses only, no kernel table>{rows}"
-
-
 class _Conf:
     """A small stand-in for scapy's ``conf``, carrying the knobs scripts read.
 
@@ -716,7 +660,9 @@ class _Conf:
     """
 
     __slots__ = ("verb", "promisc", "sniff_promisc", "checkIPaddr",
-                 "_iface", "_route")
+                 "debug_dissector", "recv_poll_rate", "route_autoload",
+                 "route6_autoload", "_iface", "_route", "_route6",
+                 "_l3socket", "_l2socket", "_l2listen", "_loopback")
 
     def __init__(self) -> None:
         self.verb = 2
@@ -726,8 +672,20 @@ class _Conf:
         # False drops the address pinning in answers.rs: what DHCP needs, and a
         # looser match everywhere else.
         self.checkIPaddr = True
+        # True makes a session's own failure raise instead of being reported and
+        # skipped past; the dissector itself never raises, by design.
+        self.debug_dissector = False
+        # How long a state machine's select waits before looking at its timers.
+        self.recv_poll_rate = 0.05
+        self.route_autoload = True
+        self.route6_autoload = True
         self._iface: Optional[str] = None
-        self._route: Optional[_Route] = None
+        self._route: Any = None
+        self._route6: Any = None
+        self._l3socket: Any = None
+        self._l2socket: Any = None
+        self._l2listen: Any = None
+        self._loopback: Optional[str] = None
 
     @property
     def iface(self) -> str:
@@ -741,10 +699,33 @@ class _Conf:
         self._iface = None if value is None else str(value)
 
     @property
-    def route(self) -> _Route:
+    def loopback_name(self) -> str:
+        """What this host calls its loopback interface."""
+        from .route import loopback_name
+
+        return self._loopback or loopback_name()
+
+    @loopback_name.setter
+    def loopback_name(self, value: Any) -> None:
+        self._loopback = None if value is None else str(value)
+
+    @property
+    def route(self) -> Any:
+        """The IPv4 routing table, read from the OS on first use."""
         if self._route is None:
-            self._route = _Route()
+            from .route import Route
+
+            self._route = Route(autoload=self.route_autoload)
         return self._route
+
+    @property
+    def route6(self) -> Any:
+        """The IPv6 routing table, read from the OS on first use."""
+        if self._route6 is None:
+            from .route import Route6
+
+            self._route6 = Route6(autoload=self.route6_autoload)
+        return self._route6
 
     @property
     def use_pcap(self) -> bool:
@@ -763,37 +744,47 @@ class _Conf:
             )
 
     @property
-    def l3socket(self) -> None:
-        """``None``, and only ``None``. wiry has no socket objects to swap: the
-        layer-3 path is a raw socket opened per call in Rust, which is also why
-        ``send(socket=...)`` is refused."""
-        return None
+    def l3socket(self) -> Any:
+        """The class a state machine opens to send layer-3 datagrams.
+
+        Set it to swap in your own; set it to ``None`` to go back to wiry's.
+        The send path of ``send()`` and ``sr()`` opens its own socket in Rust
+        and does not read this, which is why ``send(socket=...)`` is still
+        refused (E17)."""
+        from .supersocket import L3Socket
+
+        return self._l3socket or L3Socket
 
     @l3socket.setter
     def l3socket(self, value: Any) -> None:
-        if value is not None:
-            raise NotImplementedError(
-                "conf.l3socket cannot be replaced: wiry has no socket class to "
-                "swap in, and the send path opens its own socket per call"
-            )
+        self._l3socket = value
 
     @property
-    def l2socket(self) -> None:
-        """``None``, and only ``None``. See ``l3socket``: the layer-2 path is a
-        libpcap handle opened per call."""
-        return None
+    def l2socket(self) -> Any:
+        """The class a state machine opens to send layer-2 frames."""
+        from .supersocket import L2Socket
+
+        return self._l2socket or L2Socket
 
     @l2socket.setter
     def l2socket(self, value: Any) -> None:
-        if value is not None:
-            raise NotImplementedError(
-                "conf.l2socket cannot be replaced: wiry has no socket class to "
-                "swap in, and the send path opens its own handle per call"
-            )
+        self._l2socket = value
 
-    # scapy's own spelling of the same two.
+    @property
+    def l2listen(self) -> Any:
+        """The class a state machine opens to receive frames."""
+        from .supersocket import L2ListenSocket
+
+        return self._l2listen or L2ListenSocket
+
+    @l2listen.setter
+    def l2listen(self, value: Any) -> None:
+        self._l2listen = value
+
+    # scapy's own spelling of the same three.
     L3socket = l3socket
     L2socket = l2socket
+    L2listen = l2listen
 
     def __repr__(self) -> str:
         return (f"<conf iface={self._iface!r} verb={self.verb} "
