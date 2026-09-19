@@ -501,10 +501,10 @@ def fuzz(pkt: Any) -> Any:
 
     if not isinstance(pkt, Packet):
         raise TypeError(f"fuzz() takes a packet, not {type(pkt).__name__}")
-    if pkt._rust is not None:
+    if not pkt._spec_live:
         raise NotImplementedError(
-            "fuzz() takes a packet being built; a dissected one cannot be "
-            "turned back into a field spec"
+            "fuzz() takes a packet being built; a dissected one, or one whose "
+            "fields have been written through, cannot go back to a field spec"
         )
     stack = []
     for lname, fields in pkt._stack:

@@ -472,20 +472,50 @@ def test_unsetting_a_field_puts_its_default_back():
     assert p.ttl == 64 and p.id == 4
 
 
-@pytest.mark.parametrize("call", [
+SPEC_EDITS = [
     lambda p: p.delfieldval("ttl"),
     lambda p: p.hide_defaults(),
     lambda p: p.clone_with(ttl=1),
     lambda p: p.remove_payload(),
-])
-def test_editing_the_spec_needs_a_packet_that_is_still_a_spec(call):
-    # Reading a field builds the packet, and from then on the octets are the
-    # truth; the stack that made them is not, so these four refuse rather than
-    # quietly editing something nobody will serialise. This is fuzz()'s rule.
+    lambda p: wiry.fuzz(p),
+    lambda p: p.command(),
+]
+
+
+@pytest.mark.parametrize("call", SPEC_EDITS)
+def test_reading_a_field_does_not_take_the_spec_away(call):
+    # Building the packet to answer a read is a cache, not a change, so the
+    # stack is still what the packet means and these all keep working.
     p = IP(ttl=9) / TCP()
     p.ttl
+    call(p)
+
+
+@pytest.mark.parametrize("call", SPEC_EDITS[:-1])
+def test_writing_a_field_through_the_built_packet_does_take_it_away(call):
+    # A write does not reach the stack, so from here the octets are the truth
+    # and the stack is stale. Refusing is the only honest answer.
+    p = IP(ttl=9) / TCP()
+    p.ttl
+    p.ttl = 5
     with pytest.raises(NotImplementedError):
         call(p)
+
+
+def test_an_edit_reaches_the_octets_the_packet_serialises_to():
+    p = IP(ttl=9) / TCP(dport=80)
+    assert p.ttl == 9
+    p.delfieldval("ttl")
+    assert bytes(p) == bytes(IP() / TCP(dport=80))
+    p.remove_payload()
+    assert bytes(p) == bytes(IP())
+
+
+def test_command_says_the_same_thing_before_and_after_a_read():
+    p = IP(ttl=9) / TCP(dport=80)
+    before = p.command()
+    p.ttl
+    assert p.command() == before == "IP(ttl=9)/TCP(dport=80)"
 
 
 def test_hiding_defaults_leaves_only_what_was_chosen():

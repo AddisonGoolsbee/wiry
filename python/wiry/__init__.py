@@ -580,8 +580,8 @@ class Packet(metaclass=_PacketMeta):
 
     _name: str | None = None
 
-    __slots__ = ("_stack", "_payload", "_rust", "time", "wirelen", "sent_time",
-                 "sniffed_on")
+    __slots__ = ("_stack", "_payload", "_rust", "_written", "time", "wirelen",
+                 "sent_time", "sniffed_on")
 
     def __init__(
         self,
@@ -594,6 +594,7 @@ class Packet(metaclass=_PacketMeta):
         self._stack = _stack if _stack is not None else []
         self._payload = _payload
         self._rust = _rust
+        self._written = False
         self.time = time
         self.wirelen = wirelen
         self.sent_time = None
@@ -748,8 +749,30 @@ class Packet(metaclass=_PacketMeta):
             )
         return self._rust
 
+    @property
+    def _spec_live(self) -> bool:
+        """Whether the layer stack is still what this packet means.
+
+        Reading a field builds the packet and caches it, which is a cache, not
+        a change. Writing one through that cache is a change, and from then on
+        the octets are the truth and the stack is stale.
+        """
+        return bool(self._stack) and not self._written
+
+    def _edit_spec(self) -> list:
+        """The stack, for a caller about to change it. The built packet is
+        dropped so the next serialisation sees the change."""
+        if not self._spec_live:
+            raise NotImplementedError(
+                "this takes a packet being built; one whose fields have been "
+                "written through keeps no record of which values were assigned"
+            )
+        self._rust = None
+        return self._stack
+
     def _set(self, layer: int, field: str, value: Any) -> None:
         if self._rust is not None:
+            self._written = True
             if isinstance(value, (bool, FlagValue)):
                 self._rust.set_field(layer, field, int(value))
             elif isinstance(value, int):
@@ -839,7 +862,7 @@ class Packet(metaclass=_PacketMeta):
         view = self.getlayer(0)
         if view is None:
             return {}
-        if self._rust is None:
+        if self._spec_live:
             return dict(self._stack[0][1])
         return {f: getattr(view, f) for f in view.fields()}
 
@@ -886,12 +909,7 @@ class Packet(metaclass=_PacketMeta):
         Only a packet still being built can do this: once the octets exist
         there is no record of which of them the caller chose (E12).
         """
-        if self._rust is not None:
-            raise NotImplementedError(
-                "delfieldval() takes a packet being built; a dissected one "
-                "keeps no record of which values were assigned"
-            )
-        for _, fields in self._stack:
+        for _, fields in self._edit_spec():
             if field in fields:
                 del fields[field]
                 return
@@ -900,14 +918,9 @@ class Packet(metaclass=_PacketMeta):
     def hide_defaults(self) -> None:
         """Drop every assigned value that equals the layer's default, so
         `command()` prints only what the caller actually chose."""
-        if self._rust is not None:
-            raise NotImplementedError(
-                "hide_defaults() takes a packet being built; a materialised "
-                "one keeps no record of which values were assigned"
-            )
         from .discover import _defaults
 
-        for lname, fields in self._stack:
+        for lname, fields in self._edit_spec():
             if lname in _OPAQUE:
                 continue
             defaults = _defaults(lname)
@@ -917,13 +930,11 @@ class Packet(metaclass=_PacketMeta):
 
     def clone_with(self, payload: Any = None, **fields: Any) -> "Packet":
         """A copy whose outermost layer carries exactly these field values."""
-        if self._rust is not None:
+        if not self._spec_live:
             raise NotImplementedError(
-                "clone_with() takes a packet being built; a materialised one "
-                "cannot be turned back into a field spec"
+                "clone_with() takes a packet being built; one whose fields "
+                "have been written through cannot go back to a field spec"
             )
-        if not self._stack:
-            raise ValueError("empty packet")
         stack = [(n, dict(f)) for n, f in self._stack]
         stack[0] = (stack[0][0], dict(fields))
         clone = Packet(_stack=stack, _payload=self._payload,
@@ -932,12 +943,7 @@ class Packet(metaclass=_PacketMeta):
 
     def remove_payload(self) -> None:
         """Drop everything above the bottom layer, in place."""
-        if self._rust is not None:
-            raise NotImplementedError(
-                "remove_payload() takes a packet being built; a materialised "
-                "one cannot be turned back into a field spec"
-            )
-        del self._stack[1:]
+        del self._edit_spec()[1:]
         self._payload = None
 
     @classmethod
@@ -1094,7 +1100,7 @@ class Packet(metaclass=_PacketMeta):
         """A dissected packet travels as its octets and the layer to read them
         as; one still being built travels as its spec, so its generators
         survive the trip undrawn."""
-        if self._rust is None:
+        if self._spec_live:
             return (_from_stack, (self._stack, self._payload, self.time,
                                   self.wirelen, self.sniffed_on))
         names = self._rust.layer_names()

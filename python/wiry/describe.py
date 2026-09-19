@@ -76,7 +76,7 @@ def command(pkt: Any) -> str:
     packet still under construction names only what was assigned to it, since
     the rest is what construction fills in anyway.
     """
-    if pkt._rust is None and pkt._stack:
+    if pkt._spec_live:
         return _spec_command(pkt._stack)
     rust = _settled(pkt)
     parts = []
