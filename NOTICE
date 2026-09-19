@@ -69,7 +69,11 @@ per-file blocks are authoritative.
 
 | wiry file | scapy source | scapy version / commit | First taken |
 |---|---|---|---|
-| _(none yet — the relicence landed before any copying)_ | | | |
+| `python/wiry/automaton.py` | `scapy/automaton.py` | 2.7.0, `7d69454` | 2026-09-18 |
+| `python/wiry/supersocket.py` | `scapy/automaton.py` (`ObjectPipe`, `select_objects`), `scapy/supersocket.py` | 2.7.0, `7d69454` | 2026-09-18 |
+| `python/wiry/ansmachine.py` | `scapy/ansmachine.py` | 2.7.0, `7d69454` | 2026-09-18 |
+| `python/wiry/route.py` | `scapy/route.py`, `scapy/route6.py`, `scapy/arch/unix.py`, `scapy/arch/linux/rtnetlink.py`, `scapy/utils6.py` | 2.7.0, `7d69454` | 2026-09-18 |
+| `python/wiry/stream.py` | `scapy/sessions.py` (the session protocol only) | 2.7.0, `7d69454` | 2026-09-18 |
 
 
 ## Licence history — the MIT period

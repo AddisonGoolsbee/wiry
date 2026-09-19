@@ -1,3 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# The session protocol below — `DefaultSession`, `supersession`, and the
+# `process(pkt) -> Packet | None` contract `sniff(session=)` drives — is derived
+# from scapy: scapy/sessions.py
+#   scapy 2.7.0, upstream commit 7d69454
+#   Copyright (C) Philippe Biondi and the scapy contributors
+#
+# Changed by the wiry authors:
+#   2026-09-18 — reassembly is a whole-capture pass in Rust behind
+#                `bulk_process`, and the per-packet contract rides `sniff`'s
+#                wrap hook rather than a Python read loop.
+
 """TCP stream reassembly, and the session objects built on it.
 
 RFC 9293 §3.4 and §3.7. `PacketList.streams()` reassembles a whole capture in
