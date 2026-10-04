@@ -139,6 +139,42 @@ def namespace():
     return ns
 
 
+def utscapy_tools(root):
+    """The helpers UTscapy puts in every session (`import_UTscapy_tools`):
+    test scaffolding, not scapy's API. `scapy_path` resolves against the
+    checkout the campaign came from, where its pcaps live."""
+
+    class Bunch:
+        def __init__(self, **kw):
+            self.__dict__ = kw
+
+    def retry_test(func):
+        error = None
+        for _ in range(3):
+            try:
+                return func()
+            except Exception as exc:  # noqa: BLE001
+                error = exc
+        raise error
+
+    def scapy_path(fname):
+        return str(root / fname.lstrip("/"))
+
+    class no_debug_dissector:
+        def __init__(self, reverse=False):
+            self.new_value = reverse
+
+        def __enter__(self):
+            self.old = wiry.conf.debug_dissector
+            wiry.conf.debug_dissector = self.new_value
+
+        def __exit__(self, *exc):
+            wiry.conf.debug_dissector = self.old
+
+    return {"Bunch": Bunch, "retry_test": retry_test,
+            "scapy_path": scapy_path, "no_debug_dissector": no_debug_dissector}
+
+
 # A name after a dot is an attribute, not a global: `a.restart()` must not read
 # as the out-of-scope function `restart()`.
 IDENT = re.compile(r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\b")
@@ -230,6 +266,7 @@ def run(path, verbose=False, limit=None):
     # One namespace per file: UTscapy runs a campaign as one session, and
     # later tests read what earlier ones defined.
     ns = namespace()
+    ns.update(utscapy_tools(Path(path).resolve().parents[3]))
     shown = []
     ns["__display__"] = lambda v: shown.append(v) if v is not None else None
 
