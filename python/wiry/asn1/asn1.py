@@ -279,7 +279,7 @@ class ASN1Codec(EnumElement):
         cls._stem = stem
 
     def register_tagging(cls, enc, dec):
-        # Codec-level implicit/explicit tagging (BER/OER) or identity (UPER/PER).
+        # PER and UPER register the identity here: they carry no tags.
         cls._tagging_enc = enc
         cls._tagging_dec = dec
 
@@ -323,13 +323,13 @@ class ASN1Tag(EnumElement):
                  codec=None
                  ):
         EnumElement.__init__(self, key, value)
-        # populated by the metaclass
         self.context = context
         if codec is None:
             codec = {}
         self._codec = codec
 
-    def clone(self):  # not a real deep copy. self.codec is shared
+    def clone(self):
+        # Shares the codec table: a codec registered on either is on both.
         return self.__class__(self._key, self._value, self.context, self._codec)
 
     def register_asn1_object(self, asn1obj):
@@ -354,7 +354,6 @@ class ASN1Tag(EnumElement):
 class ASN1_Class_metaclass(Enum_metaclass):
     element_class = ASN1Tag
 
-    # XXX factorise a bit with Enum_metaclass.__new__()
     def __new__(cls,
                 name,
                 bases,
@@ -379,7 +378,7 @@ class ASN1_Class_metaclass(Enum_metaclass):
                     type.__new__(cls, name, bases, dct))
         for v in ncls.__dict__.values():
             if isinstance(v, ASN1Tag):
-                # overwrite ASN1Tag contexts, even cloned ones
+                # A tag cloned from a base class now belongs to this one.
                 v.context = ncls
         return ncls
 
@@ -390,8 +389,7 @@ class ASN1_Class(metaclass=ASN1_Class_metaclass):
 
 class ASN1_Class_UNIVERSAL(ASN1_Class):
     name = "UNIVERSAL"
-    # Those casts are made so that MyPy understands what the
-    # metaclass does in the background.
+    # The constructed bit (0x20) and the class bits are part of each tag.
     ERROR = cast(ASN1Tag, -3)
     RAW = cast(ASN1Tag, -2)
     NONE = cast(ASN1Tag, -1)
@@ -409,8 +407,8 @@ class ASN1_Class_UNIVERSAL(ASN1_Class):
     EMBEDDED_PDF = cast(ASN1Tag, 11)
     UTF8_STRING = cast(ASN1Tag, 12)
     RELATIVE_OID = cast(ASN1Tag, 13)
-    SEQUENCE = cast(ASN1Tag, 16 | 0x20)     # constructed encoding
-    SET = cast(ASN1Tag, 17 | 0x20)          # constructed encoding
+    SEQUENCE = cast(ASN1Tag, 16 | 0x20)
+    SET = cast(ASN1Tag, 17 | 0x20)
     NUMERIC_STRING = cast(ASN1Tag, 18)
     PRINTABLE_STRING = cast(ASN1Tag, 19)
     T61_STRING = cast(ASN1Tag, 20)          # aka TELETEX_STRING
@@ -424,11 +422,12 @@ class ASN1_Class_UNIVERSAL(ASN1_Class):
     UNIVERSAL_STRING = cast(ASN1Tag, 28)
     CHAR_STRING = cast(ASN1Tag, 29)
     BMP_STRING = cast(ASN1Tag, 30)
-    IPADDRESS = cast(ASN1Tag, 0 | 0x40)     # application-specific encoding
-    COUNTER32 = cast(ASN1Tag, 1 | 0x40)     # application-specific encoding
-    COUNTER64 = cast(ASN1Tag, 6 | 0x40)     # application-specific encoding
-    GAUGE32 = cast(ASN1Tag, 2 | 0x40)       # application-specific encoding
-    TIME_TICKS = cast(ASN1Tag, 3 | 0x40)    # application-specific encoding
+    # RFC 2578 §7.1's SMI types, each [APPLICATION n].
+    IPADDRESS = cast(ASN1Tag, 0 | 0x40)
+    COUNTER32 = cast(ASN1Tag, 1 | 0x40)
+    COUNTER64 = cast(ASN1Tag, 6 | 0x40)
+    GAUGE32 = cast(ASN1Tag, 2 | 0x40)
+    TIME_TICKS = cast(ASN1Tag, 3 | 0x40)
 
 
 class ASN1_Object_metaclass(type):
@@ -554,7 +553,6 @@ class ASN1_INTEGER(ASN1_Object[int]):
         h = hex(self.val)
         if h[-1] == "L":
             h = h[:-1]
-        # cut at 22 because with leading '0x', x509 serials should be < 23
         if len(h) > 22:
             h = h[:12] + "..." + h[-10:]
         r = repr(self.val)
@@ -565,18 +563,15 @@ class ASN1_INTEGER(ASN1_Object[int]):
 
 class ASN1_BOOLEAN(ASN1_INTEGER):
     tag = ASN1_Class_UNIVERSAL.BOOLEAN
-    # BER: 0 means False, anything else means True
+    # X.690 §8.2.2: any nonzero octet is TRUE.
 
     def __repr__(self):
         return '%s %s' % (not (self.val == 0), ASN1_Object.__repr__(self))
 
 
 class ASN1_BIT_STRING(ASN1_Object[str]):
-    """
-     ASN1_BIT_STRING values are bit strings like "011101".
-     A zero-bit padded readable string is provided nonetheless,
-     which is stored in val_readable
-    """
+    """`val` is the bits as a string of 0s and 1s; `val_readable` the same
+    bits as octets, zero-padded to a whole octet."""
     tag = ASN1_Class_UNIVERSAL.BIT_STRING
 
     def __init__(self, val, readable=False):
@@ -623,9 +618,7 @@ class ASN1_BIT_STRING(ASN1_Object[str]):
             object.__setattr__(self, name, value)
 
     def set(self, i, val):
-        """
-        Sets bit 'i' to value 'val' (starting from 0)
-        """
+        """Set bit `i`, counting from 0, growing the string if it is short."""
         val = str(val)
         assert val in ['0', '1']
         if len(self.val) < i:
@@ -705,22 +698,19 @@ class ASN1_GENERAL_STRING(ASN1_STRING):
 
 
 class ASN1_GENERALIZED_TIME(ASN1_Object[str]):
-    """
-    Improved version of ASN1_GENERALIZED_TIME, properly handling time zones and
-    all string representation formats defined by ASN.1. These are:
+    """X.680 §46 GeneralizedTime, in any of its three forms:
 
-    1. Local time only:                        YYYYMMDDHH[MM[SS[.fff]]]
-    2. Universal time (UTC time) only:         YYYYMMDDHH[MM[SS[.fff]]]Z
-    3. Difference between local and UTC times: YYYYMMDDHH[MM[SS[.fff]]]+-HHMM
+        YYYYMMDDHH[MM[SS[.fff]]]          local time
+        YYYYMMDDHH[MM[SS[.fff]]]Z         UTC
+        YYYYMMDDHH[MM[SS[.fff]]]+-HHMM    offset from UTC
 
-    It also handles ASN1_UTC_TIME, which allows:
+    and, as the `ASN1_UTC_TIME` subclass, X.680 §47 UTCTime, whose year has two
+    digits, whose minutes are required and which has no fraction:
 
-    1. Universal time (UTC time) only:         YYMMDDHHMM[SS[.fff]]Z
-    2. Difference between local and UTC times: YYMMDDHHMM[SS[.fff]]+-HHMM
+        YYMMDDHHMM[SS]Z
+        YYMMDDHHMM[SS]+-HHMM
 
-    Note the differences: Year is only two digits, minutes are not optional and
-    there is no milliseconds.
-    """
+    A value that fits none of these is kept and shown as invalid."""
     tag = ASN1_Class_UNIVERSAL.GENERALIZED_TIME
     pretty_time = None
 

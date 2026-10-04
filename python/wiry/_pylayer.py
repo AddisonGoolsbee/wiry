@@ -245,7 +245,6 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
         else:
             self.post_transforms = [post_transform]
 
-    # -- fields ---------------------------------------------------------------
 
     def init_fields(self, for_dissect_only: bool = False) -> None:
         cached = PyPacket._class_cache.get(type(self))
@@ -376,7 +375,6 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
                             sub.clear_cache()
         self.payload.clear_cache()
 
-    # -- payload chain --------------------------------------------------------
 
     def add_payload(self, payload: Any) -> None:
         if payload is None:
@@ -492,7 +490,6 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
     def __len__(self) -> int:
         return len(bytes(self))
 
-    # -- building -------------------------------------------------------------
 
     def self_build(self) -> bytes:
         if self.raw_packet_cache is not None:
@@ -567,7 +564,6 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
             done = {}
         return loop(todo, done)
 
-    # -- dissection -----------------------------------------------------------
 
     def extract_padding(self, s: bytes) -> tuple:
         return s, None
@@ -641,7 +637,6 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
             pp = pp.underlayer
         self.payload.dissection_done(pp)
 
-    # -- layers ---------------------------------------------------------------
 
     def _matches(self, cls: Any, subclass: Any) -> bool:
         if cls is None:
@@ -743,7 +738,6 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
     def __contains__(self, cls: Any) -> bool:
         return bool(self.haslayer(cls))
 
-    # -- comparison -----------------------------------------------------------
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, type(self)):
@@ -758,7 +752,7 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
     def __ne__(self, other: Any) -> bool:
         return not self.__eq__(other)
 
-    __hash__ = None  # type: ignore[assignment]
+    __hash__ = None
 
     def __gt__(self, other: Any) -> Any:
         if isinstance(other, Packet):
@@ -782,7 +776,6 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
             return self.payload.answers(other.payload)
         return 0
 
-    # -- rendering ------------------------------------------------------------
 
     def __repr__(self) -> str:
         s = ""
@@ -987,7 +980,6 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
     def fragment(self, *args: Any, **kargs: Any) -> list:
         return self.payload.fragment(*args, **kargs)
 
-    # -- pickling -------------------------------------------------------------
 
     @classmethod
     def _rebuild_pkt(cls, raw: bytes) -> "PyPacket":
@@ -1102,7 +1094,7 @@ class NoPayload(PyPacket):
     def __eq__(self, other: Any) -> bool:
         return isinstance(other, NoPayload)
 
-    __hash__ = None  # type: ignore[assignment]
+    __hash__ = None
 
     def hashret(self) -> bytes:
         return b""

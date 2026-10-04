@@ -139,12 +139,13 @@ class MIBDict(DADict):
         return ".", "", x[:-1]
 
     def _oidname(self, x):
-        """Deduce the OID name from its OID ID"""
+        """`x` with its longest known prefix replaced by that prefix's name."""
         root, _, remainder = self._findroot(x)
         return root + remainder
 
     def _oid(self, x):
-        """Parse the OID id/OID generator, and return real OID"""
+        """`x` with a leading name, as in `sha1-with-rsa-signature.1`, replaced
+        by its arcs; anything else unchanged."""
         xl = x.strip(".").split(".")
         p = len(xl) - 1
         while p >= 0 and _mib_re_integer.match(xl[p]):
@@ -161,20 +162,16 @@ def _mib_register(ident,
                   unresolved,
                   alias,
                   ):
-    """
-    Internal function used to register an OID and its name in a MIBDict
-    """
+    """Resolve `ident`'s arcs, names included (2.basicConstraints.3 becomes
+    2.2.5.29.19.3), into `the_mib`, or park it in `unresolved` until the names
+    it uses are known. True once resolved."""
     if ident in the_mib:
-        # We have already resolved this one. Store the alias
         alias[".".join(value)] = ident
         return True
     if ident in unresolved:
-        # We know we can't resolve this one
         return False
     resval = []
     not_resolved = 0
-    # Resolve the OID
-    # (e.g. 2.basicConstraints.3 -> 2.2.5.29.19.3)
     for v in value:
         if _mib_re_integer.match(v):
             resval.append(v)
@@ -189,20 +186,16 @@ def _mib_register(ident,
             else:
                 resval.append(v)
     if not_resolved:
-        # Unresolved
         unresolved[ident] = resval
         return False
     else:
-        # Fully resolved
         the_mib[ident] = resval
         keys = list(unresolved)
         i = 0
-        # Go through the unresolved to update the ones that
-        # depended on the one we just did
+        # Anything parked on this name may resolve now.
         while i < len(keys):
             k = keys[i]
             if _mib_register(k, unresolved[k], the_mib, {}, alias):
-                # Now resolved: we can remove it from unresolved
                 del unresolved[k]
                 del keys[i]
                 i = 0
@@ -213,17 +206,14 @@ def _mib_register(ident,
 
 
 def load_mib(filenames):
-    """
-    Load the conf.mib dict from a list of filenames
-    """
+    """Replace `conf.mib` with itself plus every `OBJECT ... ::= { ... }`
+    declaration in the MIB files `filenames` names, globs allowed."""
     the_mib = {'iso': ['1']}
     unresolved = {}
     alias = {}
-    # Export the current MIB to a working dictionary
     for k in conf.mib:
         _mib_register(conf.mib[k], k.split("."), the_mib, unresolved, alias)
 
-    # Read the files
     if isinstance(filenames, (str, bytes)):
         files_list = [filenames]
     else:
@@ -246,15 +236,11 @@ def load_mib(filenames):
                         oid_l[i] = m2.groups()[1]
                 _mib_register(ident, oid_l, the_mib, unresolved, alias)
 
-    # Create the new MIB
     newmib = MIBDict(_name="MIB")
-    # Add resolved values
     for oid, key in the_mib.items():
         newmib[".".join(key)] = oid
-    # Add unresolved values
     for oid, key in unresolved.items():
         newmib[".".join(key)] = oid
-    # Add aliases
     for key_s, oid in alias.items():
         newmib[key_s] = oid
 
@@ -865,8 +851,8 @@ conf.mib = MIBDict(_name="MIB", **x509_oids)
 #  Hash mapping helper  #
 #########################
 
-# This dict enables static access to string references to the hash functions
-# of some algorithms from pkcs1_oids and x962Signature_oids.
+# The hash each signature algorithm uses, by its OID; None where the
+# algorithm hashes internally.
 
 hash_by_oid = {
     "1.2.840.113549.1.1.1": "sha1",

@@ -176,7 +176,6 @@ class ASN1_Class_LDAP_Authentication(ASN1_Class):
     sicilyResponse = 0x8B
 
 
-# simple
 class LDAP_Authentication_simple(ASN1_STRING):
     tag = ASN1_Class_LDAP_Authentication.simple
 
@@ -189,7 +188,6 @@ class ASN1F_LDAP_Authentication_simple(ASN1F_STRING):
     ASN1_tag = ASN1_Class_LDAP_Authentication.simple
 
 
-# krbv42LDAP
 class LDAP_Authentication_krbv42LDAP(ASN1_STRING):
     tag = ASN1_Class_LDAP_Authentication.krbv42LDAP
 
@@ -202,7 +200,6 @@ class ASN1F_LDAP_Authentication_krbv42LDAP(ASN1F_STRING):
     ASN1_tag = ASN1_Class_LDAP_Authentication.krbv42LDAP
 
 
-# krbv42DSA
 class LDAP_Authentication_krbv42DSA(ASN1_STRING):
     tag = ASN1_Class_LDAP_Authentication.krbv42DSA
 
@@ -215,7 +212,6 @@ class ASN1F_LDAP_Authentication_krbv42DSA(ASN1F_STRING):
     ASN1_tag = ASN1_Class_LDAP_Authentication.krbv42DSA
 
 
-# sicilyPackageDiscovery
 class LDAP_Authentication_sicilyPackageDiscovery(ASN1_STRING):
     tag = ASN1_Class_LDAP_Authentication.sicilyPackageDiscovery
 
@@ -228,7 +224,6 @@ class ASN1F_LDAP_Authentication_sicilyPackageDiscovery(ASN1F_STRING):
     ASN1_tag = ASN1_Class_LDAP_Authentication.sicilyPackageDiscovery
 
 
-# sicilyNegotiate
 class LDAP_Authentication_sicilyNegotiate(ASN1_STRING):
     tag = ASN1_Class_LDAP_Authentication.sicilyNegotiate
 
@@ -241,7 +236,6 @@ class ASN1F_LDAP_Authentication_sicilyNegotiate(ASN1F_STRING):
     ASN1_tag = ASN1_Class_LDAP_Authentication.sicilyNegotiate
 
 
-# sicilyResponse
 class LDAP_Authentication_sicilyResponse(ASN1_STRING):
     tag = ASN1_Class_LDAP_Authentication.sicilyResponse
 
@@ -544,15 +538,12 @@ class LDAP_Filter(ASN1_Packet):
 
     @staticmethod
     def from_rfc2254_string(filter: str):
-        """
-        Convert a RFC-2254 filter to LDAP_Filter
-        """
-        # Note: this code is very dumb to be readable.
+        """An LDAP_Filter from RFC 2254's string form, `(&(a=b)(c=*))`."""
         _lerr = "Invalid LDAP filter string: "
         if filter.lstrip()[0] != "(":
             filter = "(%s)" % filter
 
-        # 1. Cheap lexer.
+        # Tokens: nested lists for parentheses, then operators and values.
         tokens = []
         cur = tokens
         backtrack = []
@@ -562,38 +553,29 @@ class LDAP_Filter(ASN1_Packet):
             c = filter[i]
             i += 1
             if c in [" ", "\t", "\n"]:
-                # skip spaces
                 continue
             elif c == "(":
-                # enclosure
                 cur.append([])
                 backtrack.append(cur)
                 cur = cur[-1]
             elif c == ")":
-                # end of enclosure
                 if not backtrack:
                     raise ValueError(_lerr + "parenthesis unmatched.")
                 cur = backtrack.pop(-1)
             elif c in "&|!":
-                # and / or / not
                 cur.append(c)
             elif c in "=":
-                # filtertype
                 if cur[-1] in "~><:":
                     cur[-1] += c
                     continue
                 cur.append(c)
             elif c in "~><":
-                # comparisons
                 cur.append(c)
             elif c == ":":
-                # extensible
                 cur.append(c)
             elif c == "*":
-                # substring
                 cur.append(c)
             else:
-                # value
                 v = ""
                 for x in filter[i - 1 :]:
                     if x in "():!|&~<>=*":
@@ -604,37 +586,31 @@ class LDAP_Filter(ASN1_Packet):
                 i += len(v) - 1
                 cur.append(v)
 
-        # Check that parenthesis were closed
         if backtrack:
             raise ValueError(_lerr + "parenthesis unmatched.")
 
-        # LDAP filters must have an empty enclosure ()
+        # The whole filter is one parenthesised item.
         tokens = tokens[0]
 
-        # 2. Cheap grammar parser.
-        # Doing it recursively is trivial.
+        # Then the grammar, recursively over the nesting.
         def _getfld(x):
             if not x:
                 raise ValueError(_lerr + "empty enclosure.")
             elif len(x) == 1 and isinstance(x[0], list):
-                # useless enclosure
                 return _getfld(x[0])
             elif x[0] in "&|":
-                # multinary operator
                 if len(x) < 3:
                     raise ValueError(_lerr + "bad use of multinary operator.")
                 return (LDAP_FilterAnd if x[0] == "&" else LDAP_FilterOr)(
                     vals=[LDAP_Filter(filter=_getfld(y)) for y in x[1:]]
                 )
             elif x[0] == "!":
-                # unary operator
                 if len(x) != 2:
                     raise ValueError(_lerr + "bad use of unary operator.")
                 return LDAP_FilterNot(
                     val=LDAP_Filter(filter=_getfld(x[1])),
                 )
             elif "=" in x and "*" in x:
-                # substring
                 if len(x) < 3 or x[1] != "=":
                     raise ValueError(_lerr + "bad use of substring.")
                 return LDAP_SubstringFilter(
@@ -656,10 +632,8 @@ class LDAP_Filter(ASN1_Packet):
                     ],
                 )
             elif ":=" in x:
-                # extensible
                 raise NotImplementedError("Extensible not implemented.")
             elif any(y in ["<=", ">=", "~=", "="] for y in x):
-                # simple
                 if len(x) != 3 or "=" not in x[1]:
                     raise ValueError(_lerr + "bad use of comparison.")
                 if x[2] == "*":
@@ -899,12 +873,12 @@ class LDAP_ExtendedResponse(ASN1_Packet):
     )
 
     def do_dissect(self, x):
-        # Note: Windows builds this packet with a buggy sequence size, that does not
-        # include the optional fields. Do another pass of dissection on the optionals.
+        # Windows writes a SEQUENCE length that leaves the two optional fields
+        # outside it; they are dissected from what follows.
         s = super(LDAP_ExtendedResponse, self).do_dissect(x)
         if not s:
             return s
-        for obj in self.ASN1_root.seq[-2:]:  # only on the 2 optional fields
+        for obj in self.ASN1_root.seq[-2:]:
             try:
                 s = obj.dissect(self, s)
             except ASN1F_badsequence:
@@ -978,9 +952,6 @@ class LDAP_serverSDFlagsControl(ASN1_Packet):
 _LDAP_CONTROLS["1.2.840.113556.1.4.801"] = LDAP_serverSDFlagsControl
 
 
-# LDAP main class
-
-
 class LDAP(ASN1_Packet):
     # Names the Rust layer too, so `pl.filter(LDAP)` and `columns()` take it.
     name = "LDAP"
@@ -1019,7 +990,7 @@ class LDAP(ASN1_Packet):
     @classmethod
     def dispatch_hook(cls, _pkt=None, *args, **kargs):
         if _pkt and len(_pkt) >= 4:
-            # Heuristic to detect SASL_Buffer
+            # Not a SEQUENCE: a SASL buffer, if its length prefix fits.
             if _pkt[0] != 0x30:
                 if struct.unpack("!I", _pkt[:4])[0] + 4 == len(_pkt):
                     return LDAP_SASL_Buffer
@@ -1030,9 +1001,8 @@ class LDAP(ASN1_Packet):
     def tcp_reassemble(cls, data, metadata, *args, **kwargs):
         if len(data) < 4:
             return None
-        # For LDAP, we would prefer to have the entire LDAP response
-        # (multiple LDAP concatenated) in one go, to stay consistent with
-        # what you get when using SASL.
+        # A whole response, every message of it, as a SASL buffer delivers
+        # one.
         remaining = data
         while remaining:
             try:
@@ -1043,7 +1013,8 @@ class LDAP(ASN1_Packet):
                 remaining = x[length:]
                 if not remaining:
                     pkt = cls(data)
-                    # Packet can be a whole response yet still miss some content.
+                    # Search entries without their SearchResultDone are not
+                    # the whole response.
                     if (
                         LDAP_SearchResponseEntry in pkt
                         and LDAP_SearchResponseResultDone not in pkt

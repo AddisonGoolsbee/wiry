@@ -327,8 +327,9 @@ def BER_tagging_dec(s,
                     safe=False,
                     _fname="",
                     ):
-    # We output the 'real_tag' if it is different from the (im|ex)plicit_tag.
-    # 'hidden_tag' is the type tag that is implicited when 'implicit_tag' is used.
+    """Strip an implicit or explicit tag, putting back the `hidden_tag` an
+    implicit one replaced. Returns the tag actually seen where it differs
+    from the one asked for, which only `safe` tolerates."""
     real_tag = None
     if len(s) > 0:
         err_msg = (
@@ -555,7 +556,6 @@ class BERcodec_INTEGER(BERcodec_Object[int]):
                _depth=0,
                ):
         l, s, t = cls.check_type_check_len(s)
-        # One pass: shifting a growing integer per octet was quadratic in width.
         return cls.asn1_object(int.from_bytes(s, "big", signed=True)), t
 
 
@@ -573,7 +573,7 @@ class BERcodec_BIT_STRING(BERcodec_Object[str]):
                safe=False,
                _depth=0,
                ):
-        # /!\ the unused_bits information is lost after this decoding
+        # The count of unused bits is not kept: `val` simply has that many fewer.
         l, s, t = cls.check_type_check_len(s)
         if len(s) > 0:
             unused_bits = s[0]
@@ -595,7 +595,7 @@ class BERcodec_BIT_STRING(BERcodec_Object[str]):
 
     @classmethod
     def enc(cls, _s, size_len=0, **_kwargs):
-        # /!\ this is DER encoding (bit strings are only zero-bit padded)
+        # X.690 §11.2.1 (DER): the unused bits are zero.
         s = bytes_encode(_s)
         if len(s) % 8 == 0:
             unused_bits = 0
@@ -614,7 +614,6 @@ class BERcodec_STRING(BERcodec_Object[str]):
     @classmethod
     def enc(cls, _s, size_len=0, **_kwargs):
         s = bytes_encode(_s)
-        # Be sure we are encoding bytes
         return chb(int(cls.tag)) + BER_len_enc(len(s), size=size_len) + s
 
     @classmethod
@@ -749,7 +748,7 @@ class BERcodec_SEQUENCE(BERcodec_Object[Union[bytes, List[BERcodec_Object[Any]]]
             ll = _ll
         else:
             ll = b"".join(x.enc(cls.codec) for x in _ll)
-        # None = apply conf; explicit 0 keeps short-form lengths.
+        # None reads conf.ASN1_default_long_size; 0 is the shortest form.
         if size_len is None:
             size_len = conf.ASN1_default_long_size
         return chb(int(cls.tag)) + BER_len_enc(len(ll), size=size_len) + ll

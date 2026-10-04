@@ -77,7 +77,6 @@ class ASN1_SNMP_PDU_TRAPv2(ASN1_SEQUENCE):
     tag = ASN1_Class_SNMP.PDU_TRAPv2
 
 
-#     [ BER codecs ]      #
 
 class BERcodec_SNMP_PDU_GET(BERcodec_SEQUENCE):
     tag = ASN1_Class_SNMP.PDU_GET
@@ -111,7 +110,6 @@ class BERcodec_SNMP_PDU_TRAPv2(BERcodec_SEQUENCE):
     tag = ASN1_Class_SNMP.PDU_TRAPv2
 
 
-#     [ ASN1 fields ]     #
 
 class ASN1F_SNMP_PDU_GET(ASN1F_SEQUENCE):
     ASN1_tag = ASN1_Class_SNMP.PDU_GET
@@ -145,7 +143,6 @@ class ASN1F_SNMP_PDU_TRAPv2(ASN1F_SEQUENCE):
     ASN1_tag = ASN1_Class_SNMP.PDU_TRAPv2
 
 
-#     [ SNMP Packet ]     #
 
 
 SNMP_error = {0: "no_error",
@@ -187,7 +184,7 @@ class SNMPvarbind(ASN1_Packet):
             ASN1F_field("value", ASN1_NULL(0))
         ),
 
-        # exceptions in responses
+        # RFC 3416 §3: why a response binding carries no value.
         ASN1F_optional(ASN1F_NULL("noSuchObject", None, implicit_tag=0x80)),
         ASN1F_optional(ASN1F_NULL("noSuchInstance", None, implicit_tag=0x81)),
         ASN1F_optional(ASN1F_NULL("endOfMibView", None, implicit_tag=0x82)),
@@ -287,13 +284,9 @@ class SNMP(ASN1_Packet):
 
 
 def snmpget(dst, oid="1.0.8802.1.1.1.1.1.2.1.2.29", community="public"):
-    """
-    SNMP get.
-
-    This can be used to perform a SNMP scan::
-
-        >>> snmpget("192.168.0.0/16", community="public")
-    """
+    """Ask every address in `dst` for the OID after `oid` and print what
+    answers: a scan, `snmpget("192.168.0.0/16")`. It sends GetNext, not Get,
+    as scapy's does."""
     ans, _ = sr(
         IP(dst=dst) / UDP(sport=RandShort()) / SNMP(
             community=community,
@@ -316,9 +309,8 @@ def snmpget(dst, oid="1.0.8802.1.1.1.1.1.2.1.2.29", community="public"):
 
 
 def snmpwalk(dst, oid="1", community="public"):
-    """
-    SNMP walk
-    """
+    """Walk the MIB from `oid` with GetNext until the agent stops answering
+    or reports endOfMibView, printing each binding."""
     try:
         while True:
             r = sr1(

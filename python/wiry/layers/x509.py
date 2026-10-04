@@ -71,8 +71,7 @@ class ASN1P_INTEGER(ASN1_Packet):
 
 
 class ASN1P_PRIVSEQ(ASN1_Packet):
-    # This class gets used in x509.uts
-    # It showcases the private high-tag decoding capacities of scapy.
+    # A SEQUENCE under an unknown private high tag; see ASN1F_SEQUENCE.
     ASN1_codec = ASN1_Codecs.BER
     ASN1_root = ASN1F_SEQUENCE(
         ASN1F_IA5_STRING("str", ""),
@@ -82,16 +81,11 @@ class ASN1P_PRIVSEQ(ASN1_Packet):
     )
 
 
-#######################
-#     RSA packets     #
-#######################
+# RSA packets
 # based on RFC 3447
 
 
-# It could be interesting to use os.urandom and try to generate
-# a new modulus each time RSAPublicKey is called with default values.
-# (We might have to dig into scapy field initialization mechanisms...)
-# NEVER rely on the key below, which is provided only for debugging purposes.
+# The default key is a fixed placeholder, not a secret; never use it.
 class RSAPublicKey(ASN1_Packet):
     ASN1_codec = ASN1_Codecs.BER
     ASN1_root = ASN1F_SEQUENCE(
@@ -125,9 +119,7 @@ class RSAPrivateKey(ASN1_Packet):
     )
 
 
-####################################
-#      Diffie Hellman Packets      #
-####################################
+# Diffie Hellman Packets
 # From X9.42 (or RFC3279)
 
 
@@ -157,14 +149,12 @@ class DHPublicKey(ASN1_Packet):
     ASN1_root = ASN1F_INTEGER("y", 0)
 
 
-####################################
-#          ECDSA packets           #
-####################################
+# ECDSA packets
 # based on RFC 3279 & 5480 & 5915
 
 
 class ECFieldID(ASN1_Packet):
-    # No characteristic-two-field support for now.
+    # Prime fields only; characteristic-two fields are not modelled.
     ASN1_codec = ASN1_Codecs.BER
     ASN1_root = ASN1F_SEQUENCE(
         ASN1F_OID("fieldType", "prime-field"), ASN1F_INTEGER("prime", 0)
@@ -227,9 +217,7 @@ class ECDSASignature(ASN1_Packet):
     ASN1_root = ASN1F_SEQUENCE(ASN1F_INTEGER("r", 0), ASN1F_INTEGER("s", 0))
 
 
-####################################
-#  Diffie Hellman Exchange Packets #
-####################################
+# Diffie Hellman Exchange Packets
 # based on PKCS#3
 
 # PKCS#3 sect 9
@@ -244,9 +232,7 @@ class DHParameter(ASN1_Packet):
     )
 
 
-####################################
-#      x25519/x448 packets         #
-####################################
+# x25519/x448 packets
 # based on RFC 8410
 
 
@@ -263,9 +249,7 @@ class CurvePrivateKey(ASN1_Packet):
 EdDSAPrivateKey = CurvePrivateKey
 
 
-####################################
-#          ML-DSA packets          #
-####################################
+# ML-DSA packets
 # based on RFC 9881
 
 
@@ -303,17 +287,15 @@ class MLDSAPrivateKey(ASN1_Packet):
     )
 
 
-######################
-#    X509 packets    #
-######################
+# X509 packets
 # based on RFC 5280
 
 
-#       Names       #
+# Names
 
 
 class ASN1F_X509_DirectoryString(ASN1F_CHOICE):
-    # we include ASN1 bit strings and bmp strings for rare instances of x500 addresses
+    # BIT STRING and BMPString turn up in some X.500 names, though not in RFC 5280.
     def __init__(self, name, default, **kwargs):
         ASN1F_CHOICE.__init__(
             self,
@@ -330,13 +312,12 @@ class ASN1F_X509_DirectoryString(ASN1F_CHOICE):
         )
 
 
-# More details on attributes in PKCS#9
+# Attribute types, PKCS#9 (RFC 2985)
 _X509_ATTRIBUTE_TYPE = {}
 
 
 class _AttributeValue_Field(ASN1F_field):
     def m2i(self, pkt, s):
-        # Some types have special structures
         if pkt.underlayer:
             attrType = pkt.underlayer.type.val
             if attrType in _X509_ATTRIBUTE_TYPE:
@@ -348,11 +329,10 @@ class _AttributeValue_Field(ASN1F_field):
         try:
             return super(_AttributeValue_Field, self).m2i(pkt, s)
         except BER_Decoding_Error:
-            # Do not fail on special attributes
+            # An attribute whose value does not fit its type stays octets.
             return s, b""
 
     def i2m(self, pkt, x):
-        # The special structures should be just bytes()
         if pkt.underlayer and pkt.underlayer.type.val in _X509_ATTRIBUTE_TYPE:
             return bytes(x)
         return super(_AttributeValue_Field, self).i2m(pkt, x)
@@ -404,7 +384,7 @@ class X509_OtherName(ASN1_Packet):
 
 
 class ASN1F_X509_otherName(ASN1F_SEQUENCE):
-    # field version of X509_OtherName, for usage in [MS-WCCE]
+    # X509_OtherName as a field, for [MS-WCCE].
     def __init__(self, **kargs):
         seq = [ASN1F_SEQUENCE(*X509_OtherName.ASN1_root.seq, implicit_tag=0xA0)]
         ASN1F_SEQUENCE.__init__(self, *seq, **kargs)
@@ -420,7 +400,6 @@ class X509_DNSName(ASN1_Packet):
     ASN1_root = ASN1F_IA5_STRING("dNSName", "")
 
 
-# XXX write me
 
 
 class X509_X400Address(ASN1_Packet):
@@ -505,7 +484,7 @@ class X509_GeneralName(ASN1_Packet):
     )
 
 
-#       Extensions       #
+# Extensions
 
 
 class X509_ExtAuthorityKeyIdentifier(ASN1_Packet):
@@ -928,8 +907,7 @@ class X509_ExtCertificateTemplateOID(ASN1_Packet):
     )
 
 
-# oid-info.com shows that some extensions share multiple OIDs.
-# Here we only reproduce those written in RFC5280.
+# RFC 5280's OIDs only; some extensions have others in the wild.
 _ext_mapping = {
     "2.5.29.9": X509_ExtSubjectDirectoryAttributes,
     "2.5.29.14": X509_ExtSubjectKeyIdentifier,
@@ -994,7 +972,7 @@ class X509_Extension(ASN1_Packet):
 
 
 class X509_Extensions(ASN1_Packet):
-    # we use this in OCSP status requests, in tls/handshake.py
+    # Also what an OCSP status request carries (RFC 6066 §8).
     ASN1_codec = ASN1_Codecs.BER
     ASN1_root = ASN1F_optional(ASN1F_SEQUENCE_OF("extensions", None, X509_Extension))
 
@@ -1003,7 +981,7 @@ class X509_Extensions(ASN1_Packet):
 _X509_ATTRIBUTE_TYPE["1.2.840.113549.1.9.14"] = X509_Extensions
 
 
-#       Public key wrapper       #
+# Public key wrapper
 
 
 class X509_AlgorithmIdentifier(ASN1_Packet):
@@ -1077,7 +1055,7 @@ class X509_AlgorithmIdentifier(ASN1_Packet):
                     lambda pkt: pkt.algorithm.val == "1.2.840.113549.3.7",
                 ),
             ],
-            # Default: fail, probably. This is most likely unimplemented.
+            # An algorithm none of the above names: NULL, which may not decode.
             ASN1F_NULL("parameters", 0),
         ),
     )
@@ -1152,7 +1130,7 @@ class X509_SubjectPublicKeyInfo(ASN1_Packet):
     )
 
 
-#       RFC 5958 private key wrapper       #
+# RFC 5958 private key wrapper
 
 
 class X509_OneAsymmetricKey(ASN1_Packet):
@@ -1197,13 +1175,11 @@ class X509_OneAsymmetricKey(ASN1_Packet):
     )
 
 
-#      OpenSSL compatibility wrappers      #
+# OpenSSL compatibility wrappers
 
 
-# XXX As ECDSAPrivateKey already uses the structure from RFC 5958,
-# and as we would prefer encapsulated RSA private keys to be parsed,
-# this lazy implementation actually supports RSA encoding only.
-# We'd rather call it RSAPrivateKey_OpenSSL than X509_PrivateKeyInfo.
+# OpenSSL's PKCS#8 wrapper, for RSA keys only: ECDSAPrivateKey already
+# has RFC 5958's shape.
 class RSAPrivateKey_OpenSSL(ASN1_Packet):
     ASN1_codec = ASN1_Codecs.BER
     ASN1_root = ASN1F_SEQUENCE(
@@ -1221,9 +1197,8 @@ class RSAPrivateKey_OpenSSL(ASN1_Packet):
     )
 
 
-# We need this hack because ECParameters parsing below must return
-# a Padding payload, and making the ASN1_Packet class have Padding
-# instead of Raw payload would break things...
+# ECParameters leaves what follows it as Raw, where a PacketField expects
+# Padding; this takes the Raw instead.
 
 
 class _PacketFieldRaw(PacketField):
@@ -1245,7 +1220,7 @@ class ECDSAPrivateKey_OpenSSL(PyPacket):
     ]
 
 
-#       TBSCertificate & Certificate       #
+# TBSCertificate & Certificate
 
 _default_issuer = [
     X509_RDN(),
@@ -1291,7 +1266,7 @@ class _IssuerUtils:
         attrs = self.issuer
         attrsDict = {}
         for attr in attrs:
-            # we assume there is only one name in each rdn ASN1_SET
+            # One name per RDN, which is how certificates are written.
             attrsDict[attr.rdn[0].type.oidname] = plain_str(
                 attr.rdn[0].value.val
             )
@@ -1373,7 +1348,7 @@ class X509_TBSCertificate(ASN1_Packet, _IssuerUtils):
         attrs = self.subject
         attrsDict = {}
         for attr in attrs:
-            # we assume there is only one name in each rdn ASN1_SET
+            # One name per RDN, which is how certificates are written.
             attrsDict[attr.rdn[0].type.oidname] = plain_str(
                 attr.rdn[0].value.val
             )
@@ -1423,7 +1398,7 @@ class X509_Cert(ASN1_Packet):
     ASN1_root = ASN1F_X509_Cert()
 
 
-#       TBSCertList & CRL       #
+# TBSCertList & CRL
 
 
 class X509_RevokedCertificate(ASN1_Packet):
@@ -1482,17 +1457,14 @@ class X509_CRL(ASN1_Packet):
     ASN1_root = ASN1F_X509_CRL()
 
 
-#####################
-#    CMS packets    #
-#####################
+# CMS packets
 # based on RFC 3852
 
 CMSVersion = ASN1F_INTEGER
 
 # RFC3852 sect 5.2
 
-# Other layers should store the structures that can be encapsulated
-# by CMS here, referred by their OIDs.
+# CMS content types by OID, which other layers extend.
 _CMS_ENCAPSULATED = {}
 
 
@@ -1502,7 +1474,6 @@ class _EncapsulatedContent_Field(ASN1F_STRING_PacketField):
         if not val[0].val:
             return val
 
-        # Get encapsulated value from its type
         if pkt.eContentType.val in _CMS_ENCAPSULATED:
             return (
                 _CMS_ENCAPSULATED[pkt.eContentType.val](val[0].val, _underlayer=pkt),
@@ -1531,7 +1502,6 @@ class CMS_RevocationInfoChoice(ASN1_Packet):
         "crl",
         None,
         ASN1F_PACKET("crl", X509_CRL(), X509_Cert),
-        # -- TODO: 1
     )
 
 
@@ -1544,7 +1514,6 @@ class CMS_CertificateChoices(ASN1_Packet):
         "certificate",
         None,
         ASN1F_PACKET("certificate", X509_Cert(), X509_Cert),
-        # -- TODO: 0, 1, 2
     )
 
 
@@ -1866,11 +1835,9 @@ class CMS_ContentInfo(ASN1_Packet):
     )
 
 
-#####################
-#    CSR packets    #
-#####################
+# CSR packets
 
-#       based on PKCS#10       #
+# based on PKCS#10
 
 
 class PKCS10_CertificationRequestInfo(ASN1_Packet):
@@ -1905,7 +1872,7 @@ class PKCS10_CertificationRequest(ASN1_Packet):
     )
 
 
-#       based on CMC       #
+# based on CMC
 
 # RFC 5272 sect 3.2.1.1
 
@@ -1914,7 +1881,7 @@ class CMC_TaggedAttribute(ASN1_Packet):
     ASN1_codec = ASN1_Codecs.BER
     ASN1_root = ASN1F_SEQUENCE(
         ASN1F_INTEGER("bodyPartID", 0),
-        ASN1F_OID("type", "0"),  # attrType for compat
+        ASN1F_OID("type", "0"),
         ASN1F_SET_OF("attrValues", [], X509_AttributeValue),
     )
 
@@ -1948,7 +1915,7 @@ class CMC_TaggedRequest(ASN1_Packet):
             CMC_TaggedCertificationRequest,
             implicit_tag=0xA0,
         ),
-        # XXX there are others
+        # RFC 5272 §3.2.1 has others.
     )
 
 
@@ -1991,7 +1958,7 @@ class CMC_PKIData(ASN1_Packet):
 _CMS_ENCAPSULATED["1.3.6.1.5.5.7.12.2"] = CMC_PKIData
 
 
-#       Windows extensions       #
+# Windows extensions
 
 # https://learn.microsoft.com/en-us/windows/win32/seccertenroll/cmc-extensions
 
@@ -2084,9 +2051,7 @@ _X509_ATTRIBUTE_TYPE["1.3.6.1.4.1.311.21.24"] = CMC_ENROLL_ATTESTATION_STATEMENT
 _X509_ATTRIBUTE_TYPE["1.3.6.1.4.1.311.21.23"] = CMS_ContentInfo
 
 
-#############################
-#    OCSP Status packets    #
-#############################
+# OCSP Status packets
 # based on RFC 6960
 
 

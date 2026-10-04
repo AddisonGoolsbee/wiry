@@ -71,8 +71,8 @@ class ASN1F_element(object):
 #    Basic ASN1 Field    #
 ##########################
 
-_I = TypeVar('_I')  # Internal storage
-_A = TypeVar('_A')  # ASN.1 object
+_I = TypeVar('_I')
+_A = TypeVar('_A')
 
 
 class ASN1F_field(ASN1F_element, Generic[_I, _A]):
@@ -106,7 +106,7 @@ class ASN1F_field(ASN1F_element, Generic[_I, _A]):
             raise ASN1_Error(err_msg)
         self.implicit_tag = implicit_tag and int(implicit_tag)
         self.explicit_tag = explicit_tag and int(explicit_tag)
-        # network_tag gets useful for ASN1F_CHOICE
+        # The tag a CHOICE dispatches on.
         self.network_tag = int(implicit_tag or explicit_tag or self.ASN1_tag)
         self.owners = []
 
@@ -114,7 +114,7 @@ class ASN1F_field(ASN1F_element, Generic[_I, _A]):
         self.owners.append(cls)
 
     def _apply_diff_tag(self, diff_tag):
-        # this implies that flexible_tag was True
+        # Only a flexible_tag field sees a tag other than its own.
         if diff_tag is not None:
             if self.implicit_tag is not None:
                 self.implicit_tag = diff_tag
@@ -122,16 +122,12 @@ class ASN1F_field(ASN1F_element, Generic[_I, _A]):
                 self.explicit_tag = diff_tag
 
     def _tagging_dec(self, pkt, s, **kwargs):
-        # Codec provides tagging_*; OER implements real tags, UPER/PER use
-        # identity helpers (no BER-style tagging).
         return pkt.ASN1_codec.tagging_dec(s, **kwargs)
 
     def _tagging_enc(self, pkt, s, **kwargs):
         return pkt.ASN1_codec.tagging_enc(s, **kwargs)
 
     def _apply_tagging_dec(self, s, pkt, hidden_tag=None, **kwargs):
-        # Always pass the field tags; callers may override hidden_tag (PACKET)
-        # or add decode metadata such as _fname.
         if hidden_tag is None:
             hidden_tag = self.ASN1_tag
         diff_tag, s = self._tagging_dec(
@@ -146,13 +142,11 @@ class ASN1F_field(ASN1F_element, Generic[_I, _A]):
         return s
 
     def _codec_kwargs(self, pkt):
-        # OER/UPER need extra constraints (oer_unsigned, uper_min/max, …) on
-        # every enc/dec call; override this instead of hardcoding BER size_len.
+        # A codec with per-field constraints (OER, UPER) overrides this.
         return {"size_len": self.size_len}
 
     def _use_object_enc(self, pkt, item):
-        # BER/LDAP: item.enc() when size_len is unset. UPER must override to
-        # False so constrained integers go through codec.enc(**kwargs).
+        # A fixed length size has to go through the codec, which takes it.
         return self.size_len is None
 
     def _encode_item(self, pkt, item):
@@ -173,8 +167,7 @@ class ASN1F_field(ASN1F_element, Generic[_I, _A]):
                 return item.enc(pkt.ASN1_codec)
             item = item.val
         elif hasattr(item, "self_build"):
-            # Packet values (e.g. ASN1F_STRING_PacketField) must still go through
-            # the BER type codec so the universal tag/length are applied.
+            # A packet value still gets this field's own tag and length.
             item = item.self_build()
         codec = self.ASN1_tag.get_codec(pkt.ASN1_codec)
         return codec.enc(item, **self._codec_kwargs(pkt))
@@ -186,18 +179,10 @@ class ASN1F_field(ASN1F_element, Generic[_I, _A]):
         return x
 
     def m2i(self, pkt, s):
-        """
-        The good thing about safedec is that it may still decode ASN1
-        even if there is a mismatch between the expected tag (self.ASN1_tag)
-        and the actual tag; the decoded ASN1 object will simply be put
-        into an ASN1_BADTAG object. However, safedec prevents the raising of
-        exceptions needed for ASN1F_optional processing.
-        Thus we use 'flexible_tag', which should be False with ASN1F_optional.
-
-        Regarding other fields, we might need to know whether encoding went
-        as expected or not. Noticeably, input methods from cert.py expect
-        certain exceptions to be raised. Hence default flexible_tag is False.
-        """
+        """With `flexible_tag`, a value under the wrong tag decodes anyway,
+        wrapped in ASN1_BADTAG. That swallows the error ASN1F_optional needs to
+        see a field is absent, so an optional field is never flexible, and
+        neither is any other by default."""
         s = self._apply_tagging_dec(s, pkt, _fname=self.name)
         codec = self.ASN1_tag.get_codec(pkt.ASN1_codec)
         dec = codec.safedec if self.flexible_tag else codec.dec
@@ -439,17 +424,8 @@ class ASN1F_BMP_STRING(ASN1F_STRING):
 
 
 class ASN1F_SEQUENCE(ASN1F_field[List[Any], List[Any]]):
-    # Here is how you could decode a SEQUENCE
-    # with an unknown, private high-tag prefix :
-    # class PrivSeq(ASN1_Packet):
-    #     ASN1_codec = ASN1_Codecs.BER
-    #     ASN1_root = ASN1F_SEQUENCE(
-    #                       <asn1 field #0>,
-    #                       ...
-    #                       <asn1 field #N>,
-    #                       explicit_tag=0,
-    #                       flexible_tag=True)
-    # Because we use flexible_tag, the value of the explicit_tag does not matter.
+    # explicit_tag=0 with flexible_tag=True takes a SEQUENCE under any outer
+    # tag, an unknown private high tag included (x509's ASN1P_PRIVSEQ).
     ASN1_tag = ASN1_Class_UNIVERSAL.SEQUENCE
     holds_packets = 1
 
@@ -473,14 +449,8 @@ class ASN1F_SEQUENCE(ASN1F_field[List[Any], List[Any]]):
                       self.seq, [])
 
     def m2i(self, pkt, s):
-        """
-        ASN1F_SEQUENCE behaves transparently, with nested ASN1_objects being
-        dissected one by one. Because we use obj.dissect (see loop below)
-        instead of obj.m2i (as we trust dissect to do the appropriate set_vals)
-        we do not directly retrieve the list of nested objects.
-        Thus m2i returns an empty list (along with the proper remainder).
-        It is discarded by dissect() and should not be missed elsewhere.
-        """
+        """Dissect each member into `pkt` itself. The value returned is an
+        empty list; only the remainder means anything."""
         s = self._apply_tagging_dec(s, pkt, _fname=pkt.name)
         codec = self.ASN1_tag.get_codec(pkt.ASN1_codec)
         i, s, remain = codec.check_type_check_len(s)
@@ -524,9 +494,8 @@ _SEQ_T = Union[
 
 class ASN1F_SEQUENCE_OF(ASN1F_field[List[_SEQ_T],
                                     List[ASN1_Object[Any]]]):
-    """
-    Two types are allowed as cls: ASN1_Packet, ASN1F_field
-    """
+    """`cls` is an ASN1_Packet class (or a callable making one) or an
+    ASN1F_field, class or instance."""
     ASN1_tag = ASN1_Class_UNIVERSAL.SEQUENCE
     islist = 1
 
@@ -590,8 +559,7 @@ class ASN1F_SEQUENCE_OF(ASN1F_field[List[_SEQ_T],
         elif self.holds_packets:
             s = b"".join(bytes(i) for i in val)
         else:
-            # BER: element fields may carry implicit/explicit tags; i2m
-            # matches m2i()/fld.m2i(). (Packet elements use bytes() above.)
+            # Through the element field's i2m, so its own tags are written.
             s = b"".join(self.fld.i2m(pkt, i) for i in val)
         return self.i2m(pkt, s)
 
@@ -632,9 +600,7 @@ class ASN1F_TIME_TICKS(ASN1F_INTEGER):
 #############################
 
 class ASN1F_optional(ASN1F_element):
-    """
-    ASN.1 field that is optional.
-    """
+    """An OPTIONAL member: absent when its field fails to decode here."""
     def __init__(self, field):
         field.flexible_tag = False
         self._field = field
@@ -646,7 +612,7 @@ class ASN1F_optional(ASN1F_element):
         try:
             return self._field.m2i(pkt, s)
         except (ASN1_Error, ASN1F_badsequence, ASN1_Decoding_Error):
-            # ASN1_Error may be raised by ASN1F_CHOICE
+            # ASN1_Error is what a CHOICE with no matching tag raises.
             return None, s
 
     def dissect(self, pkt, s):
@@ -669,10 +635,7 @@ class ASN1F_optional(ASN1F_element):
 
 
 class ASN1F_omit(ASN1F_field[None, None]):
-    """
-    ASN.1 field that is not specified. This is simply omitted on the network.
-    This is different from ASN1F_NULL which has a network representation.
-    """
+    """A field with no encoding at all, unlike ASN1F_NULL, which has one."""
     def m2i(self, pkt, s):
         return None, s
 
@@ -684,11 +647,8 @@ _CHOICE_T = Union['ASN1_Packet', Type[ASN1F_field[Any, Any]], 'ASN1F_PACKET']
 
 
 class ASN1F_CHOICE(ASN1F_field[_CHOICE_T, ASN1_Object[Any]]):
-    """
-    Multiple types are allowed: ASN1_Packet, ASN1F_field and ASN1F_PACKET(),
-    See layers/x509.py for examples.
-    Other ASN1F_field instances than ASN1F_PACKET instances must not be used.
-    """
+    """Alternatives are ASN1_Packet classes, ASN1F_field classes, or
+    ASN1F_PACKET instances; no other field instance."""
     holds_packets = 1
     ASN1_tag = ASN1_Class_UNIVERSAL.ANY
 
@@ -710,30 +670,24 @@ class ASN1F_CHOICE(ASN1F_field[_CHOICE_T, ASN1_Object[Any]]):
         for p in args:
             if hasattr(p, "ASN1_root"):
                 p = cast('ASN1_Packet', p)
-                # should be ASN1_Packet
                 if hasattr(p.ASN1_root, "choices"):
                     root = cast(ASN1F_CHOICE, p.ASN1_root)
                     for k, v in root.choices.items():
-                        # ASN1F_CHOICE recursion
+                        # A CHOICE of CHOICEs flattens into one.
                         self.choices[k] = v
                 else:
                     self.choices[p.ASN1_root.network_tag] = p
             elif hasattr(p, "ASN1_tag"):
                 if isinstance(p, type):
-                    # should be ASN1F_field class
                     self.choices[int(p.ASN1_tag)] = p
                 else:
-                    # should be ASN1F_PACKET instance
                     self.choices[p.network_tag] = p
                     self.pktchoices[hash(p.cls)] = (p.implicit_tag, p.explicit_tag)
             else:
                 raise ASN1_Error("ASN1F_CHOICE: no tag found for one field")
 
     def m2i(self, pkt, s):
-        """
-        First we have to retrieve the appropriate choice.
-        Then we extract the field/packet, according to this choice.
-        """
+        """Pick the alternative by the tag ahead, then decode it."""
         if len(s) == 0:
             raise ASN1_Error("ASN1F_CHOICE: got empty string")
         s = self._apply_tagging_dec(s, pkt)
@@ -751,20 +705,17 @@ class ASN1F_CHOICE(ASN1F_field[_CHOICE_T, ASN1_Object[Any]]):
                     )
                 )
         if hasattr(choice, "ASN1_root"):
-            # we don't want to import ASN1_Packet in this module...
             return self.extract_packet(choice, s, _underlayer=pkt)
         elif isinstance(choice, type):
             return choice(self.name, b"").m2i(pkt, s)
         else:
-            # XXX check properly if this is an ASN1F_PACKET
             return choice.m2i(pkt, s)
 
     def i2m(self, pkt, x):
         if x is None:
             s = b""
         else:
-            # Use the packet codec for ASN1_Object values; bytes(x) would
-            # follow conf.ASN1_default_codec instead.
+            # The packet's codec, where bytes(x) would take the default one.
             if isinstance(x, ASN1_Object):
                 s = x.enc(pkt.ASN1_codec)
             else:
@@ -782,14 +733,11 @@ class ASN1F_CHOICE(ASN1F_field[_CHOICE_T, ASN1_Object[Any]]):
         randchoices = []
         for p in self.choices.values():
             if hasattr(p, "ASN1_root"):
-                # should be ASN1_Packet class
                 randchoices.append(_fuzz(p()))
             elif hasattr(p, "ASN1_tag"):
                 if isinstance(p, type):
-                    # should be (basic) ASN1F_field class
                     randchoices.append(p("dummy", None).randval())
                 else:
-                    # should be ASN1F_PACKET instance
                     randchoices.append(p.randval())
         return RandChoice(*randchoices)
 
@@ -814,7 +762,7 @@ class ASN1F_PACKET(ASN1F_field['ASN1_Packet', Optional['ASN1_Packet']]):
         )
         if implicit_tag is None and explicit_tag is None and cls is not None:
             if cls.ASN1_root.ASN1_tag == ASN1_Class_UNIVERSAL.SEQUENCE:
-                self.network_tag = 16 | 0x20  # 16 + CONSTRUCTED
+                self.network_tag = 16 | 0x20
         self.default = default
 
     def m2i(self, pkt, s):
@@ -823,7 +771,7 @@ class ASN1F_PACKET(ASN1F_field['ASN1_Packet', Optional['ASN1_Packet']]):
         else:
             cls = self.cls
         if not hasattr(cls, "ASN1_root"):
-            # A normal Packet (!= ASN1)
+            # A packet that is not ASN.1 brings its own framing.
             return self.extract_packet(cls, s, _underlayer=pkt)
         s = self._apply_tagging_dec(
             s, pkt,
@@ -850,7 +798,7 @@ class ASN1F_PACKET(ASN1F_field['ASN1_Packet', Optional['ASN1_Packet']]):
         else:
             s = bytes(x)
             if not hasattr(x, "ASN1_root"):
-                # A normal Packet (!= ASN1)
+                # A packet that is not ASN.1 brings its own framing.
                 return s
         return self._tagging_enc(
             pkt, s,
@@ -871,10 +819,8 @@ class ASN1F_PACKET(ASN1F_field['ASN1_Packet', Optional['ASN1_Packet']]):
 
 
 class ASN1F_BIT_STRING_ENCAPS(ASN1F_BIT_STRING):
-    """
-    We may emulate simple string encapsulation with explicit_tag=0x04,
-    but we need a specific class for bit strings because of unused bits, etc.
-    """
+    """A packet carried inside a BIT STRING, whose unused-bits octet an
+    explicit OCTET STRING tag could not express."""
     ASN1_tag = ASN1_Class_UNIVERSAL.BIT_STRING
 
     def __init__(self,
@@ -940,7 +886,7 @@ class ASN1F_FLAGS(ASN1F_BIT_STRING):
     def any2i(self, pkt, x):
         if isinstance(x, str):
             if any(y not in ["0", "1"] for y in x):
-                # resolve the flags
+                # Flag names joined with "+" become the bit string.
                 value = ["0"] * len(self.mapping)
                 for i in x.split("+"):
                     value[self.mapping.index(i)] = "1"
@@ -961,9 +907,7 @@ class ASN1F_FLAGS(ASN1F_BIT_STRING):
 
 
 class ASN1F_STRING_PacketField(ASN1F_STRING):
-    """
-    ASN1F_STRING that holds packets.
-    """
+    """An OCTET STRING whose value may be a packet."""
     holds_packets = 1
 
     def i2m(self, pkt, val):
@@ -978,9 +922,7 @@ class ASN1F_STRING_PacketField(ASN1F_STRING):
 
 
 class ASN1F_STRING_ENCAPS(ASN1F_STRING_PacketField):
-    """
-    ASN1F_STRING that encapsulates a single ASN1 packet.
-    """
+    """An OCTET STRING whose content is one packet of class `cls`."""
 
     def __init__(self,
                  name,
