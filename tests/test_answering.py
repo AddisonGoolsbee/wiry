@@ -10,8 +10,8 @@ import ipaddress
 import pytest
 
 import wiry
-from wiry import ARP, BOOTP, DHCP, DNS, ICMP, IP, NBNS, UDP, Ether, Raw
-from wiry.answering import _Message, _nb_encode
+from wiry import ARP, BOOTP, DHCP, DNS, DNSQR, ICMP, IP, NBNS, UDP, Ether, Raw
+from wiry.answering import _nb_encode
 
 
 def wire(pkt):
@@ -24,14 +24,12 @@ def reply(am, req):
 
 
 def dns_query(qname, qtype=1, **l):
-    m = _Message(compress=True)
-    m.question({"qname": qname, "qtype": qtype, "qclass": 1})
-    pkt = Ether(**{k: v for k, v in l.items() if k.startswith("e_")}) if False else Ether(
-        src=l.get("esrc", "aa:aa:aa:aa:aa:aa"), dst=l.get("edst", "bb:bb:bb:bb:bb:bb"))
+    pkt = Ether(src=l.get("esrc", "aa:aa:aa:aa:aa:aa"),
+                dst=l.get("edst", "bb:bb:bb:bb:bb:bb"))
     pkt = pkt / IP(src=l.get("src", "127.0.0.1"), dst=l.get("dst", "127.0.0.2"),
                    ttl=l.get("ttl", 64))
     pkt = pkt / UDP(sport=l.get("sport", 1234), dport=l.get("dport", 53))
-    return pkt / DNS(qdcount=1) / Raw(load=bytes(m.buf))
+    return pkt / DNS(qd=[DNSQR(qname=qname, qtype=qtype)])
 
 
 # ------------------------------------------------------------------- ARP
@@ -134,33 +132,35 @@ def test_dns_am_answers_a_query():
     am = wiry.DNS_am(joker="192.168.1.1")
     r = reply(am, dns_query(b"www.secdev.org."))
     assert r[DNS].ancount == 1
-    assert r[DNS].an[0]["rdata"] == "192.168.1.1"
-    assert r[DNS].qd[0]["qname"] == "www.secdev.org."
+    assert r[DNS].an[0].rdata == "192.168.1.1"
+    assert r[DNS].qd[0].qname == b"www.secdev.org."
     assert r[IP].src == "127.0.0.2" and r[IP].dst == "127.0.0.1"
+    # The answer's owner name points back at the question (RFC 1035 §4.1.4).
+    assert bytes(r[DNS]).count(b"\x03www\x06secdev\x03org\x00") == 1
 
 
 def test_dns_am_match_table():
     am = wiry.DNS_am(match={"google.com": ("127.0.0.1", "::1")})
     r4 = reply(am, dns_query(b"google.com.", 1))
-    assert r4[DNS].an[0]["rdata"] == "127.0.0.1"
+    assert r4[DNS].an[0].rdata == "127.0.0.1"
     r6 = reply(am, dns_query(b"google.com.", 28))
-    assert r6[DNS].an[0]["rdata"] == "::1"
+    assert r6[DNS].an[0].rdata == "::1"
 
 
 def test_dns_am_srv():
     am = wiry.DNS_am(srvmatch={"_ldap._tcp.scapy.fr": (389, "dc.scapy.fr")})
     r = reply(am, dns_query(b"_ldap._tcp.scapy.fr.", 33))
     an = r[DNS].an[0]
-    assert an["type"] == "SRV"
-    assert an["rdata"]["port"] == 389
-    assert an["rdata"]["target"] == "dc.scapy.fr."
+    assert an.type == 33
+    assert an.port == 389
+    assert an.target == b"dc.scapy.fr."
 
 
 def test_dns_am_ptr_arpa():
     am = wiry.DNS_am(jokerarpa="scapy")
     r = reply(am, dns_query(b"1.0.16.172.in-addr.arpa.", 12))
-    assert r[DNS].an[0]["rdata"] == "scapy."
-    assert r[DNS].an[0]["rrname"] == "1.0.16.172.in-addr.arpa."
+    assert r[DNS].an[0].rdata == b"scapy."
+    assert r[DNS].an[0].rrname == b"1.0.16.172.in-addr.arpa."
 
 
 def test_dns_am_no_answer_is_silent():
@@ -181,9 +181,17 @@ def test_dns_am_malformed_requests_return_none():
     assert wiry.DNS_am().make_reply(Ether() / IP() / UDP()) is None
 
 
-def test_dns_am_relay_refused():
-    with pytest.raises(NotImplementedError):
-        wiry.DNS_am(relay=True)
+def test_dns_am_relay_answers_from_the_resolver_cache():
+    from wiry.layers.dns import DNSRR
+
+    resolved = DNS(qr=1, an=[DNSRR(rrname="relayed.example.", rdata="10.9.8.7")])
+    wiry.conf.netcache.dns_cache[b"relayed.example.;\x00\x01;raw"] = resolved
+    try:
+        am = wiry.DNS_am(relay=True, joker=False)
+        r = reply(am, dns_query(b"relayed.example.", 1))
+    finally:
+        del wiry.conf.netcache.dns_cache[b"relayed.example.;\x00\x01;raw"]
+    assert r[DNS].an[0].rdata == "10.9.8.7"
 
 
 def test_llmnr_am_scopes_to_link_multicast():
@@ -194,8 +202,10 @@ def test_llmnr_am_scopes_to_link_multicast():
     r = reply(am, good)
     assert r[UDP].sport == 5355 and r[UDP].dport == 51938
     assert r[DNS].ancount == 1 and r[DNS].qdcount == 1
-    assert r[DNS].an[0]["rdata"] == "192.168.1.1"
-    assert r[DNS].an[0]["ttl"] == 60
+    assert r[DNS].an[0].rdata == "192.168.1.1"
+    assert r[DNS].an[0].ttl == 60
+    # LLMNR is not compressed (RFC 4795 §2.1.1).
+    assert b"\x04TEST\x00\x00\x01" in bytes(r[DNS])
     assert r[Ether].dst == "aa:aa:aa:aa:aa:aa"
     # A routed query (ttl != 1) or a unicast one is not answered (RFC 4795).
     routed = dns_query(b"TEST.", 1, dst="224.0.0.252", ttl=42, dport=5355)
@@ -210,8 +220,22 @@ def test_mdns_am_answers_without_question():
     assert r[IP].dst == "224.0.0.251" and r[IP].ttl == 255
     assert r[UDP].sport == 5353 and r[UDP].dport == 5353
     assert r[DNS].ancount == 1 and r[DNS].qdcount == 0
-    assert r[DNS].an[0]["rrname"] == "TEST.local."
-    assert r[DNS].an[0]["ttl"] == 10
+    assert r[DNS].an[0].rrname == b"TEST.local."
+    assert r[DNS].an[0].ttl == 10
+    assert r[DNS].an[0].cacheflush == 1
+
+
+def test_mdns_am_negative_answer_lists_the_types_held():
+    # RFC 6762 §6.1: the NSEC bit map names the types that exist, so an ALL
+    # query for a name with only an A record draws A plus an NSEC saying A.
+    from wiry.layers.dns import bitmap2RRlist
+
+    am = wiry.mDNS_am(match={"TEST.local": "192.168.1.1"})
+    q = dns_query(b"TEST.local.", 255, dst="224.0.0.251", ttl=1, dport=5353)
+    r = reply(am, q)
+    nsec = [x for x in r[DNS].an if x.type == 47]
+    assert len(nsec) == 1
+    assert bitmap2RRlist(nsec[0].typebitmaps) == [1]
 
 
 def test_mdns_am_nsec_only_is_discarded():

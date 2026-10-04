@@ -899,8 +899,21 @@ fn sub_repr(s: &Sub) -> String {
 }
 
 pub fn repr_of(buf: &[u8], spans: &[LayerSpan], given: Option<Given>, from: usize) -> String {
+    repr_range(buf, spans, given, from, usize::MAX)
+}
+
+/// `repr_of`, stopping before layer `to`; the layers after it still decide
+/// which fields of the last one shown were overloaded by it.
+pub fn repr_range(
+    buf: &[u8],
+    spans: &[LayerSpan],
+    given: Option<Given>,
+    from: usize,
+    to: usize,
+) -> String {
     let v = View { buf, spans };
-    let shown = visible_layers(&v, from);
+    let mut shown = visible_layers(&v, from);
+    shown.retain(|&i| i < to);
     let mut out = String::new();
     for &i in &shown {
         out.push('<');

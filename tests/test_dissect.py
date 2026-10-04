@@ -81,7 +81,7 @@ def test_dissects_an_arp_request():
 
 def test_dissects_a_dns_header_only():
     pkt = DNS(DNS_HEADER)
-    assert pkt.layers() == ["DNS"]
+    assert pkt.layers() == [DNS]
     assert pkt[DNS].id == 0x1234
     assert (pkt[DNS].qr, pkt[DNS].opcode, pkt[DNS].rd) == (0, 0, 1)
     assert (pkt[DNS].qdcount, pkt[DNS].ancount) == (1, 0)

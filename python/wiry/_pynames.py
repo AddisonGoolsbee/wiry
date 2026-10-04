@@ -258,9 +258,29 @@ EXPORTS = {
         "PKINIT_KEX_METHOD", "KerberosClient", "krb_as_req", "krb_tgs_req",
         "krb_as_and_tgs", "krb_get_salt", "kpasswd", "KerberosSSP",
     ),
+    "_pyfields": (
+        "MaximumItemsCount",
+    ),
+    "layers.dns": (
+        "dnstypes", "dnsqtypes", "dnsclasses", "dnssecalgotypes",
+        "dnssecdigesttypes", "dnssecnsec3algotypes", "dns_get_str",
+        "dns_encode", "DNSgetstr", "dns_compress", "DNSCompressedPacket",
+        "DNSStrField", "DNSTextField", "edns0types", "EDNS0TLV", "DNSRROPT",
+        "EDNS0OWN", "EDNS0DAU", "EDNS0DHU", "EDNS0N3U", "ClientSubnetv4",
+        "ClientSubnetv6", "EDNS0ClientSubnet", "EDNS0COOKIE", "EDNS0PADDING",
+        "extended_dns_error_codes", "EDNS0ExtendedDNSError",
+        "EDNS0OPT_DISPATCHER", "bitmap2RRlist", "RRlist2bitmap",
+        "RRlistField", "DNSRRHINFO", "DNSRRMX", "DNSRRSOA", "DNSRRRSIG",
+        "DNSRRNSEC", "DNSRRDNSKEY", "DNSRRDS", "DNSRRDLV", "DNSRRNSEC3",
+        "DNSRRNSEC3PARAM", "svc_param_keys", "SvcParam", "DNSRRSVCB",
+        "DNSRRHTTPS", "DNSRRSRV", "tsig_algo_sizes", "TimeSignedField",
+        "DNSRRTSIG", "DNSRRNAPTR", "DNSRR_DISPATCHER", "DNSRR", "DNSQR", "DNS",
+        "DNSTCP", "dns_resolve", "dyndns_add", "dyndns_del", "DNSSDResult",
+        "dnssd",
+    ),
 }
 
 # Rust layers whose scapy contract is a tree of Python objects. The Rust layer
 # stays in the dissection chain, so a capture of them is found, counted and
 # filtered without Python; the name exported is the Python model.
-PY_MODELLED = {"SNMP": "layers.snmp", "LDAP": "layers.ldap"}
+PY_MODELLED = {"SNMP": "layers.snmp", "LDAP": "layers.ldap", "DNS": "layers.dns"}

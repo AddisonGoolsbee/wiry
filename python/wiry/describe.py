@@ -48,8 +48,14 @@ def _spec_command(stack: list) -> str:
     everything else was already a default."""
     from . import FlagValue
 
+    from . import _is_py
+
     parts = []
     for name, fields in stack:
+        held = [v for v in fields.values() if _is_py(v)]
+        if held:
+            parts.append(held[0].command())
+            continue
         order = {n: i for i, n in enumerate(_b.layer_fields(name))}
         ranked = sorted(
             fields.items(), key=lambda kv: (order.get(kv[0], len(order)), kv[0])
@@ -73,8 +79,11 @@ def command(pkt: Any) -> str:
     if pkt._spec_live:
         return _spec_command(pkt._stack)
     rust = _settled(pkt)
+    top = pkt._py_top()
     parts = []
     for i, name in enumerate(rust.layer_names()):
+        if top is not None and i == top[0]:
+            return "/".join(parts + [top[1].command()])
         args = []
         suffix = rust.bound_suffix(i)
         for f, v in _values(rust, i, name, numeric_flags=True):

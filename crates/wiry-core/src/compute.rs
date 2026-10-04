@@ -227,21 +227,15 @@ fn fix_tcp(pkt: &mut Packet, i: usize) {
     put16(&mut pkt.buf, off + 16, c);
 }
 
-/// RFC 1035 §4.2.2. A segment may carry more messages than wiry dissects, so a
-/// prefix already framing a shorter one is describing bytes this layer does not
-/// own and is left as the sender wrote it.
+/// RFC 1035 §4.2.2: the prefix counts the message, which is the layer's own
+/// header; what follows it in the segment is the next message or payload.
 fn fix_dns_length(pkt: &mut Packet, i: usize) {
-    let (off, _, end) = span_bounds(pkt, i);
+    let (off, hlen, _) = span_bounds(pkt, i);
     let pre = pkt.framing(i);
-    if off + pre > end || pkt.is_pinned(i, "length") {
+    if hlen < pre || pkt.is_pinned(i, "length") {
         return;
     }
-    let want = end - off - pre;
-    let have = u16::from_be_bytes([pkt.buf[off], pkt.buf[off + 1]]) as usize;
-    if (12..want).contains(&have) {
-        return;
-    }
-    put16(&mut pkt.buf, off, want as u16);
+    put16(&mut pkt.buf, off, (hlen - pre) as u16);
 }
 
 fn fix_icmpv6(pkt: &mut Packet, i: usize) {
