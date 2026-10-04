@@ -1217,6 +1217,9 @@ def render_by_layer(entries: list[tuple[dict, dict]]) -> list[str]:
         if len(always) > 1:
             raise SpecError(f"{parent}: {always} all follow it unconditionally")
         body.append(f"    Some(ProtoId::{always[0]})" if always else "    None")
+        if not keyed:
+            # A parent whose one child follows unconditionally reads no header.
+            body[1] = body[1].replace("(hdr: &[u8])", "(_hdr: &[u8])")
         body.append("}")
         funcs += body + [""]
     fwd += ["        _ => None,", "    }", "}", ""]

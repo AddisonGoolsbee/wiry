@@ -313,7 +313,7 @@ fn by_h_c_i_event_l_e_meta(hdr: &[u8]) -> Option<ProtoId> {
 }
 
 #[inline(never)]
-fn by_h_c_i_p_h_d_r_hdr(hdr: &[u8]) -> Option<ProtoId> {
+fn by_h_c_i_p_h_d_r_hdr(_hdr: &[u8]) -> Option<ProtoId> {
     Some(ProtoId::HCIHdr)
 }
 
