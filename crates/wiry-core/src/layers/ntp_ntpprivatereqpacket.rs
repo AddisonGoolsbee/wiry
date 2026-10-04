@@ -23,7 +23,7 @@ use crate::proto::{ProtoDesc, ProtoId};
 pub static FIELDS: &[FieldDesc] = &[FieldDesc::var_bytes("req_data", 0)];
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::NTPPrivateReqPacket,
+    id: ProtoId::NTPPrivateReqPacketX,
     name: "NTPPrivateReqPacket",
     fields: FIELDS,
     min_len: 0,

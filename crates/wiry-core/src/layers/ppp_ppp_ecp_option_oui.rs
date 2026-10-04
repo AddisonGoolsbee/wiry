@@ -49,7 +49,7 @@ fn content_len(hdr: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::PPPECPOptionOUI,
+    id: ProtoId::PPPECPOptionOUIX,
     name: "PPP_ECP_Option_OUI",
     fields: FIELDS,
     min_len: 6,

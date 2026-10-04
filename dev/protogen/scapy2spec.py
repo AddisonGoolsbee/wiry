@@ -1759,6 +1759,10 @@ def bindings(results: dict[str, dict], wl: dict[str, list], module_classes: list
             for fval, child in getattr(parent, "payload_guess", []):
                 if child is cls:
                     p = binding(parent, fval, cls, results, wl, universe)
+                    if isinstance(p, dict):
+                        taken = claim(r, p, p.get("field"))
+                        if taken:
+                            p = f"under {parent.__name__}: {taken}"
                     if isinstance(p, str):
                         r["dropped"].append(p)
                     elif p:
@@ -1840,6 +1844,85 @@ def binding(parent, fval: dict, cls, results, wl, universe):
             return f"under {pname} on {k}, which is not at a fixed place there"
     return {"from": "layer", "layer": layer_id(pname, results), "field": k,
             "off": place[0], "len": place[1], "values": [v]}
+
+
+# Who already answers a selector value: (kind, value) or ("layer", parent id,
+# bit offset, bit length, value), mapped to the layer name that owns it.
+CLAIMS: dict[tuple, str] = {}
+
+
+def load_claims(skip: set[Path]) -> None:
+    """Claims the specs on disk make, except those about to be regenerated."""
+    import tomllib
+
+    for spec in sorted(SPECS.rglob("*.toml")):
+        if any(spec.is_relative_to(d) for d in skip):
+            continue
+        s = tomllib.loads(spec.read_text())
+        for p in s.get("parents", []):
+            for key in claim_keys(p):
+                CLAIMS.setdefault(key, s["name"])
+
+
+def claim_keys(p: dict) -> list[tuple]:
+    if p["from"] != "layer":
+        return [(p["from"], v) for v in p["values"]]
+    if "field" not in p:
+        return [("layer", p["layer"], None, None, None)]
+    return [("layer", p["layer"], p["off"], p["len"], v) for v in p["values"]]
+
+
+PROBE_PAYLOAD = b"\x00" * 48
+
+
+def probe(key: tuple) -> str | None:
+    """What the built engine dissects after a selector value with nothing
+    declared for it: hand-written dispatch (DNS on 53, BOOTP on 67) is not in
+    any spec, so the engine is asked."""
+    import wiry
+
+    W = wiry
+    kind, v = key[0], key[-1]
+    try:
+        if kind == "udp_port":
+            pkt, outer, at = W.IP() / W.UDP(sport=v, dport=v) / W.Raw(load=PROBE_PAYLOAD), W.IP, 2
+        elif kind == "tcp_port":
+            pkt, outer, at = W.IP() / W.TCP(sport=v, dport=v) / W.Raw(load=PROBE_PAYLOAD), W.IP, 2
+        elif kind == "ipproto":
+            pkt, outer, at = W.IP(proto=v) / W.Raw(load=PROBE_PAYLOAD), W.IP, 1
+        elif kind == "ethertype":
+            pkt, outer, at = W.Ether(type=v) / W.Raw(load=PROBE_PAYLOAD), W.Ether, 1
+        elif kind == "llc_sap":
+            pkt, outer, at = W.LLC(dsap=v, ssap=v) / W.Raw(load=PROBE_PAYLOAD), W.LLC, 1
+        elif kind == "layer":
+            name = next((n for n, i in WIRY_IDS.items() if i == key[1]), None)
+            if name is None or not hasattr(W, name):
+                return None
+            parent = getattr(W, name)
+            field = key[5] if len(key) > 5 else None
+            pkt = (parent(**{field: v}) if field else parent()) / W.Raw(load=PROBE_PAYLOAD)
+            outer, at = parent, 1
+        else:
+            return None
+        names = outer(bytes(pkt)).layers()
+    except Exception:  # noqa: BLE001
+        return None
+    got = names[at] if len(names) > at else None
+    return got if got not in (None, "Raw", "Padding") else None
+
+
+def claim(r: dict, p: dict, field: str | None = None) -> str | None:
+    """Take the selector values a binding needs, or say who has them."""
+    keys = claim_keys(p)
+    for key in keys:
+        owner = CLAIMS.get(key)
+        if owner is None:
+            owner = probe(key + ((field,) if key[0] == "layer" else ()))
+        if owner is not None and owner != r["class"]:
+            return f"{key[0]} {key[-1] if key[-1] is not None else ''} is already {owner}'s".strip()
+    for key in keys:
+        CLAIMS[key] = r["class"]
+    return None
 
 
 def layer_id(name: str, results: dict) -> str:
@@ -1942,6 +2025,8 @@ def main(argv: list[str]) -> int:
         ours[s["name"]] = spec
     existing -= set(ours)
 
+    shorts = {m.split(".", 2)[2].replace(".", "_") for m in mods if m.count(".") >= 2}
+    load_claims({OUT / sh for sh in shorts})
     report = []
     base = a.id_base
     for m in mods:

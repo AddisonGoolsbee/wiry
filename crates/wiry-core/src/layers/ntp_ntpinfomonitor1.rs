@@ -42,7 +42,7 @@ fn header_len(_: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::NTPInfoMonitor1,
+    id: ProtoId::NTPInfoMonitor1X,
     name: "NTPInfoMonitor1",
     fields: FIELDS,
     min_len: 72,

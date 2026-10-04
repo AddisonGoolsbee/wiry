@@ -35,7 +35,7 @@ fn header_len(_: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::NTPConfTrap,
+    id: ProtoId::NTPConfTrapX,
     name: "NTPConfTrap",
     fields: FIELDS,
     min_len: 48,

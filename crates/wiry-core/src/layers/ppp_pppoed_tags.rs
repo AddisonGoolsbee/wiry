@@ -62,7 +62,7 @@ pub static GROUP: GroupDesc = GroupDesc::new(
 );
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::PPPoEDTags,
+    id: ProtoId::PPPoEDTagsX,
     name: "PPPoED_Tags",
     fields: FIELDS,
     min_len: 0,

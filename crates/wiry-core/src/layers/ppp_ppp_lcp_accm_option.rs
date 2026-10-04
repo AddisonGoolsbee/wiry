@@ -44,7 +44,7 @@ fn content_len(_: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::PPPLCPACCMOption,
+    id: ProtoId::PPPLCPACCMOptionX,
     name: "PPP_LCP_ACCM_Option",
     fields: FIELDS,
     min_len: 6,

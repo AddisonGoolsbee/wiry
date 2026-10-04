@@ -32,7 +32,7 @@ fn next(_: &[u8]) -> Next {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::DIRPPP,
+    id: ProtoId::DIRPPPX,
     name: "DIR_PPP",
     fields: FIELDS,
     min_len: 1,
