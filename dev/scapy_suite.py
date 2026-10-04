@@ -71,8 +71,38 @@ def parse_uts(path):
         yield campaign, name, kw, "\n".join(buf)
 
 
+# Standard-library modules and names `from scapy.all import *` happens to
+# re-export, which the suite uses without importing them itself. They are not
+# scapy's API, so they come from the standard library, never from wiry.
+_STDLIB_MODULES = (
+    "abc argparse atexit builtins calendar code collections copy ctypes "
+    "dataclasses decimal difflib enum errno functools getopt gzip hashlib hmac "
+    "html importlib inspect io itertools json locale logging math operator os "
+    "pathlib pickle queue random re select shutil socket ssl string struct "
+    "subprocess sys tempfile threading time traceback types uuid warnings"
+).split()
+_STDLIB_NAMES = {
+    "collections": ("Counter", "UserDict", "defaultdict", "deque"),
+    "decimal": ("Decimal",), "enum": ("Enum", "IntEnum", "IntFlag"),
+    "queue": ("Empty", "Queue"), "threading": ("Event", "Lock", "Thread"),
+    "logging": ("LogRecord",), "io": ("StringIO",), "uuid": ("UUID",),
+    "array": ("array",), "functools": ("partial",),
+    "datetime": ("datetime", "timedelta", "timezone", "tzinfo"),
+    "itertools": ("zip_longest",),
+}
+
+
+def _stdlib():
+    ns = {m: importlib.import_module(m) for m in _STDLIB_MODULES}
+    for mod, names in _STDLIB_NAMES.items():
+        m = importlib.import_module(mod)
+        ns.update({n: getattr(m, n) for n in names})
+    return ns
+
+
 def namespace():
-    ns = {k: getattr(wiry, k) for k in dir(wiry) if not k.startswith("_")}
+    ns = _stdlib()
+    ns.update({k: getattr(wiry, k) for k in dir(wiry) if not k.startswith("_")})
     ns["__name__"] = "scapy_suite"
     return ns
 

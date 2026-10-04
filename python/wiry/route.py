@@ -667,6 +667,24 @@ class Route6:
 
     delete = delt
 
+    def ifchange(self, iff: str, addr: str) -> None:
+        """Tell the table an interface's address changed."""
+        from .utils6 import in6_and, in6_cidr2mask
+
+        the_addr, plen_b = (addr.split("/") + ["128"])[:2]
+        plen = int(plen_b)
+        the_net = socket.inet_ntop(
+            socket.AF_INET6, in6_and(in6_cidr2mask(plen), _in6_bytes(the_addr)))
+        for i, (net, rplen, gw, iface, _, metric) in enumerate(self.routes):
+            if iface != iff:
+                continue
+            self.ipv6_ifaces.add(iface)
+            if gw == "::":
+                self.routes[i] = (the_net, plen, gw, iface, [the_addr], metric)
+            else:
+                self.routes[i] = (net, rplen, gw, iface, [the_addr], metric)
+        self.invalidate_cache()
+
     def ifdel(self, iff: str) -> None:
         self.invalidate_cache()
         self.routes = [rt for rt in self.routes if rt[3] != iff]

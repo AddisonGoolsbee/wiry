@@ -1145,6 +1145,50 @@ class Packet(metaclass=_PacketMeta):
         from .describe import json_str
         return json_str(self, **kw)
 
+    def answers(self, other: Any) -> bool:
+        """Whether this packet is a reply to ``other``, by the rules ``sr``
+        pairs with (E14). A packet that is only Raw answers anything, as
+        scapy's Raw does."""
+        if self.layers()[:1] == ["Raw"]:
+            return True
+        names = other.layers() if isinstance(other, Packet) else []
+        if not names:
+            return False
+        from .capture import conf
+
+        pairs, _ = _b.pair_replies([bytes(other)], [bytes(self)], names[0],
+                                   False, bool(conf.checkIPaddr))
+        return bool(pairs)
+
+    def __lt__(self, other: Any) -> bool:
+        """``a < b``: a answers b."""
+        return self.answers(other)
+
+    def __gt__(self, other: Any) -> bool:
+        """``a > b``: b answers a."""
+        return other.answers(self)
+
+    def route(self) -> tuple:
+        """``(iface, source, gateway)`` for the first layer that names a
+        destination: IP, IPv6, or ARP over either; ``(None, None, None)``
+        when none does."""
+        from .capture import conf
+
+        for i, name in enumerate(self.layers()):
+            view = _LayerView(self, i, name)
+            if name == "IP":
+                return conf.route.route(_first_address(view.dst))
+            if name == "IPv6":
+                return conf.route6.route(_first_address(view.dst))
+            if name == "ARP":
+                ptype = view.ptype
+                if ptype == 0x0800:
+                    return conf.route.route(_first_address(view.pdst))
+                if ptype == 0x86DD:
+                    return conf.route6.route(_first_address(view.pdst))
+                return None, None, None
+        return None, None, None
+
     def fragment(self, fragsize: int | None = None) -> list["Packet"]:
         """Split this datagram per RFC 791 §3.2."""
         from .frag import FRAGSIZE, fragment
@@ -1184,6 +1228,16 @@ def _with_meta(pkt: Packet, meta: dict) -> Packet:
     for k, v in meta.items():
         setattr(pkt, k, v)
     return pkt
+
+
+def _first_address(value: Any) -> Any:
+    """A generator field routes by its first address, as scapy's does."""
+    if isinstance(value, (str, bytes)):
+        return value
+    try:
+        return next(iter(value))
+    except (TypeError, StopIteration):
+        return value
 
 
 def _from_stack(stack, payload, meta) -> Packet:
