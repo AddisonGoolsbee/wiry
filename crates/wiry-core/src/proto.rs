@@ -381,6 +381,11 @@ impl ProtoId {
     pub const NetflowOptionsRecordScopeV9: ProtoId = ProtoId(6442);
     pub const NetflowOptionsRecordOptionV9: ProtoId = ProtoId(6443);
     pub const NetflowOptionsFlowsetScopeV9: ProtoId = ProtoId(6445);
+    pub const LoWPANUncompressedIPv6: ProtoId = ProtoId(6450);
+    pub const LoWPANHC2UDP: ProtoId = ProtoId(6452);
+    pub const LoWPANFragmentationFirst: ProtoId = ProtoId(6454);
+    pub const LoWPANBroadcast: ProtoId = ProtoId(6456);
+    pub const SixLoWPANESC: ProtoId = ProtoId(6462);
     pub const Dot15d4CmdCoordRealignPage: ProtoId = ProtoId(6478);
     pub const Dot15d4CmdAssocReq: ProtoId = ProtoId(6479);
     pub const Dot15d4CmdAssocResp: ProtoId = ProtoId(6480);
@@ -835,6 +840,11 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::NetflowOptionsRecordScopeV9,
     ProtoId::NetflowOptionsRecordOptionV9,
     ProtoId::NetflowOptionsFlowsetScopeV9,
+    ProtoId::LoWPANUncompressedIPv6,
+    ProtoId::LoWPANHC2UDP,
+    ProtoId::LoWPANFragmentationFirst,
+    ProtoId::LoWPANBroadcast,
+    ProtoId::SixLoWPANESC,
     ProtoId::Dot15d4CmdCoordRealignPage,
     ProtoId::Dot15d4CmdAssocReq,
     ProtoId::Dot15d4CmdAssocResp,
@@ -1316,6 +1326,11 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
         &netflow_netflowoptionsrecordoptionv9::DESC;
     t[ProtoId::NetflowOptionsFlowsetScopeV9.0 as usize] =
         &netflow_netflowoptionsflowsetscopev9::DESC;
+    t[ProtoId::LoWPANUncompressedIPv6.0 as usize] = &sixlowpan_lowpanuncompressedipv6::DESC;
+    t[ProtoId::LoWPANHC2UDP.0 as usize] = &sixlowpan_lowpan_hc2_udp::DESC;
+    t[ProtoId::LoWPANFragmentationFirst.0 as usize] = &sixlowpan_lowpanfragmentationfirst::DESC;
+    t[ProtoId::LoWPANBroadcast.0 as usize] = &sixlowpan_lowpanbroadcast::DESC;
+    t[ProtoId::SixLoWPANESC.0 as usize] = &sixlowpan_sixlowpan_esc::DESC;
     t[ProtoId::Dot15d4CmdCoordRealignPage.0 as usize] = &dot15d4_dot15d4cmdcoordrealignpage::DESC;
     t[ProtoId::Dot15d4CmdAssocReq.0 as usize] = &dot15d4_dot15d4cmdassocreq::DESC;
     t[ProtoId::Dot15d4CmdAssocResp.0 as usize] = &dot15d4_dot15d4cmdassocresp::DESC;
