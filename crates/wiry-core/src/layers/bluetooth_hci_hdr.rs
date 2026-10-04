@@ -15,7 +15,7 @@
 //! come from the sources cited above; edit the spec, not this file.
 
 use crate::field::FieldDesc;
-use crate::proto::{Next, ProtoDesc, ProtoId};
+use crate::proto::{ProtoDesc, ProtoId};
 
 // protogen:hand begin
 // protogen:hand end
@@ -35,17 +35,13 @@ fn header_len(_: &[u8]) -> usize {
     1
 }
 
-fn next(_: &[u8]) -> Next {
-    Next::Proto(ProtoId::Raw)
-}
-
 pub static DESC: ProtoDesc = ProtoDesc {
     id: ProtoId::HCIHdr,
     name: "HCI_Hdr",
     fields: FIELDS,
     min_len: 1,
     header_len,
-    next,
+    next: crate::proto::next_raw,
     build_len: 1,
     parse_options: None,
     opt_table: None,

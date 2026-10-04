@@ -528,8 +528,11 @@ class _LayerView:
         if field in _FLAG_FIELDS:
             names = _flag_names(self._name, field)
             if names is not None:
-                return FlagValue.from_str(
-                    value, names, self._pkt, self._idx, field
+                # The number, not the rendered string: scapy names some bits
+                # twice ("reserved"), and a name cannot say which it meant.
+                return FlagValue(
+                    rust.field_uint(self._idx, field), names, self._pkt,
+                    self._idx, field
                 )
         scale = _scale(self._name, field)
         return value / scale if scale else value
@@ -1954,6 +1957,7 @@ _LINKTYPE_OF = {
     "IPv6": 229,
     "CookedLinux": 113,
     "CookedLinuxV2": 276,
+    "HCI_Hdr": 187,
 }
 
 

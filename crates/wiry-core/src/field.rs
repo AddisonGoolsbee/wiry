@@ -50,6 +50,12 @@ impl FieldDesc {
         self
     }
 
+    /// Derived on build unless the user assigns it.
+    pub const fn recomputed(mut self) -> Self {
+        self.computed = true;
+        self
+    }
+
     pub const fn with_default(mut self, d: u64) -> Self {
         self.default = d;
         self
@@ -141,9 +147,7 @@ impl FieldDesc {
     }
 
     pub const fn computed_uint(name: &'static str, bit_off: u16, bit_len: u16) -> Self {
-        let mut f = Self::new(name, bit_off, bit_len, FieldKind::Uint, 0);
-        f.computed = true;
-        f
+        Self::new(name, bit_off, bit_len, FieldKind::Uint, 0).recomputed()
     }
 
     pub const fn ipv4(name: &'static str, bit_off: u16, default: u64) -> Self {
@@ -279,23 +283,17 @@ pub fn write_bits(buf: &mut [u8], bit_off: u16, bit_len: u16, val: u64) {
 }
 
 /// The octets of a little-endian group, reversed so the group reads as a
-/// big-endian integer, and where they start. None for a big-endian field, or
-/// for a group the buffer does not hold, which reads as zero and takes no write.
-fn le_image(buf: &[u8], f: &FieldDesc) -> Option<([u8; 8], usize, usize)> {
-    let n = (f.le_len as usize).min(8);
-    let at = f.le_at as usize;
+/// big-endian integer. None for a group the buffer does not hold, which reads
+/// as zero and takes no write.
+fn le_image(buf: &[u8], le_at: u16, le_len: u8) -> Option<[u8; 8]> {
+    let n = (le_len as usize).min(8);
+    let at = le_at as usize;
     let src = buf.get(at..at + n)?;
     let mut img = [0u8; 8];
     for (d, s) in img.iter_mut().zip(src.iter().rev()) {
         *d = *s;
     }
-    Some((img, at, n))
-}
-
-/// Where the field starts inside its group's image.
-#[inline]
-fn le_off(f: &FieldDesc) -> u16 {
-    f.bit_off.wrapping_sub(f.le_at.wrapping_mul(8))
+    Some(img)
 }
 
 #[inline]
@@ -303,31 +301,57 @@ fn is_le(f: &FieldDesc) -> bool {
     f.le_len > 1
 }
 
-/// An integer or flags field's value, in either byte order.
+/// `bit_len` bits at `bit_off`, where octets `[le_at, le_at + le_len)` are one
+/// little-endian integer whose most significant bit `bit_off` counts from;
+/// a `le_len` below 2 is plain big-endian. What dispatch reads a selector
+/// with, and what `read_uint` reads a field with.
 #[inline]
-pub fn read_uint(hdr: &[u8], f: &FieldDesc) -> u64 {
-    if !is_le(f) {
-        return read_bits(hdr, f.bit_off, f.bit_len);
+pub fn read_in(buf: &[u8], bit_off: u16, bit_len: u16, le_at: u16, le_len: u8) -> u64 {
+    if le_len < 2 {
+        return read_bits(buf, bit_off, bit_len);
     }
-    match le_image(hdr, f) {
-        Some((img, _, n)) => read_bits(&img[..n], le_off(f), f.bit_len),
+    let n = (le_len as usize).min(8);
+    match le_image(buf, le_at, le_len) {
+        Some(img) => read_bits(
+            &img[..n],
+            bit_off.wrapping_sub(le_at.wrapping_mul(8)),
+            bit_len,
+        ),
         None => 0,
     }
 }
 
-/// The inverse of `read_uint`. Bits of the field past its width are dropped,
-/// as `write_bits` drops them.
+/// The inverse of `read_in`. Bits past the width are dropped, as `write_bits`
+/// drops them.
 #[inline]
-pub fn write_uint(buf: &mut [u8], f: &FieldDesc, v: u64) {
-    if !is_le(f) {
-        return write_bits(buf, f.bit_off, f.bit_len, v);
+pub fn write_in(buf: &mut [u8], bit_off: u16, bit_len: u16, le_at: u16, le_len: u8, v: u64) {
+    if le_len < 2 {
+        return write_bits(buf, bit_off, bit_len, v);
     }
-    if let Some((mut img, at, n)) = le_image(buf, f) {
-        write_bits(&mut img[..n], le_off(f), f.bit_len, v);
+    let n = (le_len as usize).min(8);
+    let at = le_at as usize;
+    if let Some(mut img) = le_image(buf, le_at, le_len) {
+        write_bits(
+            &mut img[..n],
+            bit_off.wrapping_sub(le_at.wrapping_mul(8)),
+            bit_len,
+            v,
+        );
         for (d, s) in buf[at..at + n].iter_mut().zip(img[..n].iter().rev()) {
             *d = *s;
         }
     }
+}
+
+/// An integer or flags field's value, in either byte order.
+#[inline]
+pub fn read_uint(hdr: &[u8], f: &FieldDesc) -> u64 {
+    read_in(hdr, f.bit_off, f.bit_len, f.le_at, f.le_len)
+}
+
+#[inline]
+pub fn write_uint(buf: &mut [u8], f: &FieldDesc, v: u64) {
+    write_in(buf, f.bit_off, f.bit_len, f.le_at, f.le_len, v)
 }
 
 /// `b` as the octets a fixed-width field stores: reversed under a

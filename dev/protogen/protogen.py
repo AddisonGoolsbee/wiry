@@ -300,9 +300,9 @@ def validate(s: dict) -> None:
     if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", s["id"]):
         raise SpecError(f"{f}: id {s['id']!r} must be a Rust-style CamelCase name")
 
-    fields = s.get("fields") or []
-    if not fields:
-        raise SpecError(f"{f}: a layer needs at least one field")
+    fields = s["fields"] = s.get("fields") or []
+    if not fields and s.get("header_len") != 0:
+        raise SpecError(f"{f}: a layer with no fields must have header_len = 0")
 
     hl = s.get("header_len")
     fixed_hl = hl if isinstance(hl, int) else None
@@ -376,6 +376,16 @@ def validate(s: dict) -> None:
         if sl.get("field") not in names:
             raise SpecError(f"{f}: set_len names no field of this layer")
         Expr(sl["expr"], fields, f"{f}: set_len", extra=("x",))
+    pl = s.get("payload_len")
+    if pl is not None:
+        if not isinstance(pl, dict) or set(pl) - {"field", "add"} or "field" not in pl:
+            raise SpecError(f"{f}: payload_len takes field and an optional add")
+        fd = next((x for x in fields if x["name"] == pl["field"]), None)
+        if fd is None or fd.get("kind", "uint") not in ("uint", "le_uint", "computed"):
+            raise SpecError(f"{f}: payload_len names no integer field of this layer")
+        if fd.get("cond") or fd.get("when"):
+            raise SpecError(f"{f}: payload_len names a conditional field")
+        fd["_payload_len"] = True
     cl = s.get("content_len")
     if isinstance(cl, str) and cl not in ("hand", "header"):
         raise SpecError(f"{f}: content_len must be \"hand\" or \"header\"")
@@ -615,6 +625,8 @@ def render_field(fd: dict) -> str:
         expr += f".with_default({fd['default']})"
     if fd.get("le"):
         expr += f".little_endian({fd['le']['at']}, {fd['le']['len']})"
+    if fd.get("_payload_len") and kind != "computed":
+        expr += ".recomputed()"
     if fd.get("default_bytes"):
         b = ", ".join(str(x) for x in fd["default_bytes"])
         expr += f".defaulting_to(&[{b}])"
@@ -705,7 +717,7 @@ def render_bind_next(s: dict) -> str:
         body.append(f"        ProtoId::{a['proto']} => {a['value']},")
     body.append("        _ => return,")
     body.append("    };")
-    body.append(f"    if hdr.len() >= {need} {{")
+    body.append("    if !hdr.is_empty() {" if need == 1 else f"    if hdr.len() >= {need} {{")
     body.append(f"        crate::field::write_bits(hdr, {off}, {ln}, v);")
     body.append("    }")
     body.append("}")
@@ -1197,10 +1209,19 @@ def render_dispatch(specs: list[dict]) -> str:
     for s, p in by_layer:
         parent = by_id.get(p["layer"])
         if parent and "field" in p:
-            refuse_le_overlap(s["_file"], validate_le(parent["_file"], parent["fields"]),
-                              p["off"], p["len"], f"the {p['layer']} selector")
+            spans = validate_le(parent["_file"], parent["fields"])
+            le = p.get("le")
+            if le:
+                g = (le["at"] * 8, (le["at"] + le["len"]) * 8)
+                if g not in spans or not (g[0] <= p["off"] and p["off"] + p["len"] <= g[1]):
+                    raise SpecError(f"{s['_file']}: the {p['layer']} selector names a "
+                                    "little-endian group its parent does not have")
+                spans = [x for x in spans if x != g]
+            refuse_le_overlap(s["_file"], spans, p["off"], p["len"],
+                              f"the {p['layer']} selector")
     out += render_by_layer(by_layer)
-    places = sorted({(p["layer"], p["field"], p["off"], p["len"])
+    places = sorted({(p["layer"], tuple(p["field"]) if isinstance(p["field"], list)
+                      else (p["field"],), *selector(p))
                      for _, p in by_layer if "field" in p})
     if places:
         tests += [
@@ -1211,10 +1232,27 @@ def render_dispatch(specs: list[dict]) -> str:
             "    #[test]",
             "    fn every_parent_field_is_where_the_bindings_read_it() {",
             *[
-                f"        assert_eq!(crate::proto::field_of(ProtoId::{lay}, {rs_str(f)})"
-                f".map(|f| (f.bit_off, f.bit_len)), Some(({o}, {n})));"
-                for lay, f, o, n in places
+                f"        assert_eq!(span_of(ProtoId::{lay}, &[{', '.join(rs_str(x) for x in f)}]), "
+                f"Some(({o}, {n}, {a}, {g})));"
+                for lay, f, o, n, a, g in places
             ],
+            "    }",
+            "",
+            "    /// Adjacent fields of one byte order, as the selector they make together.",
+            "    fn span_of(p: ProtoId, names: &[&str]) -> Option<(u16, u16, u16, u8)> {",
+            "        let mut out: Option<(u16, u16, u16, u8)> = None;",
+            "        for n in names {",
+            "            let f = crate::proto::field_of(p, n)?;",
+            "            let (at, len) = if f.le_len > 1 { (f.le_at, f.le_len) } else { (0, 0) };",
+            "            out = match out {",
+            "                None => Some((f.bit_off, f.bit_len, at, len)),",
+            "                Some((o, l, a, g)) if o + l == f.bit_off && (a, g) == (at, len) => {",
+            "                    Some((o, l + f.bit_len, a, g))",
+            "                }",
+            "                _ => return None,",
+            "            };",
+            "        }",
+            "        out",
             "    }",
             "",
         ]
@@ -1259,6 +1297,12 @@ def render_dispatch(specs: list[dict]) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+def selector(p: dict) -> tuple[int, int, int, int]:
+    """A layer parent's selector as `field::read_in` takes it."""
+    le = p.get("le") or {"at": 0, "len": 0}
+    return (p["off"], p["len"], le["at"], le["len"])
+
+
 def render_by_layer(entries: list[tuple[dict, dict]]) -> list[str]:
     """Children of any layer, chosen by one of its fields. Consulted only when
     the parent's own `next` found nothing, so a hand-written parent keeps every
@@ -1275,32 +1319,33 @@ def render_by_layer(entries: list[tuple[dict, dict]]) -> list[str]:
         fn = "by_" + re.sub(r"(?<!^)([A-Z])", r"_\1", parent).lower()
         fwd.append(f"        ProtoId::{parent} => {fn}(hdr),")
         body = [f"#[inline(never)]", f"fn {fn}(hdr: &[u8]) -> Option<ProtoId> {{"]
-        keyed: dict[tuple[int, int], list[tuple[int, str]]] = {}
+        keyed: dict[tuple[int, int, int, int], list[tuple[int, str]]] = {}
         always = []
         for s, p in parents[parent]:
             if "field" not in p:
                 always.append(s["id"])
                 continue
             for v in p["values"]:
-                keyed.setdefault((p["off"], p["len"]), []).append((v, s["id"]))
+                keyed.setdefault(selector(p), []).append((v, s["id"]))
             bv = p.get("bind", p["values"][0])
             rev += [f"    if parent == ProtoId::{parent} && child == ProtoId::{s['id']} {{",
-                    f"        crate::field::write_bits(hdr, {p['off']}, {p['len']}, {bv});",
+                    f"        crate::field::write_in(hdr, {', '.join(map(str, selector(p)))}, {bv});",
                     "    }"]
-        for (off, ln), arms in sorted(keyed.items()):
+        for (off, ln, le_at, le_len), arms in sorted(keyed.items()):
             seen = {}
             for v, pid in arms:
                 if v in seen and seen[v] != pid:
                     raise SpecError(f"{parent} bit {off}: {v} binds both {seen[v]} and {pid}")
                 seen[v] = pid
-            read = f"crate::field::read_bits(hdr, {off}, {ln})"
+            read = f"crate::field::read_in(hdr, {off}, {ln}, {le_at}, {le_len})"
+            need = (le_at + le_len) * 8 if le_len > 1 else off + ln
             if len(seen) == 1:
                 (v, pid), = seen.items()
-                body.append(f"    if hdr.len() * 8 >= {off + ln} && {read} == {v} {{")
+                body.append(f"    if hdr.len() * 8 >= {need} && {read} == {v} {{")
                 body.append(f"        return Some(ProtoId::{pid});")
                 body.append("    }")
                 continue
-            body.append(f"    if hdr.len() * 8 >= {off + ln} {{")
+            body.append(f"    if hdr.len() * 8 >= {need} {{")
             body.append(f"        match {read} {{")
             for v in sorted(seen):
                 body.append(f"            {v} => return Some(ProtoId::{seen[v]}),")
@@ -1364,7 +1409,11 @@ def render_registration(specs: list[dict]) -> dict[Path, list[tuple[str, str]]]:
             acc.append(f"ProtoId::{s['id']} => &[{names}],")
     parsed = []
     groups = []
+    plen = []
     for s in sorted(specs, key=lambda s: s["num"]):
+        if s.get("payload_len"):
+            pl = s["payload_len"]
+            plen.append(f"ProtoId::{s['id']} => Some(({rs_str(pl['field'])}, {pl.get('add', 0)})),")
         if s.get("parsed_field"):
             parsed.append(f"ProtoId::{s['id']} => {rs_str(s['parsed_field'])},")
         if s.get("group"):
@@ -1383,6 +1432,7 @@ def render_registration(specs: list[dict]) -> dict[Path, list[tuple[str, str]]]:
             ("accessors", "\n".join(acc)),
             ("parsed", "\n".join(parsed)),
             ("groups", "\n".join(groups)),
+            ("payload_len", "\n".join(plen)),
         ],
         MOD_RS: [("mods", mods)],
     }

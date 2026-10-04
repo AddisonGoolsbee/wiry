@@ -481,6 +481,7 @@ class Layout:
         self.group: dict | None = None
         self.header_len = None  # int | "rest" | {"base", "expr"}
         self.set_len: dict | None = None
+        self.payload_len: dict | None = None
         self.min_len = 0
         self.length_links: dict[str, dict] = {}
         self.truncated_tail = False
@@ -770,6 +771,15 @@ class LeRun:
         return closes
 
 
+def is_bound(cls) -> bool:
+    """Whether some layer's payload_guess names `cls`: a message with no fields
+    of its own (HCI_Cmd_Reset) is still a layer dissection reaches."""
+    import scapy.config
+
+    return any(child is cls for parent in scapy.config.conf.layers
+               for _, child in getattr(parent, "payload_guess", []))
+
+
 def is_le_bits(f) -> tuple[bool, bool]:
     """(a little-endian bit field at all, of the least-significant-first kind)."""
     n = kind_name_of(f)
@@ -792,8 +802,9 @@ def analyse(cls) -> Layout:
     readable: set[str] = set()
     widths: dict[str, int] = {}
     fields = list(cls.fields_desc)
-    if not fields:
-        raise Refuse("no_fields", "no fields of its own (an abstract or dispatching base)")
+    if not fields and not is_bound(cls):
+        raise Refuse("no_fields", "no fields and nothing binds it (an abstract or "
+                     "dispatching base)")
     try:
         defaults = dict(cls().default_fields)
     except Exception:  # noqa: BLE001
@@ -1558,7 +1569,7 @@ def verify_group(lay: Layout, hdr: bytes, pkt, where: str) -> str | None:
     return None
 
 
-def model_build(lay: Layout, content: str | None) -> bytes:
+def model_build(lay: Layout, content: str | None, payload: int = 0) -> bytes:
     """What `Packet::build_with` emits for a default construction."""
     n = lay.spec_build_len
     buf = bytearray(n)
@@ -1581,6 +1592,9 @@ def model_build(lay: Layout, content: str | None) -> bytes:
         v = evaluate(lay.set_len["expr"], {"x": 0})
         if v >= 0:
             put_uint(fd, buf, v)
+    if lay.payload_len:
+        fd = next(f for f in lay.fields if f["name"] == lay.payload_len["field"])
+        put_uint(fd, buf, lay.payload_len["add"] + payload)
     g = lay.group
     if g:
         if g["extent"] == "count":
@@ -1680,6 +1694,8 @@ def field_toml(fd: dict, table: str) -> list[str]:
         out.append(f"flags = {toml_val(fd['flags'])}")
     if fd.get("default_bytes"):
         out.append(f"default_bytes = {toml_val(fd['default_bytes'])}")
+    if fd.get("le") and fd["le"]["len"] > 1:
+        out.append(f"le = {toml_val(fd['le'])}")
     if fd.get("cond"):
         out.append(f"cond = {toml_str(strip_parens(render(fd['cond'])))}")
     if fd.get("overlaps"):
@@ -1748,6 +1764,10 @@ def emit(res: dict, mod) -> str:
     if lay.set_len:
         lines.append(f"set_len = {{ field = {toml_str(lay.set_len['field'])}, expr = "
                      f"{toml_str(strip_parens(render(lay.set_len['expr'])))} }}")
+    if lay.payload_len:
+        pl = lay.payload_len
+        lines.append(f"payload_len = {{ field = {toml_str(pl['field'])}"
+                     + (f", add = {pl['add']}" if pl["add"] else "") + " }")
     nx = res["next"]
     if isinstance(nx, str):
         lines.append(f"next = {toml_str(nx)}")
@@ -1897,6 +1917,11 @@ def convert_class(cls, existing: set[str]) -> dict:
     if bad:
         res.update(status="refused", code="verify", why=f"disagrees with scapy: {bad}")
         return res
+    rule = payload_len_rule(lay, res.get("content"))
+    if rule:
+        lay.payload_len = rule
+        gaps = [(c, w) for c, w in gaps if c != "post_build"
+                and not (c == "computed_len" and w.startswith(rule["field"] + " "))]
     try:
         built = bytes(cls())
     except Exception as e:  # noqa: BLE001
@@ -1913,6 +1938,49 @@ def convert_class(cls, existing: set[str]) -> dict:
     res["partial"] = [{"code": c, "why": w} for c, w in gaps]
     res["status"] = "partial" if gaps else "clean"
     return res
+
+
+PROBE_LENS = (0, 1, 2, 7, 200)
+
+
+def payload_len_rule(lay: Layout, content: str | None) -> dict | None:
+    """The field a `LenField` or a length-writing `post_build` fills, found
+    by building over payloads of several lengths: one integer field that
+    holds the payload's length plus a constant, everything else in the
+    header exactly the default build, the payload untouched, and an assigned
+    value left alone. Anything else post_build does fails one of those."""
+    from scapy.packet import Raw
+
+    cls = lay.cls
+    hl = lay.header_len
+    if not isinstance(hl, int) or lay.group:
+        return None
+    by_name = {f.name: unwrap(f)[0] for f in cls.fields_desc}
+    for fd in lay.fields:
+        f = by_name.get(fd["name"])
+        if fd["kind"] not in ("uint", "le_uint") or "cond" in fd or f is None:
+            continue
+        if f.default is not None:
+            continue
+        try:
+            add = get_uint(fd, bytes(cls() / Raw(b""))[:hl])
+            lay.payload_len = {"field": fd["name"], "add": add}
+            ok = True
+            for k in PROBE_LENS:
+                pay = b"\x5a" * k
+                if bytes(cls() / Raw(pay)) != model_build(lay, content, k) + pay:
+                    ok = False
+                    break
+                pinned = bytes(cls(**{fd["name"]: 3}) / Raw(pay))
+                if get_uint(fd, pinned[:hl]) != 3 or pinned[hl:] != pay:
+                    ok = False
+                    break
+        except Exception:  # noqa: BLE001
+            ok = False
+        lay.payload_len = None
+        if ok:
+            return {"field": fd["name"], "add": add}
+    return None
 
 
 def _constructible(cls) -> bool:
@@ -1934,7 +2002,9 @@ def bindings(results: dict[str, dict], wl: dict[str, list], module_classes: list
         r = results[cls.__name__]
         r.setdefault("parents", [])
         r.setdefault("dropped", [])
-        if r["status"] not in ("clean", "partial"):
+        # Only a class that is written out may claim a selector value; a
+        # partial one left unwritten would otherwise shadow its clean sibling.
+        if cls.__name__ not in emitted:
             continue
         has_children = False
         for parent in scapy.config.conf.layers:
@@ -1960,6 +2030,10 @@ def bindings(results: dict[str, dict], wl: dict[str, list], module_classes: list
         for fval, child in cls.payload_guess:
             cname = child.__name__
             if cname not in wl or cname in emitted:
+                continue
+            # bind_layers(X, conf.raw_layer) names the fallback every layer
+            # already has; as an arm it would shadow the children by field.
+            if not fval and cname == "Raw":
                 continue
             if not fval:
                 arms.append(("", 0, WIRY_IDS.get(cname, "")))
@@ -1988,13 +2062,22 @@ def next_table(r: dict, arms: list[tuple[str, int, str]]):
 
 
 def merge_parent(ps: list, p: dict) -> None:
+    """Fold `p` into the entry for the same selector. `bind` is what stacking
+    writes; protogen defaults it to the first value, so it is kept only where
+    scapy builds with another."""
     for q in ps:
         if all(q.get(k) == p.get(k) for k in ("from", "layer", "field")):
             for v in p.get("values", []):
                 if v not in q["values"]:
                     q["values"].append(v)
-            return
-    ps.append(p)
+            if "bind" in p:
+                q["bind"] = p["bind"]
+            p = q
+            break
+    else:
+        ps.append(p)
+    if "bind" in p and (p["bind"] not in p["values"] or p["bind"] == p["values"][0]):
+        del p["bind"]
 
 
 def binding(parent, fval: dict, cls, results, wl, universe):
@@ -2005,6 +2088,8 @@ def binding(parent, fval: dict, cls, results, wl, universe):
         sel = {SELECTORS.get((pname, k)) for k in fval}
         if len(sel) == 1 and None not in sel and len(set(fval.values())) == 1:
             fval = {next(iter(fval)): next(iter(fval.values()))}
+        elif pname in results and "layout" in results[pname]:
+            return joint_selector(parent, fval, cls, results)
         else:
             return f"under {pname} on {sorted(fval)}, more than one field"
     if not fval:
@@ -2016,16 +2101,56 @@ def binding(parent, fval: dict, cls, results, wl, universe):
     if sel:
         return {"from": sel, "values": [v]}
     if pname in results and "layout" in results[pname]:
-        fd = next((f for f in results[pname]["layout"].fields if f["name"] == k), None)
-        if fd is None or "cond" in fd or fd["kind"] not in ("uint", "flags") or "le" in fd:
-            return f"under {pname} on {k}, not a plain big-endian field there"
-        place = (fd["off"], fd["len"])
+        return joint_selector(parent, fval, cls, results)
     else:
         place = field_place(wl.get(pname, []), k)
         if place is None:
             return f"under {pname} on {k}, which is not at a fixed place there"
     return {"from": "layer", "layer": layer_id(pname, results), "field": k,
             "off": place[0], "len": place[1], "values": [v]}
+
+
+def joint_selector(parent, fval: dict, cls, results: dict):
+    """A binding on one field, or on several adjacent fields of one byte order
+    read as a single selector: scapy binds HCI commands on `ogf` and `ocf`,
+    which together are the little-endian opcode.
+
+    Stacking writes what scapy's last `bind_layers` for the pair overloads,
+    which is not always a value dissection is bound on first: L2CAP
+    signalling is read under cid 1 and 5 and built as 5."""
+    pname = parent.__name__
+    fds = []
+    for k, v in fval.items():
+        fd = next((f for f in results[pname]["layout"].fields if f["name"] == k), None)
+        if fd is None or "cond" in fd or fd["kind"] not in ("uint", "flags", "le_uint"):
+            return f"under {pname} on {k}, not a plain field there"
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0 or v >> fd["len"]:
+            return f"under {pname} on {k}={v!r}, not a value the field holds"
+        fds.append((fd, v))
+    fds.sort(key=lambda x: x[0]["off"])
+    groups = {le_group(fd) for fd, _ in fds}
+    off = fds[0][0]["off"]
+    width = 0
+    value = 0
+    for fd, v in fds:
+        if fd["off"] != off + width:
+            return f"under {pname} on {sorted(fval)}, fields that are not adjacent"
+        width += fd["len"]
+        value = (value << fd["len"]) | v
+    if len(groups) != 1 or width > 64:
+        return f"under {pname} on {sorted(fval)}, fields of different byte orders"
+    out = {"from": "layer", "layer": layer_id(pname, results),
+           "field": fds[0][0]["name"] if len(fds) == 1 else [fd["name"] for fd, _ in fds],
+           "off": off, "len": width, "values": [value]}
+    g = groups.pop()
+    if g:
+        out["le"] = {"at": g[0], "len": g[1]}
+    over = getattr(cls, "_overload_fields", {}).get(parent) or {}
+    if all(isinstance(over.get(fd["name"]), int) for fd, _ in fds):
+        out["bind"] = 0
+        for fd, _ in fds:
+            out["bind"] = (out["bind"] << fd["len"]) | (over[fd["name"]] & ((1 << fd["len"]) - 1))
+    return out
 
 
 # Who already answers a selector value: (kind, value) or ("layer", parent id,
@@ -2170,7 +2295,7 @@ def convert_module(modname: str, id_base: int | None, existing: set[str],
                 ident += "X"
             used_ids.add(ident)
             r["id"] = ident
-        r["module"] = f"{short}_{snake(cls.__name__)}"
+        r["module"] = f"{snake(short)}_{snake(cls.__name__)}"
         results[cls.__name__] = r
     return [results[c.__name__] for c in classes], mod
 

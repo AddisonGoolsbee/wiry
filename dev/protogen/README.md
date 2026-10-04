@@ -60,6 +60,10 @@ next = "raw"              # "raw" | "end" | "hand" | a [next] table
 content_len = "hand"      # optional; "hand"
 parse_options = "hand"    # optional; "hand"
 parsed_field = "headers"  # optional; the field a parsed item list answers under
+payload_len = { field = "len", add = 0 }
+                          # optional; on build, unless assigned, the field takes
+                          # the octets after this header plus `add`: scapy's
+                          # LenField, and most length-writing post_builds
 
 [[fields]]
 name = "detect_mult"
@@ -143,6 +147,15 @@ values = [3784, 3785, 4784]
 bind = 3784               # the value stacking writes back; defaults to values[0]
 guard = "crate::layers::bfd::looks_like"   # optional fn(&[u8]) -> bool over the payload
 
+[[parents]]               # or under any layer, by one of its fields
+from = "layer"
+layer = "HCICommandHdr"   # the parent's ProtoId
+field = ["ogf", "ocf"]    # one name, or adjacent fields read as one selector
+off = 0
+len = 16
+le = { at = 0, len = 2 }  # where the selector lies in a little-endian group
+values = [1025]
+
 [vector]                  # seeds the test module, once
 source = "RFC 5880 §4.1 control packet: ..."
 bytes = [0x20, 0xc0, 0x03, 0x18]
@@ -163,6 +176,8 @@ raise:
 
 - no `citation`, `name`, `id` or `num`
 - a duplicate `num` or a duplicate layer name
+- a layer with no fields whose `header_len` is not 0; a message that is only
+  its type (an HCI `Reset` command) is a zero-length layer, nothing else is
 - a field with no bit length, or a `flags` field naming more flags than its width
   has bits
 - a variable-length field that is not last

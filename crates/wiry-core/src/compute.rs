@@ -1,4 +1,5 @@
 use crate::checksum as ck;
+use crate::field::FieldDesc;
 use crate::packet::Packet;
 use crate::proto::{ipproto, ProtoId};
 
@@ -17,6 +18,7 @@ pub fn recompute(pkt: &mut Packet) {
         if !clipped {
             fix_tail_len(pkt, i);
             fix_unit_hlen(pkt, i);
+            fix_payload_len(pkt, i);
         }
         match pkt.spans[i].proto {
             ProtoId::Ipv4 => fix_ipv4(pkt, i, clipped),
@@ -91,6 +93,17 @@ pub fn oversize(pkt: &Packet) -> Option<String> {
                 "{}.{name} cannot describe a {hlen}-byte header",
                 s.proto.name()
             ));
+        }
+    }
+    for i in 0..pkt.spans.len() {
+        if let Some((f, n)) = payload_len(pkt, i) {
+            if n >= 0 && !crate::field::fits(f, n as u64) && !pkt.is_pinned(i, f.name) {
+                return Some(format!(
+                    "{}.{} cannot hold {n} bytes",
+                    pkt.spans[i].proto.name(),
+                    f.name
+                ));
+            }
         }
     }
     // Every other length recomputed here is sixteen bits wide (RFC 791 §3.1,
@@ -308,6 +321,26 @@ fn tail_len(proto: ProtoId) -> Option<(usize, usize)> {
     }
 }
 
+/// What `payload_len_of` names for a span: the field and the value it should
+/// hold, or None where there is nothing to write.
+fn payload_len(pkt: &Packet, i: usize) -> Option<(&'static FieldDesc, i64)> {
+    let (name, add) = crate::proto::payload_len_of(pkt.spans[i].proto)?;
+    let f = pkt.active_field(i, name)?;
+    let (off, hlen, end) = span_bounds(pkt, i);
+    Some((f, end.saturating_sub(off + hlen) as i64 + add))
+}
+
+fn fix_payload_len(pkt: &mut Packet, i: usize) {
+    let Some((f, n)) = payload_len(pkt, i) else {
+        return;
+    };
+    if pkt.is_pinned(i, f.name) || n < 0 || !crate::field::fits(f, n as u64) {
+        return;
+    }
+    let (off, hlen, _) = span_bounds(pkt, i);
+    crate::field::write_uint(&mut pkt.buf[off..off + hlen], f, n as u64);
+}
+
 fn fix_tail_len(pkt: &mut Packet, i: usize) {
     let Some((at, fixed)) = tail_len(pkt.spans[i].proto) else {
         return;
@@ -373,7 +406,9 @@ mod tests {
         for id in (0..crate::proto::BUILTIN_COUNT).map(ProtoId) {
             for framed in [false, true] {
                 for f in crate::proto::fields_of(id, framed) {
-                    if f.computed && !HANDLED.contains(&(id, f.name)) {
+                    let generated =
+                        crate::proto::payload_len_of(id).is_some_and(|(n, _)| n == f.name);
+                    if f.computed && !generated && !HANDLED.contains(&(id, f.name)) {
                         let entry = format!("{}.{}", id.name(), f.name);
                         if !missing.contains(&entry) {
                             missing.push(entry);
