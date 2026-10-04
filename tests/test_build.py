@@ -28,7 +28,9 @@ def test_slash_groups_the_same_either_way():
     "name,size",
     [
         ("Ether", 14), ("Dot1Q", 4), ("ARP", 28), ("IP", 20), ("IPv6", 40),
-        ("TCP", 20), ("UDP", 8), ("ICMP", 8), ("ICMPv6", 4), ("DNS", 12),
+        ("TCP", 20), ("UDP", 8), ("ICMP", 8), ("ICMPv6", 4),
+        # scapy's DNS() carries a question for www.example.com.
+        ("DNS", 33),
         ("BOOTP", 236), ("DHCP", 0), ("Raw", 0), ("Padding", 0),
     ],
 )
@@ -48,7 +50,7 @@ def test_single_layer_serialises_to_its_header_size(name, size):
         (lambda: Ether() / IPv6() / ICMPv6(), 58),
         (lambda: Ether() / ARP(), 42),
         (lambda: Ether() / Dot1Q() / IP() / UDP(), 46),
-        (lambda: Ether() / IP() / UDP() / DNS(), 54),
+        (lambda: Ether() / IP() / UDP() / DNS(), 75),
     ],
 )
 def test_stack_length_is_the_sum_of_its_headers(build, size):

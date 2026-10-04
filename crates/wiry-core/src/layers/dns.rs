@@ -6,9 +6,10 @@
 //
 // Changed by the wiry authors:
 //   2026-10-03 — opcode and rcode names transcribed into the field table
+//   2026-10-04 — the layer spans the whole message, as scapy's DNS does
 
-//! RFC 1035 §4.1.1 header; sections stay `Raw` and are decoded by
-//! [`parse_records`]. RDATA layouts: RFC 1035 §3.3, RFC 2782 (SRV),
+//! RFC 1035 §4.1: the header is a field table and the record sections are
+//! decoded by [`parse_records`]. RDATA layouts: RFC 1035 §3.3, RFC 2782 (SRV),
 //! RFC 6891 (OPT), RFC 4034 (DS, RRSIG, NSEC, DNSKEY), RFC 5155 (NSEC3),
 //! RFC 8659 (CAA). DEVIATIONS.md E8.
 
@@ -60,8 +61,49 @@ pub static FIELDS: &[FieldDesc] = header_fields!(0);
 /// RFC 1035 §4.2.2.
 pub static TCP_FIELDS: &[FieldDesc] = header_fields!(16, FieldDesc::computed_uint("length", 0, 16));
 
-fn header_len(_: &[u8]) -> usize {
-    12
+/// The layer is the whole message, its record sections included, as scapy's
+/// `DNS` is: a segment or datagram's octets past the last record are payload.
+/// A message whose records cannot be walked runs to the end of the input,
+/// since nothing then says where it stops.
+fn header_len(msg: &[u8]) -> usize {
+    message_len(msg).unwrap_or(msg.len())
+}
+
+/// The octet after a name, without decoding it: a pointer ends the name.
+fn skip_name(msg: &[u8], mut pos: usize) -> Option<usize> {
+    loop {
+        let len = *msg.get(pos)?;
+        match len & 0xc0 {
+            0x00 if len == 0 => return Some(pos + 1),
+            0x00 => pos += 1 + len as usize,
+            0xc0 => return (pos + 2 <= msg.len()).then_some(pos + 2),
+            _ => return None,
+        }
+    }
+}
+
+/// RFC 1035 §4.1: the header, then as many questions and resource records as
+/// the four counts claim. Every step advances, so the walk is bounded by the
+/// input whatever the counts say.
+pub fn message_len(msg: &[u8]) -> Option<usize> {
+    let count = |at: usize| be16(msg, at).map(usize::from);
+    let (qd, rr) = (count(4)?, count(6)? + count(8)? + count(10)?);
+    let mut pos = 12usize;
+    for _ in 0..qd {
+        pos = skip_name(msg, pos)? + 4;
+        if pos > msg.len() {
+            return None;
+        }
+    }
+    for _ in 0..rr {
+        pos = skip_name(msg, pos)?;
+        let rdlength = be16(msg, pos + 8)? as usize;
+        pos += 10 + rdlength;
+        if pos > msg.len() {
+            return None;
+        }
+    }
+    Some(pos)
 }
 
 fn next(_: &[u8]) -> Next {
@@ -88,6 +130,8 @@ pub static DESC: ProtoDesc = ProtoDesc {
 pub mod rtype {
     pub const A: u16 = 1;
     pub const NS: u16 = 2;
+    pub const MD: u16 = 3;
+    pub const MF: u16 = 4;
     pub const CNAME: u16 = 5;
     pub const SOA: u16 = 6;
     pub const PTR: u16 = 12;
@@ -95,6 +139,7 @@ pub mod rtype {
     pub const TXT: u16 = 16;
     pub const AAAA: u16 = 28;
     pub const SRV: u16 = 33;
+    pub const DNAME: u16 = 39;
     pub const OPT: u16 = 41;
     pub const DS: u16 = 43;
     pub const RRSIG: u16 = 46;
@@ -132,6 +177,8 @@ pub fn rtype_name(t: u16) -> &'static str {
     match t {
         rtype::A => "A",
         rtype::NS => "NS",
+        rtype::MD => "MD",
+        rtype::MF => "MF",
         rtype::CNAME => "CNAME",
         rtype::SOA => "SOA",
         rtype::PTR => "PTR",
@@ -139,6 +186,7 @@ pub fn rtype_name(t: u16) -> &'static str {
         rtype::TXT => "TXT",
         rtype::AAAA => "AAAA",
         rtype::SRV => "SRV",
+        rtype::DNAME => "DNAME",
         rtype::OPT => "OPT",
         rtype::DS => "DS",
         rtype::RRSIG => "RRSIG",
@@ -193,7 +241,7 @@ pub struct Edns {
 pub enum RData {
     A([u8; 4]),
     Aaaa([u8; 16]),
-    /// CNAME, NS, PTR.
+    /// NS, MD, MF, CNAME, PTR and DNAME (RFC 6672 §2.1).
     Name(String),
     Txt(Vec<String>),
     Mx {
@@ -490,10 +538,12 @@ fn decode_rdata(msg: &[u8], rtype: u16, start: usize, end: usize) -> RData {
             Ok(a) => RData::Aaaa(a),
             Err(_) => other(),
         },
-        rtype::NS | rtype::CNAME | rtype::PTR => match read_name_within(msg, start, end) {
-            Some((n, _)) => RData::Name(n),
-            None => other(),
-        },
+        rtype::NS | rtype::MD | rtype::MF | rtype::CNAME | rtype::PTR | rtype::DNAME => {
+            match read_name_within(msg, start, end) {
+                Some((n, _)) => RData::Name(n),
+                None => other(),
+            }
+        }
         rtype::MX => match (be16(msg, start), read_name_within(msg, start + 2, end)) {
             (Some(pref), Some((exchange, _))) => RData::Mx { pref, exchange },
             _ => other(),
@@ -773,7 +823,7 @@ mod tests {
     fn dissects_query_header() {
         let p = Packet::dissect(query(), ProtoId::Dns);
         let d = p.find_layer(ProtoId::Dns).unwrap();
-        assert_eq!(p.header(d).len(), 12);
+        assert_eq!(p.header(d).len(), query().len());
         assert_eq!(p.get(d, "id").unwrap(), FieldValue::Uint(0xabcd));
         assert_eq!(p.get(d, "qr").unwrap(), FieldValue::Uint(0));
         assert_eq!(p.get(d, "opcode").unwrap(), FieldValue::Uint(0));
@@ -785,12 +835,33 @@ mod tests {
     }
 
     #[test]
-    fn record_sections_stay_raw() {
+    fn the_layer_is_the_message_and_what_follows_is_payload() {
         let p = Packet::dissect(query(), ProtoId::Dns);
         let got: Vec<_> = p.layers().iter().map(|s| s.proto).collect();
+        assert_eq!(got, vec![ProtoId::Dns]);
+        assert!(p.payload(0).is_empty());
+
+        let mut trailed = query();
+        trailed.extend_from_slice(b"junk");
+        let p = Packet::dissect(trailed, ProtoId::Dns);
+        let got: Vec<_> = p.layers().iter().map(|s| s.proto).collect();
         assert_eq!(got, vec![ProtoId::Dns, ProtoId::Raw]);
-        let d = p.find_layer(ProtoId::Dns).unwrap();
-        assert_eq!(p.payload(d), b"\x01a\x03com\x00\x00\x01\x00\x01");
+        assert_eq!(p.payload(0), b"junk");
+    }
+
+    #[test]
+    fn a_message_whose_records_do_not_walk_runs_to_the_end() {
+        let mut short = query();
+        short[5] = 2;
+        assert_eq!(message_len(&short), None);
+        let p = Packet::dissect(short.clone(), ProtoId::Dns);
+        assert_eq!(p.header(0).len(), short.len());
+
+        let r = referral();
+        assert_eq!(message_len(&r), Some(r.len()));
+        for n in 0..r.len() {
+            assert!(message_len(&r[..n]).is_none_or(|m| m <= n));
+        }
     }
 
     #[test]
@@ -878,7 +949,7 @@ mod tests {
         let msg = query();
         let p = Packet::dissect(tcp_dns(&msg, msg.len() as u16), ProtoId::Tcp);
         let d = p.find_layer(ProtoId::Dns).expect("dns over tcp");
-        assert_eq!(p.header(d).len(), 14);
+        assert_eq!(p.header(d).len(), 2 + msg.len());
         assert_eq!(p.framing(d), 2);
         assert_eq!(p.get(d, "length").unwrap(), FieldValue::Uint(23));
         assert_eq!(p.get(d, "id").unwrap(), FieldValue::Uint(0xabcd));
@@ -889,7 +960,7 @@ mod tests {
         udp.extend_from_slice(&msg);
         let u = Packet::dissect(udp, ProtoId::Udp);
         let ud = u.find_layer(ProtoId::Dns).unwrap();
-        assert_eq!(u.header(ud).len(), 12);
+        assert_eq!(u.header(ud).len(), msg.len());
         assert_eq!(u.get(ud, "length"), None);
         assert_eq!(u.get(ud, "id").unwrap(), FieldValue::Uint(0xabcd));
     }
@@ -958,7 +1029,7 @@ mod tests {
     fn a_stream_message_builds_with_room_for_its_prefix() {
         let mut p = Packet::build(&[ProtoId::Ipv4, ProtoId::Tcp, ProtoId::Dns]);
         assert_eq!(p.header(2).len(), 14);
-        assert_eq!(p.get(1, "dport").unwrap(), FieldValue::Uint(53));
+        assert_eq!(p.get(1, "sport").unwrap(), FieldValue::Uint(53));
         let bytes = p.to_bytes().to_vec();
         assert_eq!(bytes.len(), 20 + 20 + 14);
 

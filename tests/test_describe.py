@@ -42,14 +42,21 @@ DISSECTED = [
 ]
 
 
+class _Names(dict):
+    """wiry's names, lazy ones included, for `eval` to resolve through."""
+
+    def __missing__(self, key):
+        return getattr(wiry, key)
+
+
 @pytest.mark.parametrize("p", BUILT, ids=lambda p: p.summary())
 def test_eval_of_command_rebuilds_a_built_packet(p):
-    assert bytes(eval(p.command(), vars(wiry))) == bytes(p)
+    assert bytes(eval(p.command(), {}, _Names())) == bytes(p)
 
 
 @pytest.mark.parametrize("p", DISSECTED, ids=lambda p: p.summary())
 def test_eval_of_command_rebuilds_a_dissected_packet(p):
-    assert bytes(eval(p.command(), vars(wiry))) == bytes(p)
+    assert bytes(eval(p.command(), {}, _Names())) == bytes(p)
 
 
 def test_command_names_every_layer_in_order():

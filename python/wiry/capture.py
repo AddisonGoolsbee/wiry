@@ -1138,7 +1138,7 @@ class _Conf:
                  "_l3socket", "_l2socket", "_l2listen", "_loopback", "_prog",
                  "warning_threshold", "temp_files", "auto_crop_tables",
                  "_stats", "_manufdb", "_asn1_codec", "ASN1_default_long_size",
-                 "_mib")
+                 "_mib", "_netcache", "_nameservers", "max_list_count")
 
     def __init__(self) -> None:
         self.verb = 2
@@ -1181,6 +1181,35 @@ class _Conf:
         self.auto_crop_tables = True
         self._stats: Optional[list] = None
         self._manufdb: Any = None
+        self._netcache: Any = None
+        self._nameservers: Optional[list] = None
+        # A list field dissecting more items than this raises
+        # MaximumItemsCount: a count is attacker-controlled.
+        self.max_list_count = 100
+
+    @property
+    def netcache(self) -> Any:
+        if self._netcache is None:
+            from .config import NetCache
+
+            self._netcache = NetCache()
+            self._netcache.new_cache("arp_cache", 120)
+            self._netcache.new_cache("dns_cache", 300)
+        return self._netcache
+
+    @property
+    def nameservers(self) -> list:
+        """What ``dns_resolve`` asks, in order: the host's resolvers until
+        set."""
+        if self._nameservers is None:
+            from .arch import read_nameservers
+
+            self._nameservers = read_nameservers()
+        return self._nameservers
+
+    @nameservers.setter
+    def nameservers(self, value: Any) -> None:
+        self._nameservers = list(value)
 
     @property
     def version(self) -> str:

@@ -39,6 +39,12 @@ def over_udp(msg: bytes) -> bytes:
     return bytes(Ether() / IP() / UDP(sport=40000, dport=53) / Raw(load=msg))
 
 
+def parsed(pkt):
+    """The Rust parser's reading of the record sections: what the bulk paths
+    and the Rust renderer see, which `pkt[DNS]` must agree with."""
+    return pkt._materialize().dns_records(pkt.layers().index("DNS"))
+
+
 QUERY = header(1, 0, 0, 0) + question(name("example", "com"), 1)
 
 
@@ -51,17 +57,19 @@ def test_tcp_port_53_reaches_dns_and_strips_the_length_prefix():
     assert pkt[DNS].length == len(QUERY)
     assert pkt[DNS].id == 0x1234
     assert pkt[DNS].qdcount == 1
-    assert pkt[DNS].qd == [
+    q = pkt[DNS].qd[0]
+    assert (q.qname, q.qtype, q.qclass) == (b"example.com.", 1, 1)
+    assert parsed(pkt)["qd"] == [
         {"qname": "example.com.", "qtype": 1, "type": "A", "qclass": 1}
     ]
 
 
 def test_the_length_prefix_exists_only_over_tcp():
-    assert "length" in Ether(over_tcp(QUERY))[DNS].fields()
+    assert "length" in Ether(over_tcp(QUERY))[DNS].fields
     udp = Ether(over_udp(QUERY))
-    assert "length" not in udp[DNS].fields()
+    assert "length" not in udp[DNS].fields
     assert udp[DNS].id == 0x1234
-    assert udp[DNS].qd == Ether(over_tcp(QUERY))[DNS].qd
+    assert udp[DNS].qd[0].qname == Ether(over_tcp(QUERY))[DNS].qd[0].qname
 
 
 def test_a_stream_message_round_trips_and_recomputes_its_length():
@@ -80,8 +88,9 @@ def test_a_built_dns_over_tcp_dissects_back():
     pkt = IP() / TCP() / DNS()
     back = IP(bytes(pkt))
     assert back.layers() == ["IP", "TCP", "DNS"]
-    assert back[TCP].dport == 53
-    assert back[DNS].length == 12
+    # scapy's last binding of the pair, bind_layers(TCP, DNS, sport=53).
+    assert (back[TCP].sport, back[TCP].dport) == (53, 80)
+    assert back[DNS].length == len(bytes(DNS()))
 
 
 # --- RFC 6891 EDNS0 ---------------------------------------------------------
@@ -95,8 +104,16 @@ def test_an_opt_pseudo_record_exposes_its_edns_fields():
     cookie = struct.pack("!HH", 10, 8) + bytes(range(8))
     msg = header(1, 0, 0, 1) + question(name("example", "com"), 1)
     msg += opt_record(4096, 0x01008000, cookie)
-    ar = Ether(over_udp(msg))[DNS].ar
+    pkt = Ether(over_udp(msg))
+    ar = pkt[DNS].ar
     assert len(ar) == 1
+    opt = ar[0]
+    assert (opt.rrname, opt.type, opt.rclass) == (b".", 41, 4096)
+    assert (opt.extrcode, opt.version, opt.z) == (1, 0, 0x8000)
+    assert opt.rdata[0].optcode == 10
+    assert opt.rdata[0].client_cookie == bytes(range(8))
+
+    ar = parsed(pkt)["ar"]
     assert ar[0]["rrname"] == "."
     assert ar[0]["type"] == "OPT"
     assert ar[0]["udpsize"] == 4096
@@ -110,7 +127,9 @@ def test_an_opt_pseudo_record_exposes_its_edns_fields():
 
 def test_an_opt_record_with_no_options_is_an_empty_list():
     msg = header(0, 0, 0, 1) + opt_record(1232, 0, b"")
-    ar = Ether(over_udp(msg))[DNS].ar
+    pkt = Ether(over_udp(msg))
+    assert pkt[DNS].ar[0].rdata == []
+    ar = parsed(pkt)["ar"]
     assert ar[0]["rdata"] == []
     assert ar[0]["do"] is False
     assert ar[0]["udpsize"] == 1232
@@ -137,8 +156,19 @@ def test_dnssec_rdata_is_decoded_rather_than_left_raw():
     msg += record(zone, 48, 1, 3600, key)
     msg += record(zone, 46, 1, 3600, sig)
     msg += record(zone, 47, 1, 3600, nsec)
-    an = Ether(over_udp(msg))[DNS].an
+    pkt = Ether(over_udp(msg))
+    rr = pkt[DNS].an
+    assert [type(r).__name__ for r in rr] == [
+        "DNSRRDS", "DNSRRDNSKEY", "DNSRRRSIG", "DNSRRNSEC"]
+    assert (rr[0].keytag, rr[0].algorithm, rr[0].digesttype) == (12345, 8, 2)
+    assert rr[0].digest == b"\xab" * 32
+    assert (rr[1].flags, rr[1].publickey) == (257, b"public key")
+    assert (rr[2].typecovered, rr[2].signersname) == (1, b"example.com.")
+    assert rr[2].signature == b"SIGNATURE"
+    assert rr[3].nextname == b"next.example.com."
+    assert rr[3].sprintf("%typebitmaps%") == "['A', 'NS']"
 
+    an = parsed(pkt)["an"]
     assert [r["type"] for r in an] == ["DS", "DNSKEY", "RRSIG", "NSEC"]
     assert an[0]["rdata"] == {
         "keytag": 12345,
@@ -158,7 +188,11 @@ def test_dnssec_rdata_is_decoded_rather_than_left_raw():
 def test_srv_rdata_is_decoded():
     rdata = struct.pack("!HHH", 10, 5, 443) + name("host", "example", "com")
     msg = header(0, 1, 0, 0) + record(name("example", "com"), 33, 1, 60, rdata)
-    an = Ether(over_udp(msg))[DNS].an
+    pkt = Ether(over_udp(msg))
+    srv = pkt[DNS].an[0]
+    assert (srv.priority, srv.weight, srv.port) == (10, 5, 443)
+    assert srv.target == b"host.example.com."
+    an = parsed(pkt)["an"]
     assert an[0]["rdata"] == {
         "priority": 10,
         "weight": 5,
@@ -169,7 +203,9 @@ def test_srv_rdata_is_decoded():
 
 def test_an_unknown_type_still_falls_back_to_raw_bytes():
     msg = header(0, 1, 0, 0) + record(name("a", "com"), 999, 1, 60, b"\xde\xad")
-    an = Ether(over_udp(msg))[DNS].an
+    pkt = Ether(over_udp(msg))
+    assert (pkt[DNS].an[0].type, pkt[DNS].an[0].rdata) == (999, b"\xde\xad")
+    an = parsed(pkt)["an"]
     assert an[0]["type"] == "UNKNOWN"
     assert an[0]["rdata"] == b"\xde\xad"
 
@@ -182,10 +218,17 @@ def test_names_end_in_the_root_dot_and_escape_a_dot_inside_a_label():
     msg += question(name("example", "com"), 1)
     msg += question(b"\x03a.b\x03com\x00", 1)
     msg += question(b"\x00", 2)
-    qd = Ether(over_udp(msg))[DNS].qd
+    pkt = Ether(over_udp(msg))
+    qd = parsed(pkt)["qd"]
     assert qd[0]["qname"] == "example.com."
     assert qd[1]["qname"] == "a\\.b.com."
     assert qd[2]["qname"] == "."
+    # The record objects agree, so the escaped label survives a rebuild where
+    # scapy's, unescaped, splits into two.
+    names = [q.qname for q in pkt[DNS].qd]
+    assert names == [b"example.com.", b"a\\.b.com.", b"."]
+    pkt[DNS].qd[1].qtype = 28
+    assert b"\x03a.b\x03com\x00\x00\x1c" in bytes(pkt)
 
 
 # --- RFC 2018 SACK ----------------------------------------------------------
@@ -336,7 +379,7 @@ def test_a_bulk_read_of_a_framed_only_field_refuses_the_unframed_layer(tmp_path)
     assert cols["DNS.id"] == [0x1234, 0x1234]
     assert cols["DNS.length"] == [None, len(QUERY)]
     assert pl.field_column("DNS", "length") == [None, len(QUERY)]
-    assert not hasattr(pl[0][DNS], "length")
+    assert pl[0][DNS].length is None
 
     # A condition on the field selects only the packet that carries it.
     assert len(pl.filter(where=[("DNS", "length", "==", 0x1234)])) == 0

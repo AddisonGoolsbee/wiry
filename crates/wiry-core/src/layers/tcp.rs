@@ -59,13 +59,14 @@ fn next(hdr: &[u8]) -> Next {
 }
 
 /// Without this a built `TCP()/DNS()` would not dissect back as DNS, since the
-/// default ports name no protocol.
+/// default ports name no protocol. DNS takes the source port, as scapy's last
+/// `bind_layers(TCP, DNS, sport=53)` does.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
     if hdr.len() < 4 {
         return;
     }
     if p == ProtoId::Dns {
-        hdr[2..4].copy_from_slice(&ports::DNS.to_be_bytes());
+        hdr[0..2].copy_from_slice(&ports::DNS.to_be_bytes());
     } else if let Some(port) = crate::layers::dispatch::by_tcp_port_of(p) {
         hdr[2..4].copy_from_slice(&port.to_be_bytes());
     }

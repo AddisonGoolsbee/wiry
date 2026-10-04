@@ -206,7 +206,7 @@ class PyPacketMeta(_PacketMeta):
         for lower, fval in cls._overload_fields.items():
             if not isinstance(lower, PyPacketMeta):
                 from . import _PY_OVERLOAD, _layer_name
-                _PY_OVERLOAD[cls] = (_layer_name(lower), dict(fval))
+                _PY_OVERLOAD.setdefault(cls, {})[_layer_name(lower)] = dict(fval)
         return cls
 
     def __getattr__(cls, attr):

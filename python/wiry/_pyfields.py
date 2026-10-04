@@ -75,8 +75,7 @@ EPOCH = 0
 log_runtime = logging.getLogger("wiry.runtime")
 
 
-class Scapy_Exception(Exception):
-    pass
+from .error import Scapy_Exception  # noqa: E402
 
 
 def bytes_encode(x):
@@ -120,7 +119,6 @@ class _Conf:
 
     debug_strfixedlenfield = False
     manufdb = None
-    max_list_count = 100
     noenum: set = set()
     resolve: set = set()
     padding_layer = PyPadding

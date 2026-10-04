@@ -258,9 +258,28 @@ EXPORTS = {
         "PKINIT_KEX_METHOD", "KerberosClient", "krb_as_req", "krb_tgs_req",
         "krb_as_and_tgs", "krb_get_salt", "kpasswd", "KerberosSSP",
     ),
+    "_pyfields": (
+        "MaximumItemsCount",
+    ),
+    "layers.dns": (
+        "dnstypes", "dnsqtypes", "dnsclasses", "dnssecalgotypes",
+        "dnssecdigesttypes", "dnssecnsec3algotypes", "dns_get_str",
+        "dns_encode", "DNSgetstr", "dns_compress", "DNSCompressedPacket",
+        "DNSStrField", "DNSTextField", "edns0types", "EDNS0TLV", "DNSRROPT",
+        "EDNS0OWN", "EDNS0DAU", "EDNS0DHU", "EDNS0N3U", "ClientSubnetv4",
+        "ClientSubnetv6", "EDNS0ClientSubnet", "EDNS0COOKIE", "EDNS0PADDING",
+        "extended_dns_error_codes", "EDNS0ExtendedDNSError",
+        "EDNS0OPT_DISPATCHER", "bitmap2RRlist", "RRlist2bitmap",
+        "RRlistField", "DNSRRHINFO", "DNSRRMX", "DNSRRSOA", "DNSRRRSIG",
+        "DNSRRNSEC", "DNSRRDNSKEY", "DNSRRDS", "DNSRRDLV", "DNSRRNSEC3",
+        "DNSRRNSEC3PARAM", "svc_param_keys", "SvcParam", "DNSRRSVCB",
+        "DNSRRHTTPS", "DNSRRSRV", "tsig_algo_sizes", "TimeSignedField",
+        "DNSRRTSIG", "DNSRRNAPTR", "DNSRR_DISPATCHER", "DNSRR", "DNSQR", "DNS",
+        "DNSTCP", "dns_resolve", "dyndns_add", "dyndns_del", "DNSSDResult",
+        "dnssd",
+    ),
     "layers.dhcp6": (
-        "IP6ListField", "DomainNameListField", "dns_get_str", "dns_encode",
-        "DNSStrField", "dhcp6_cls_by_type",
+        "IP6ListField", "DomainNameListField", "dhcp6_cls_by_type",
         "All_DHCP_Relay_Agents_and_Servers", "All_DHCP_Servers", "dhcp6opts",
         "dhcp6opts_by_code", "dhcp6types", "duidtypes", "duidhwtypes",
         "DUID_LLT", "DUID_EN", "DUID_LL", "DUID_UUID", "duid_cls",
@@ -305,6 +324,7 @@ EXPORTS = {
 # filtered without Python; the name exported is the Python model.
 PY_MODELLED = {
     "SNMP": "layers.snmp", "LDAP": "layers.ldap", "DHCP6": "layers.dhcp6",
+    "DNS": "layers.dns",
 }
 
 # Where scapy splits one Rust layer into a class per variant, the function
