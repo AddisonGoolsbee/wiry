@@ -15,6 +15,7 @@ See README.md in this directory for the spec format and the reasoning.
 
 from __future__ import annotations
 
+import ast
 import re
 import shutil
 import subprocess
@@ -44,6 +45,9 @@ KINDS = {
 }
 
 FIXED_BITS = {"ipv4": 32, "ipv6": 128, "mac": 48}
+
+# A parent outside the shared selectors: any layer, by one of its own fields.
+LAYER_PARENT = "layer"
 
 # `enum = "<one of these>"` names a table scapy loads from the host rather
 # than one written out in the spec.
@@ -82,10 +86,10 @@ def builtin_count() -> int:
 
 def load_specs() -> list[dict]:
     out = []
-    for path in sorted(SPECS.glob("*.toml")):
+    for path in sorted(SPECS.rglob("*.toml")):
         with path.open("rb") as f:
             spec = tomllib.load(f)
-        spec["_file"] = path.name
+        spec["_file"] = path.relative_to(SPECS).as_posix()
         spec["module"] = spec.get("module", path.stem)
         validate(spec)
         out.append(spec)
@@ -274,11 +278,34 @@ def validate(s: dict) -> None:
         raise SpecError(f"{f}: header_len must be an integer, \"rest\" or \"hand\"")
     if hl is None:
         raise SpecError(f"{f}: header_len is required")
+    names = {fd["name"] for fd in fields}
+    if isinstance(hl, dict):
+        if set(hl) != {"base", "expr"}:
+            raise SpecError(f"{f}: header_len as a table takes exactly base and expr")
+        Expr(hl["expr"], fields, f"{f}: header_len")
+    for fd in fields:
+        if fd.get("cond"):
+            if fd.get("when"):
+                raise SpecError(f"{f}: {fd['name']!r} has both cond and when")
+            Expr(fd["cond"], fields, f"{f}: {fd['name']!r} cond")
+    sl = s.get("set_len")
+    if sl:
+        if not isinstance(hl, dict):
+            raise SpecError(f"{f}: set_len needs header_len as a table")
+        if sl.get("field") not in names:
+            raise SpecError(f"{f}: set_len names no field of this layer")
+        Expr(sl["expr"], fields, f"{f}: set_len", extra=("x",))
+    cl = s.get("content_len")
+    if isinstance(cl, str) and cl not in ("hand", "header"):
+        raise SpecError(f"{f}: content_len must be \"hand\" or \"header\"")
 
     nx = s.get("next")
     if isinstance(nx, str) and nx not in ("hand", "raw", "end"):
         raise SpecError(f"{f}: next must be \"raw\", \"end\", \"hand\" or a table")
-    if isinstance(nx, dict):
+    if isinstance(nx, dict) and "proto" in nx:
+        if set(nx) != {"proto"}:
+            raise SpecError(f"{f}: a [next] naming one proto takes nothing else")
+    elif isinstance(nx, dict):
         if "off" not in nx or "len" not in nx:
             raise SpecError(f"{f}: [next] needs off and len")
         for arm in nx.get("arms", []):
@@ -290,7 +317,7 @@ def validate(s: dict) -> None:
         validate_group(f, g, False)
         # The region has to sit inside the header, because that is the slice a
         # walk is handed; a fixed header length ends before it.
-        if isinstance(hl, int):
+        if isinstance(hl, int) or (isinstance(hl, dict) and hl["base"] != g.get("start", 0)):
             raise SpecError(
                 f"{f}: a group needs header_len \"rest\" or \"hand\", so the "
                 "elements are inside the header the walk is handed"
@@ -319,6 +346,16 @@ def validate(s: dict) -> None:
             )
 
     for p in s.get("parents", []):
+        if p.get("from") == LAYER_PARENT:
+            if not p.get("layer"):
+                raise SpecError(f"{f}: a layer parent needs the parent's ProtoId as layer")
+            if "field" in p:
+                for k in ("off", "len", "values"):
+                    if k not in p:
+                        raise SpecError(f"{f}: a layer parent's field needs {k}")
+            elif "values" in p:
+                raise SpecError(f"{f}: a layer parent with values must name the field")
+            continue
         if p.get("from") not in PARENT_KINDS:
             raise SpecError(
                 f"{f}: parent kind {p.get('from')!r} unknown; "
@@ -333,6 +370,142 @@ def validate(s: dict) -> None:
                 f"{f}: a guard is only consulted on a port selector, not on "
                 f"{p['from']}"
             )
+
+
+class Expr:
+    """An integer expression over a layer's own header fields, in Python syntax
+    because the converter that writes most of them is Python: a condition, a
+    header length, the value a length field takes. Rendered into a Rust fn over
+    the header bytes. Every operation is total — the operands are
+    attacker-controlled, so nothing here may overflow, divide by zero or shift
+    out of range."""
+
+    BIN = {ast.Add: "wrapping_add", ast.Sub: "wrapping_sub", ast.Mult: "wrapping_mul",
+           ast.BitAnd: "&", ast.BitOr: "|", ast.BitXor: "^"}
+    CMP = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">",
+           ast.GtE: ">="}
+
+    def __init__(self, src: str, fields: list[dict], where: str, extra: tuple = ()):
+        self.where = where
+        self.fields = {fd["name"]: (i, fd) for i, fd in enumerate(fields)}
+        self.extra = extra
+        self.used: list[str] = []
+        try:
+            tree = ast.parse(str(src), mode="eval")
+        except SyntaxError as e:
+            raise SpecError(f"{where}: {src!r} does not parse: {e.msg}")
+        self.tree = tree.body
+        self.check(self.tree)
+
+    def fail(self, why):
+        raise SpecError(f"{self.where}: {why}")
+
+    def const(self, n) -> int | None:
+        if isinstance(n, ast.Constant) and type(n.value) is int:
+            return n.value
+        return None
+
+    def check(self, n):
+        if isinstance(n, ast.Name):
+            if n.id in self.extra:
+                return
+            if n.id not in self.fields:
+                self.fail(f"{n.id!r} is not a field of this layer")
+            fd = self.fields[n.id][1]
+            if fd.get("kind", "uint") not in ("uint", "le_uint", "flags", "computed"):
+                self.fail(f"{n.id!r} is not an integer field")
+            if fd.get("cond") or fd.get("when"):
+                self.fail(f"{n.id!r} is conditional, so it may not be there to read")
+            if n.id not in self.used:
+                self.used.append(n.id)
+        elif isinstance(n, ast.Constant):
+            if type(n.value) is not int:
+                self.fail(f"{n.value!r} is not an integer")
+        elif isinstance(n, ast.BinOp):
+            if type(n.op) in (ast.FloorDiv, ast.Mod, ast.LShift, ast.RShift):
+                c = self.const(n.right)
+                if c is None or c <= 0 or (type(n.op) in (ast.LShift, ast.RShift) and c >= 64):
+                    self.fail("a division, remainder or shift needs a positive constant "
+                              "on its right")
+            elif type(n.op) not in self.BIN:
+                self.fail(f"operator {type(n.op).__name__} is not supported")
+            self.check(n.left)
+            self.check(n.right)
+        elif isinstance(n, ast.UnaryOp):
+            if type(n.op) not in (ast.Not, ast.USub, ast.Invert):
+                self.fail(f"operator {type(n.op).__name__} is not supported")
+            self.check(n.operand)
+        elif isinstance(n, ast.BoolOp):
+            for v in n.values:
+                self.check(v)
+        elif isinstance(n, ast.Compare):
+            if any(type(o) not in self.CMP for o in n.ops):
+                self.fail("only ==, !=, <, <=, > and >= compare")
+            self.check(n.left)
+            for c in n.comparators:
+                self.check(c)
+        elif isinstance(n, ast.IfExp):
+            self.check(n.test)
+            self.check(n.body)
+            self.check(n.orelse)
+        else:
+            self.fail(f"{type(n).__name__} is not supported")
+
+    def rs(self, n, want: str) -> str:
+        code, got = self.node(n)
+        if got == want:
+            return code
+        return f"({code} != 0)" if want == "bool" else f"i64::from({code})"
+
+    def node(self, n) -> tuple[str, str]:
+        if isinstance(n, ast.Name):
+            return (f"v_{n.id}", "int")
+        if isinstance(n, ast.Constant):
+            return (f"{n.value}i64", "int")
+        if isinstance(n, ast.BinOp):
+            a = self.rs(n.left, "int")
+            op = type(n.op)
+            if op in (ast.FloorDiv, ast.Mod, ast.LShift, ast.RShift):
+                c = self.const(n.right)
+                fn = {ast.FloorDiv: "div_euclid", ast.Mod: "rem_euclid",
+                      ast.LShift: "wrapping_shl", ast.RShift: "wrapping_shr"}[op]
+                arg = f"{c}u32" if op in (ast.LShift, ast.RShift) else f"{c}i64"
+                return (f"{a}.{fn}({arg})", "int")
+            b = self.rs(n.right, "int")
+            m = self.BIN[op]
+            if m.startswith("wrapping"):
+                return (f"{a}.{m}({b})", "int")
+            return (f"({a} {m} {b})", "int")
+        if isinstance(n, ast.UnaryOp):
+            if isinstance(n.op, ast.Not):
+                return (f"!{self.rs(n.operand, 'bool')}", "bool")
+            if isinstance(n.op, ast.USub):
+                return (f"{self.rs(n.operand, 'int')}.wrapping_neg()", "int")
+            return (f"!{self.rs(n.operand, 'int')}", "int")
+        if isinstance(n, ast.BoolOp):
+            j = " && " if isinstance(n.op, ast.And) else " || "
+            return ("(" + j.join(self.rs(v, "bool") for v in n.values) + ")", "bool")
+        if isinstance(n, ast.Compare):
+            parts = []
+            left = n.left
+            for o, r in zip(n.ops, n.comparators):
+                parts.append(f"{self.rs(left, 'int')} {self.CMP[type(o)]} {self.rs(r, 'int')}")
+                left = r
+            return ("(" + " && ".join(parts) + ")", "bool")
+        if isinstance(n, ast.IfExp):
+            _, t = self.node(n.body)
+            t = "bool" if t == "bool" and self.node(n.orelse)[1] == "bool" else "int"
+            return (f"(if {self.rs(n.test, 'bool')} {{ {self.rs(n.body, t)} }} else "
+                    f"{{ {self.rs(n.orelse, t)} }})", t)
+        raise AssertionError(n)
+
+    def reads(self, hdr: str = "hdr") -> list[str]:
+        out = []
+        for name in self.used:
+            i, _ = self.fields[name]
+            out.append(f"    let v_{name} = crate::field::decode({hdr}, &FIELDS[{i}])"
+                       ".as_uint().unwrap_or(0) as i64;")
+        return out
 
 
 # --------------------------------------------------------------------------
@@ -359,6 +532,8 @@ def render_field(fd: dict) -> str:
         expr += f".defaulting_to(&[{b}])"
     if fd.get("when"):
         expr += f".when({fd['when']})"
+    if fd.get("_cond_fn"):
+        expr += f".when({fd['_cond_fn']})"
     e = fd.get("enum")
     if isinstance(e, str):
         expr += f".host_named(crate::names::Host::{HOST_ENUMS[e]})"
@@ -405,6 +580,8 @@ def render_next(s: dict) -> str:
     nx = s.get("next", "raw")
     if not isinstance(nx, dict):
         return ""
+    if "proto" in nx:
+        return f"fn next(_: &[u8]) -> Next {{\n    Next::Proto(ProtoId::{nx['proto']})\n}}\n"
     off, ln = nx["off"], nx["len"]
     need = (off + ln + 7) // 8
     fallback = nx.get("fallback", "raw")
@@ -428,7 +605,7 @@ def render_next(s: dict) -> str:
 
 def render_bind_next(s: dict) -> str:
     nx = s.get("next")
-    if not isinstance(nx, dict) or not nx.get("bind", True):
+    if not isinstance(nx, dict) or "proto" in nx or not nx.get("bind", True):
         return ""
     arms = [a for a in nx.get("arms", []) if a.get("bind", True)]
     if not arms:
@@ -455,7 +632,60 @@ def render_header_len(s: dict) -> str:
     hl = s["header_len"]
     if hl in ("hand", "rest"):
         return ""
+    if isinstance(hl, dict):
+        e = Expr(hl["expr"], s["fields"], s["_file"])
+        return "\n".join([
+            "fn header_len(hdr: &[u8]) -> usize {",
+            *e.reads(),
+            f"    let n: i64 = {e.rs(e.tree, 'int')};",
+            f"    {hl['base']} + n.clamp(0, hdr.len() as i64) as usize",
+            "}",
+        ]) + "\n"
     return f"fn header_len(_: &[u8]) -> usize {{\n    {hl}\n}}\n"
+
+
+def render_conds(s: dict) -> str:
+    out = []
+    for i, fd in enumerate(s["fields"]):
+        if not fd.get("cond"):
+            continue
+        e = Expr(fd["cond"], s["fields"], s["_file"])
+        fd["_cond_fn"] = f"cond_{i}"
+        out += [f"fn cond_{i}(hdr: &[u8]) -> bool {{", *e.reads(),
+                f"    {e.rs(e.tree, 'bool')}", "}", ""]
+    return "\n".join(out)
+
+
+def render_set_len(s: dict) -> str:
+    """The inverse of a computed header length: what the length field holds for
+    a header of `hlen` octets, `x` being the octets past the fixed part."""
+    sl = s.get("set_len")
+    if not sl:
+        return ""
+    e = Expr(sl["expr"], s["fields"], s["_file"], extra=("x",))
+    i = next(i for i, fd in enumerate(s["fields"]) if fd["name"] == sl["field"])
+    return "\n".join([
+        "fn set_hlen(hdr: &mut [u8], hlen: usize) {",
+        f"    let v_x = hlen.saturating_sub({s['header_len']['base']}) as i64;",
+        *e.reads("&*hdr"),
+        f"    let v: i64 = {e.rs(e.tree, 'int')};",
+        f"    let f = &FIELDS[{i}];",
+        "    if v >= 0 && crate::field::fits(f, v as u64) {",
+        "        let w = crate::field::wire_uint(f, v as u64);",
+        "        crate::field::write_bits(hdr, f.bit_off, f.bit_len, w);",
+        "    }",
+        "}",
+    ]) + "\n"
+
+
+def render_content_len(s: dict) -> str:
+    if s.get("content_len") != "header":
+        return ""
+    hl = s["header_len"]
+    body = "hdr.len()" if hl == "rest" else "header_len(hdr)"
+    if isinstance(hl, int):
+        return f"fn content_len(_: &[u8]) -> usize {{\n    {hl}\n}}\n"
+    return f"fn content_len(hdr: &[u8]) -> usize {{\n    {body}\n}}\n"
 
 
 def opt_hook(s: dict, key: str) -> str:
@@ -563,10 +793,14 @@ def render_layer(s: dict, existing: str) -> str:
     for line in s["citation"].strip().splitlines():
         lines.append(("//! " + line).rstrip())
     lines.append("//!")
-    lines.append("//! " + BANNER.format(spec=s["_file"]))
+    banner = BANNER.format(spec=s["_file"])
+    if s.get("provenance"):
+        banner = banner.replace("the RFC cited above", "the sources cited above")
+    lines.append("//! " + banner)
     lines.append("")
     bind = render_bind_next(s)
-    hooks = [render_header_len(s), render_next(s), bind]
+    hooks = [render_conds(s), render_header_len(s), render_set_len(s),
+             render_content_len(s), render_next(s), bind]
     # `Next` is named only by a hook this file defines; a shared one is reached
     # through its full path.
     names = ["ProtoDesc", "ProtoId"]
@@ -606,11 +840,13 @@ def render_layer(s: dict, existing: str) -> str:
     lines.append(f"    build_len: {build_len},")
     lines.append(f"    parse_options: {opt_hook(s, 'parse_options')},")
     lines.append(f"    opt_table: {opt_hook(s, 'opt_table')},")
-    lines.append(f"    set_hlen: {opt_hook(s, 'set_hlen')},")
+    sh = "Some(set_hlen)" if s.get("set_len") else opt_hook(s, "set_hlen")
+    lines.append(f"    set_hlen: {sh},")
     bn = "Some(bind_next)" if (bind or s.get("bind_next") == "hand") else "None"
     lines.append(f"    bind_next: {bn},")
     lines.append(f"    bind_next_bytes: {opt_hook(s, 'bind_next_bytes')},")
-    lines.append(f"    content_len: {opt_hook(s, 'content_len')},")
+    cl = "Some(content_len)" if s.get("content_len") == "header" else opt_hook(s, "content_len")
+    lines.append(f"    content_len: {cl},")
     lines.append("};")
     lines.append("")
     lines.append("#[cfg(test)]")
@@ -685,9 +921,13 @@ def test_region(s: dict, existing: str) -> str:
 
 def render_dispatch(specs: list[dict]) -> str:
     by_kind: dict[str, list[tuple[dict, dict]]] = {k: [] for k in PARENT_KINDS}
+    by_layer: list[tuple[dict, dict]] = []
     for s in specs:
         for p in s.get("parents", []):
-            by_kind[p["from"]].append((s, p))
+            if p["from"] == LAYER_PARENT:
+                by_layer.append((s, p))
+            else:
+                by_kind[p["from"]].append((s, p))
 
     out = [
         "//! Where every generated layer is reached from, and what to write back",
@@ -866,6 +1106,25 @@ def render_dispatch(specs: list[dict]) -> str:
             out.append("")
             if is_port:
                 gates.append((fname, f"{kind.upper()}_CLAIMED"))
+    out += render_by_layer(by_layer)
+    places = sorted({(p["layer"], p["field"], p["off"], p["len"])
+                     for _, p in by_layer if "field" in p})
+    if places:
+        tests += [
+            "    /// A parent's field is placed by the spec that binds under it, which",
+            "    /// for a hand-written parent is a claim about a table protogen cannot",
+            "    /// see. The engine's own table has to agree, or dispatch reads the",
+            "    /// wrong bits.",
+            "    #[test]",
+            "    fn every_parent_field_is_where_the_bindings_read_it() {",
+            *[
+                f"        assert_eq!(crate::proto::field_of(ProtoId::{lay}, {rs_str(f)})"
+                f".map(|f| (f.bit_off, f.bit_len)), Some(({o}, {n})));"
+                for lay, f, o, n in places
+            ],
+            "    }",
+            "",
+        ]
     if gates:
         tests += [
             "    /// The reverse map is what stacking a layer writes, so a port it",
@@ -889,6 +1148,9 @@ def render_dispatch(specs: list[dict]) -> str:
         out += [
             "#[cfg(test)]",
             "mod tests {",
+            "    #[allow(unused_imports)]",
+            "    use crate::proto::ProtoId;",
+            "",
             "    /// A guard that rejects every probe would hide a dropped bitmap bit,",
             "    /// so the probes have to reach as many arms as they can.",
             "    const PROBES: &[&[u8]] = &[",
@@ -902,6 +1164,72 @@ def render_dispatch(specs: list[dict]) -> str:
             "}",
         ]
     return "\n".join(out).rstrip() + "\n"
+
+
+def render_by_layer(entries: list[tuple[dict, dict]]) -> list[str]:
+    """Children of any layer, chosen by one of its fields. Consulted only when
+    the parent's own `next` found nothing, so a hand-written parent keeps every
+    arm it has and gains these."""
+    parents: dict[str, list[tuple[dict, dict]]] = {}
+    for s, p in entries:
+        parents.setdefault(p["layer"], []).append((s, p))
+    out = []
+    fwd = ["#[inline]", "pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {",
+           "    match parent {"]
+    rev = ["#[inline]", "pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {"]
+    funcs = []
+    for parent in sorted(parents):
+        fn = "by_" + re.sub(r"(?<!^)([A-Z])", r"_\1", parent).lower()
+        fwd.append(f"        ProtoId::{parent} => {fn}(hdr),")
+        body = [f"#[inline(never)]", f"fn {fn}(hdr: &[u8]) -> Option<ProtoId> {{"]
+        keyed: dict[tuple[int, int], list[tuple[int, str]]] = {}
+        always = []
+        for s, p in parents[parent]:
+            if "field" not in p:
+                always.append(s["id"])
+                continue
+            for v in p["values"]:
+                keyed.setdefault((p["off"], p["len"]), []).append((v, s["id"]))
+            bv = p.get("bind", p["values"][0])
+            rev += [f"    if parent == ProtoId::{parent} && child == ProtoId::{s['id']} {{",
+                    f"        crate::field::write_bits(hdr, {p['off']}, {p['len']}, {bv});",
+                    "    }"]
+        for (off, ln), arms in sorted(keyed.items()):
+            seen = {}
+            for v, pid in arms:
+                if v in seen and seen[v] != pid:
+                    raise SpecError(f"{parent} bit {off}: {v} binds both {seen[v]} and {pid}")
+                seen[v] = pid
+            read = f"crate::field::read_bits(hdr, {off}, {ln})"
+            if len(seen) == 1:
+                (v, pid), = seen.items()
+                body.append(f"    if hdr.len() * 8 >= {off + ln} && {read} == {v} {{")
+                body.append(f"        return Some(ProtoId::{pid});")
+                body.append("    }")
+                continue
+            body.append(f"    if hdr.len() * 8 >= {off + ln} {{")
+            body.append(f"        match {read} {{")
+            for v in sorted(seen):
+                body.append(f"            {v} => return Some(ProtoId::{seen[v]}),")
+            body.append("            _ => {}")
+            body.append("        }")
+            body.append("    }")
+        if len(always) > 1:
+            raise SpecError(f"{parent}: {always} all follow it unconditionally")
+        body.append(f"    Some(ProtoId::{always[0]})" if always else "    None")
+        if not keyed:
+            # A parent whose one child follows unconditionally reads no header.
+            body[1] = body[1].replace("(hdr: &[u8])", "(_hdr: &[u8])")
+        body.append("}")
+        funcs += body + [""]
+    fwd += ["        _ => None,", "    }", "}", ""]
+    rev += ["}", ""]
+    if not parents:
+        fwd = ["#[inline]", "pub fn by_layer(_parent: ProtoId, _hdr: &[u8]) -> Option<ProtoId> {",
+               "    None", "}", ""]
+        rev = ["#[inline]",
+               "pub fn bind_layer(_hdr: &mut [u8], _parent: ProtoId, _child: ProtoId) {}", ""]
+    return fwd + funcs + rev
 
 
 # --------------------------------------------------------------------------

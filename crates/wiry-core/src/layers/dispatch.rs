@@ -257,8 +257,213 @@ pub fn by_icmpv6_type_of(p: ProtoId) -> Option<u8> {
     }
 }
 
+#[inline]
+pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
+    match parent {
+        ProtoId::ATTHdr => by_a_t_t_hdr(hdr),
+        ProtoId::HCIEventLEMeta => by_h_c_i_event_l_e_meta(hdr),
+        ProtoId::HCIPHDRHdr => by_h_c_i_p_h_d_r_hdr(hdr),
+        ProtoId::PppoeDisc => by_pppoe_disc(hdr),
+        ProtoId::SMHdr => by_s_m_hdr(hdr),
+        _ => None,
+    }
+}
+
+#[inline(never)]
+fn by_a_t_t_hdr(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_bits(hdr, 0, 8) {
+            1 => return Some(ProtoId::ATTErrorResponse),
+            2 => return Some(ProtoId::ATTExchangeMTURequest),
+            3 => return Some(ProtoId::ATTExchangeMTUResponse),
+            4 => return Some(ProtoId::ATTFindInformationRequest),
+            6 => return Some(ProtoId::ATTFindByTypeValueRequest),
+            7 => return Some(ProtoId::ATTFindByTypeValueResponse),
+            10 => return Some(ProtoId::ATTReadRequest),
+            11 => return Some(ProtoId::ATTReadResponse),
+            12 => return Some(ProtoId::ATTReadBlobRequest),
+            13 => return Some(ProtoId::ATTReadBlobResponse),
+            14 => return Some(ProtoId::ATTReadMultipleRequest),
+            15 => return Some(ProtoId::ATTReadMultipleResponse),
+            16 => return Some(ProtoId::ATTReadByGroupTypeRequest),
+            17 => return Some(ProtoId::ATTReadByGroupTypeResponse),
+            18 => return Some(ProtoId::ATTWriteRequest),
+            22 => return Some(ProtoId::ATTPrepareWriteRequest),
+            23 => return Some(ProtoId::ATTPrepareWriteResponse),
+            24 => return Some(ProtoId::ATTExecuteWriteRequest),
+            27 => return Some(ProtoId::ATTHandleValueNotification),
+            29 => return Some(ProtoId::ATTHandleValueIndication),
+            82 => return Some(ProtoId::ATTWriteCommand),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_h_c_i_event_l_e_meta(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_bits(hdr, 0, 8) {
+            3 => return Some(ProtoId::HCILEMetaConnectionUpdateComplete),
+            5 => return Some(ProtoId::HCILEMetaLongTermKeyRequest),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_h_c_i_p_h_d_r_hdr(_hdr: &[u8]) -> Option<ProtoId> {
+    Some(ProtoId::HCIHdr)
+}
+
+#[inline(never)]
+fn by_pppoe_disc(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 && crate::field::read_bits(hdr, 4, 4) == 1 {
+        return Some(ProtoId::PPPoEDTags);
+    }
+    None
+}
+
+#[inline(never)]
+fn by_s_m_hdr(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_bits(hdr, 0, 8) {
+            1 => return Some(ProtoId::SMPairingRequest),
+            2 => return Some(ProtoId::SMPairingResponse),
+            3 => return Some(ProtoId::SMConfirm),
+            4 => return Some(ProtoId::SMRandom),
+            5 => return Some(ProtoId::SMFailed),
+            6 => return Some(ProtoId::SMEncryptionInformation),
+            7 => return Some(ProtoId::SMMasterIdentification),
+            8 => return Some(ProtoId::SMIdentityInformation),
+            10 => return Some(ProtoId::SMSigningInformation),
+            11 => return Some(ProtoId::SMSecurityRequest),
+            12 => return Some(ProtoId::SMPublicKey),
+            13 => return Some(ProtoId::SMDHKeyCheck),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline]
+pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTErrorResponse {
+        crate::field::write_bits(hdr, 0, 8, 1);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTExchangeMTURequest {
+        crate::field::write_bits(hdr, 0, 8, 2);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTExchangeMTUResponse {
+        crate::field::write_bits(hdr, 0, 8, 3);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTExecuteWriteRequest {
+        crate::field::write_bits(hdr, 0, 8, 24);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindByTypeValueRequest {
+        crate::field::write_bits(hdr, 0, 8, 6);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindByTypeValueResponse {
+        crate::field::write_bits(hdr, 0, 8, 7);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindInformationRequest {
+        crate::field::write_bits(hdr, 0, 8, 4);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTHandleValueIndication {
+        crate::field::write_bits(hdr, 0, 8, 29);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTHandleValueNotification {
+        crate::field::write_bits(hdr, 0, 8, 27);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTPrepareWriteRequest {
+        crate::field::write_bits(hdr, 0, 8, 22);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTPrepareWriteResponse {
+        crate::field::write_bits(hdr, 0, 8, 23);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadBlobRequest {
+        crate::field::write_bits(hdr, 0, 8, 12);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadBlobResponse {
+        crate::field::write_bits(hdr, 0, 8, 13);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByGroupTypeRequest {
+        crate::field::write_bits(hdr, 0, 8, 16);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByGroupTypeResponse {
+        crate::field::write_bits(hdr, 0, 8, 17);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadMultipleRequest {
+        crate::field::write_bits(hdr, 0, 8, 14);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadMultipleResponse {
+        crate::field::write_bits(hdr, 0, 8, 15);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadRequest {
+        crate::field::write_bits(hdr, 0, 8, 10);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadResponse {
+        crate::field::write_bits(hdr, 0, 8, 11);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTWriteCommand {
+        crate::field::write_bits(hdr, 0, 8, 82);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTWriteRequest {
+        crate::field::write_bits(hdr, 0, 8, 18);
+    }
+    if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaConnectionUpdateComplete {
+        crate::field::write_bits(hdr, 0, 8, 3);
+    }
+    if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaLongTermKeyRequest {
+        crate::field::write_bits(hdr, 0, 8, 5);
+    }
+    if parent == ProtoId::PppoeDisc && child == ProtoId::PPPoEDTags {
+        crate::field::write_bits(hdr, 4, 4, 1);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMConfirm {
+        crate::field::write_bits(hdr, 0, 8, 3);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMDHKeyCheck {
+        crate::field::write_bits(hdr, 0, 8, 13);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMEncryptionInformation {
+        crate::field::write_bits(hdr, 0, 8, 6);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMFailed {
+        crate::field::write_bits(hdr, 0, 8, 5);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMIdentityInformation {
+        crate::field::write_bits(hdr, 0, 8, 8);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMMasterIdentification {
+        crate::field::write_bits(hdr, 0, 8, 7);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMPairingRequest {
+        crate::field::write_bits(hdr, 0, 8, 1);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMPairingResponse {
+        crate::field::write_bits(hdr, 0, 8, 2);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMPublicKey {
+        crate::field::write_bits(hdr, 0, 8, 12);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMRandom {
+        crate::field::write_bits(hdr, 0, 8, 4);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMSecurityRequest {
+        crate::field::write_bits(hdr, 0, 8, 11);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMSigningInformation {
+        crate::field::write_bits(hdr, 0, 8, 10);
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use crate::proto::ProtoId;
+
     /// A guard that rejects every probe would hide a dropped bitmap bit,
     /// so the probes have to reach as many arms as they can.
     const PROBES: &[&[u8]] = &[
@@ -294,6 +499,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A parent's field is placed by the spec that binds under it, which
+    /// for a hand-written parent is a claim about a table protogen cannot
+    /// see. The engine's own table has to agree, or dispatch reads the
+    /// wrong bits.
+    #[test]
+    fn every_parent_field_is_where_the_bindings_read_it() {
+        assert_eq!(
+            crate::proto::field_of(ProtoId::ATTHdr, "opcode").map(|f| (f.bit_off, f.bit_len)),
+            Some((0, 8))
+        );
+        assert_eq!(
+            crate::proto::field_of(ProtoId::HCIEventLEMeta, "event")
+                .map(|f| (f.bit_off, f.bit_len)),
+            Some((0, 8))
+        );
+        assert_eq!(
+            crate::proto::field_of(ProtoId::PppoeDisc, "type").map(|f| (f.bit_off, f.bit_len)),
+            Some((4, 4))
+        );
+        assert_eq!(
+            crate::proto::field_of(ProtoId::SMHdr, "sm_command").map(|f| (f.bit_off, f.bit_len)),
+            Some((0, 8))
+        );
     }
 
     /// The reverse map is what stacking a layer writes, so a port it

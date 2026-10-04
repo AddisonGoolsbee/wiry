@@ -141,6 +141,33 @@ def _to_bytes(x: Any, what: str = "value") -> bytes:
     raise TypeError(f"{what} must be bytes or str, not {type(x).__name__}")
 
 
+class GroupItem(tuple):
+    """One element of a repeating group. Still the `(name, fields)` pair it
+    always was, so it compares equal to one; its fields also read as
+    attributes, as the elements of scapy's PacketListField do."""
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str) -> Any:
+        for k, v in self[1]:
+            if k == name:
+                return v
+        raise AttributeError(f"{self[0]} has no field {name!r}")
+
+
+def _group_item(x: Any) -> Any:
+    if (isinstance(x, tuple) and len(x) == 2 and isinstance(x[0], str)
+            and isinstance(x[1], list)
+            and all(isinstance(p, tuple) and len(p) == 2 and isinstance(p[0], str)
+                    for p in x[1])):
+        return GroupItem((x[0], [(k, _nested(v)) for k, v in x[1]]))
+    return x
+
+
+def _nested(v: Any) -> Any:
+    return [_group_item(x) for x in v] if isinstance(v, list) else v
+
+
 _FLAG_NAMES: dict[tuple[str, str], tuple[str, ...] | None] = {}
 
 # Tested first on every field read, so a non-flag field costs one set lookup.
@@ -487,7 +514,7 @@ class _LayerView:
         if field == _PARSED_FIELD.get(self._name, "options"):
             parsed = rust.options(self._idx)
             if parsed is not None:
-                return parsed
+                return [_group_item(x) for x in parsed]
         if field in ("qd", "an", "ns", "ar"):
             recs = rust.dns_records(self._idx)
             if recs is not None:
@@ -506,6 +533,14 @@ class _LayerView:
                 )
         scale = _scale(self._name, field)
         return value / scale if scale else value
+
+    def __bytes__(self) -> bytes:
+        """This layer and everything after it, as scapy's `raw(pkt[X])` is."""
+        whole = bytes(self._pkt)
+        return whole[self._pkt._materialize().layer_offset(self._idx) or 0:]
+
+    def __len__(self) -> int:
+        return len(bytes(self))
 
     def raw_options(self) -> Any:
         """The unparsed option bytes, for layers whose options are parsed."""
