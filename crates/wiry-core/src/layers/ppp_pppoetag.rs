@@ -63,7 +63,7 @@ fn content_len(hdr: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::PPPoETagX,
+    id: ProtoId::PPPoETag,
     name: "PPPoETag",
     fields: FIELDS,
     min_len: 4,

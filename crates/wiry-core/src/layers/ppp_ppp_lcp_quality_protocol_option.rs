@@ -57,7 +57,7 @@ fn content_len(hdr: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::PPPLCPQualityProtocolOptionX,
+    id: ProtoId::PPPLCPQualityProtocolOption,
     name: "PPP_LCP_Quality_Protocol_Option",
     fields: FIELDS,
     min_len: 4,

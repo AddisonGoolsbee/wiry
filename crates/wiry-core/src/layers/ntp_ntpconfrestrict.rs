@@ -55,7 +55,7 @@ fn header_len(_: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::NTPConfRestrictX,
+    id: ProtoId::NTPConfRestrict,
     name: "NTPConfRestrict",
     fields: FIELDS,
     min_len: 48,

@@ -60,7 +60,7 @@ fn content_len(hdr: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::PPPLCPTerminateX,
+    id: ProtoId::PPPLCPTerminate,
     name: "PPP_LCP_Terminate",
     fields: FIELDS,
     min_len: 4,

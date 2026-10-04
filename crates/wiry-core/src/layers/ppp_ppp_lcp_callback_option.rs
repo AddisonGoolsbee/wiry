@@ -63,7 +63,7 @@ fn content_len(hdr: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::PPPLCPCallbackOptionX,
+    id: ProtoId::PPPLCPCallbackOption,
     name: "PPP_LCP_Callback_Option",
     fields: FIELDS,
     min_len: 3,

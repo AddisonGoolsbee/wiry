@@ -56,7 +56,7 @@ fn content_len(_: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::NTPPeerStatusPacketX,
+    id: ProtoId::NTPPeerStatusPacket,
     name: "NTPPeerStatusPacket",
     fields: FIELDS,
     min_len: 2,

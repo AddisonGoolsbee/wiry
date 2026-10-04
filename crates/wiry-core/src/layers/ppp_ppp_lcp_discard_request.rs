@@ -61,7 +61,7 @@ fn content_len(hdr: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::PPPLCPDiscardRequestX,
+    id: ProtoId::PPPLCPDiscardRequest,
     name: "PPP_LCP_Discard_Request",
     fields: FIELDS,
     min_len: 8,

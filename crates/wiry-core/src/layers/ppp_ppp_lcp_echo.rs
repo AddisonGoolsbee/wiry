@@ -61,7 +61,7 @@ fn content_len(hdr: &[u8]) -> usize {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::PPPLCPEchoX,
+    id: ProtoId::PPPLCPEcho,
     name: "PPP_LCP_Echo",
     fields: FIELDS,
     min_len: 8,

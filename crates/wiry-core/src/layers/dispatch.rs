@@ -29,7 +29,6 @@ fn claimed(bits: &[u64], v: u16) -> bool {
 pub fn by_ethertype(v: u16) -> Option<ProtoId> {
     match v {
         35020 => Some(ProtoId::Lldp),
-        35047 => Some(ProtoId::Dot1AH),
         _ => None,
     }
 }
@@ -38,7 +37,6 @@ pub fn by_ethertype(v: u16) -> Option<ProtoId> {
 pub fn by_ethertype_of(p: ProtoId) -> Option<u16> {
     match p {
         ProtoId::Lldp => Some(35020),
-        ProtoId::Dot1AH => Some(35047),
         _ => None,
     }
 }
@@ -70,8 +68,8 @@ pub fn by_ipproto_of(p: ProtoId) -> Option<u8> {
 }
 
 const UDP_PORT_VALUES: &[u16] = &[
-    69, 80, 123, 137, 161, 162, 434, 443, 514, 520, 546, 547, 1645, 1646, 1812, 1813, 1985, 2055,
-    2056, 3784, 3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
+    69, 80, 123, 137, 161, 162, 443, 514, 520, 546, 547, 1645, 1646, 1812, 1813, 1985, 2055, 3784,
+    3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
 ];
 
 static UDP_PORT_CLAIMED: [u64; 810] = port_bits(UDP_PORT_VALUES);
@@ -86,7 +84,6 @@ fn by_udp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
         123 => Some(ProtoId::Ntp),
         137 => Some(ProtoId::Nbns),
         161 | 162 => Some(ProtoId::Snmp),
-        434 => Some(ProtoId::MobileIP),
         514 => Some(ProtoId::Syslog),
         520 => Some(ProtoId::Rip),
         546 | 547 => Some(ProtoId::Dhcp6),
@@ -104,7 +101,6 @@ fn by_udp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
             }
             None
         }
-        2056 => Some(ProtoId::NetflowHeader),
         3784 | 3785 | 4784 => Some(ProtoId::Bfd),
         4739 => crate::layers::ipfix::looks_like(payload).then_some(ProtoId::Ipfix),
         5060 | 5061 => crate::layers::sip::looks_like(payload).then_some(ProtoId::Sip),
@@ -137,8 +133,6 @@ pub fn by_udp_port_of(p: ProtoId) -> Option<u16> {
         ProtoId::Quic => Some(443),
         ProtoId::Radius => Some(1812),
         ProtoId::Rip => Some(520),
-        ProtoId::MobileIP => Some(434),
-        ProtoId::NetflowHeader => Some(2056),
         ProtoId::SFlow => Some(6343),
         ProtoId::Sip => Some(5060),
         ProtoId::Snmp => Some(161),
@@ -151,7 +145,7 @@ pub fn by_udp_port_of(p: ProtoId) -> Option<u16> {
 
 const TCP_PORT_VALUES: &[u16] = &[
     21, 22, 23, 25, 80, 139, 143, 179, 389, 443, 445, 465, 502, 563, 587, 636, 989, 990, 992, 993,
-    995, 1883, 2000, 3128, 3268, 5060, 5061, 8000, 8008, 8080, 8443, 8883, 8888,
+    995, 1883, 3128, 3268, 5060, 5061, 8000, 8008, 8080, 8443, 8883, 8888,
 ];
 
 static TCP_PORT_CLAIMED: [u64; 139] = port_bits(TCP_PORT_VALUES);
@@ -178,7 +172,6 @@ fn by_tcp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
         445 => crate::layers::smb2::looks_like(payload).then_some(ProtoId::Smb2),
         502 => crate::layers::modbus::looks_like(payload).then_some(ProtoId::Modbus),
         1883 | 8883 => crate::layers::mqtt::looks_like(payload).then_some(ProtoId::Mqtt),
-        2000 => Some(ProtoId::Skinny),
         5060 => crate::layers::sip::looks_like(payload).then_some(ProtoId::Sip),
         _ => None,
     }
@@ -204,7 +197,6 @@ pub fn by_tcp_port_of(p: ProtoId) -> Option<u16> {
         ProtoId::Modbus => Some(502),
         ProtoId::Mqtt => Some(1883),
         ProtoId::NbtSession => Some(139),
-        ProtoId::Skinny => Some(2000),
         ProtoId::Sip => Some(5060),
         ProtoId::Smb2 => Some(445),
         ProtoId::Smtp => Some(25),
@@ -268,432 +260,23 @@ pub fn by_icmpv6_type_of(p: ProtoId) -> Option<u8> {
 #[inline]
 pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
     match parent {
-        ProtoId::ATTHdr => by_a_t_t_hdr(hdr),
-        ProtoId::BTLECTRL => by_b_t_l_e_c_t_r_l(hdr),
-        ProtoId::Dot11Action => by_dot11_action(hdr),
-        ProtoId::GRErouting => by_g_r_erouting(hdr),
-        ProtoId::Gre => by_gre(hdr),
-        ProtoId::HCIEventLEMeta => by_h_c_i_event_l_e_meta(hdr),
-        ProtoId::HCIPHDRHdr => by_h_c_i_p_h_d_r_hdr(hdr),
-        ProtoId::IrLAPCommand => by_ir_l_a_p_command(hdr),
-        ProtoId::IrLAPHead => by_ir_l_a_p_head(hdr),
-        ProtoId::LinuxSll2 => by_linux_sll2(hdr),
-        ProtoId::MobileIP => by_mobile_i_p(hdr),
-        ProtoId::NetflowRecordV1 => by_netflow_record_v1(hdr),
-        ProtoId::NetflowRecordV5 => by_netflow_record_v5(hdr),
-        ProtoId::NetflowV5 => by_netflow_v5(hdr),
         ProtoId::PppoeDisc => by_pppoe_disc(hdr),
-        ProtoId::Rtp => by_rtp(hdr),
-        ProtoId::SMHdr => by_s_m_hdr(hdr),
-        ProtoId::Tftp => by_tftp(hdr),
         _ => None,
     }
 }
 
 #[inline(never)]
-fn by_a_t_t_hdr(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
-            1 => return Some(ProtoId::ATTErrorResponse),
-            2 => return Some(ProtoId::ATTExchangeMTURequest),
-            3 => return Some(ProtoId::ATTExchangeMTUResponse),
-            4 => return Some(ProtoId::ATTFindInformationRequest),
-            6 => return Some(ProtoId::ATTFindByTypeValueRequest),
-            7 => return Some(ProtoId::ATTFindByTypeValueResponse),
-            10 => return Some(ProtoId::ATTReadRequest),
-            11 => return Some(ProtoId::ATTReadResponse),
-            12 => return Some(ProtoId::ATTReadBlobRequest),
-            13 => return Some(ProtoId::ATTReadBlobResponse),
-            14 => return Some(ProtoId::ATTReadMultipleRequest),
-            15 => return Some(ProtoId::ATTReadMultipleResponse),
-            16 => return Some(ProtoId::ATTReadByGroupTypeRequest),
-            17 => return Some(ProtoId::ATTReadByGroupTypeResponse),
-            18 => return Some(ProtoId::ATTWriteRequest),
-            22 => return Some(ProtoId::ATTPrepareWriteRequest),
-            23 => return Some(ProtoId::ATTPrepareWriteResponse),
-            24 => return Some(ProtoId::ATTExecuteWriteRequest),
-            27 => return Some(ProtoId::ATTHandleValueNotification),
-            29 => return Some(ProtoId::ATTHandleValueIndication),
-            82 => return Some(ProtoId::ATTWriteCommand),
-            _ => {}
-        }
-    }
-    None
-}
-
-#[inline(never)]
-fn by_b_t_l_e_c_t_r_l(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
-            0 => return Some(ProtoId::LLCONNECTIONUPDATEIND),
-            2 => return Some(ProtoId::LLTERMINATEIND),
-            3 => return Some(ProtoId::LLENCREQ),
-            4 => return Some(ProtoId::LLENCRSP),
-            7 => return Some(ProtoId::LLUNKNOWNRSP),
-            12 => return Some(ProtoId::LLVERSIONIND),
-            13 => return Some(ProtoId::LLREJECTIND),
-            15 => return Some(ProtoId::LLCONNECTIONPARAMREQ),
-            16 => return Some(ProtoId::LLCONNECTIONPARAMRSP),
-            17 => return Some(ProtoId::LLREJECTEXTIND),
-            20 => return Some(ProtoId::LLLENGTHREQ),
-            21 => return Some(ProtoId::LLLENGTHRSP),
-            29 => return Some(ProtoId::LLCLOCKACCURACYREQ),
-            30 => return Some(ProtoId::LLCLOCKACCURACYRSP),
-            32 => return Some(ProtoId::LLCISRSP),
-            33 => return Some(ProtoId::LLCISIND),
-            34 => return Some(ProtoId::LLCISTERMINATEIND),
-            38 => return Some(ProtoId::LLSUBRATEREQ),
-            39 => return Some(ProtoId::LLSUBRATEIND),
-            40 => return Some(ProtoId::LLCHANNELREPORTINGIND),
-            _ => {}
-        }
-    }
-    None
-}
-
-#[inline(never)]
-fn by_dot11_action(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
-            0 => return Some(ProtoId::Dot11SpectrumManagement),
-            10 => return Some(ProtoId::Dot11WNM),
-            _ => {}
-        }
-    }
-    None
-}
-
-#[inline(never)]
-fn by_g_r_erouting(hdr: &[u8]) -> Option<ProtoId> {
-    Some(ProtoId::GRErouting)
-}
-
-#[inline(never)]
-fn by_gre(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 2 && crate::field::read_bits(hdr, 1, 1) == 1 {
-        return Some(ProtoId::GRErouting);
-    }
-    None
-}
-
-#[inline(never)]
-fn by_h_c_i_event_l_e_meta(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
-            3 => return Some(ProtoId::HCILEMetaConnectionUpdateComplete),
-            5 => return Some(ProtoId::HCILEMetaLongTermKeyRequest),
-            _ => {}
-        }
-    }
-    None
-}
-
-#[inline(never)]
-fn by_h_c_i_p_h_d_r_hdr(hdr: &[u8]) -> Option<ProtoId> {
-    Some(ProtoId::HCIHdr)
-}
-
-#[inline(never)]
-fn by_ir_l_a_p_command(hdr: &[u8]) -> Option<ProtoId> {
-    Some(ProtoId::IrLMP)
-}
-
-#[inline(never)]
-fn by_ir_l_a_p_head(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 8 && crate::field::read_bits(hdr, 7, 1) == 1 {
-        return Some(ProtoId::IrLAPCommand);
-    }
-    None
-}
-
-#[inline(never)]
-fn by_linux_sll2(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 16 && crate::field::read_bits(hdr, 0, 16) == 23 {
-        return Some(ProtoId::IrLAPHead);
-    }
-    None
-}
-
-#[inline(never)]
-fn by_mobile_i_p(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
-            1 => return Some(ProtoId::MobileIPRRQ),
-            3 => return Some(ProtoId::MobileIPRRP),
-            4 => return Some(ProtoId::MobileIPTunnelData),
-            _ => {}
-        }
-    }
-    None
-}
-
-#[inline(never)]
-fn by_netflow_record_v1(hdr: &[u8]) -> Option<ProtoId> {
-    Some(ProtoId::NetflowRecordV1)
-}
-
-#[inline(never)]
-fn by_netflow_record_v5(hdr: &[u8]) -> Option<ProtoId> {
-    Some(ProtoId::NetflowRecordV5)
-}
-
-#[inline(never)]
-fn by_netflow_v5(hdr: &[u8]) -> Option<ProtoId> {
-    Some(ProtoId::NetflowRecordV5)
-}
-
-#[inline(never)]
 fn by_pppoe_disc(hdr: &[u8]) -> Option<ProtoId> {
     if hdr.len() * 8 >= 8 && crate::field::read_bits(hdr, 4, 4) == 1 {
-        return Some(ProtoId::PPPoEDTagsX);
-    }
-    None
-}
-
-#[inline(never)]
-fn by_rtp(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 4 && crate::field::read_bits(hdr, 3, 1) == 1 {
-        return Some(ProtoId::RTPExtension);
-    }
-    None
-}
-
-#[inline(never)]
-fn by_s_m_hdr(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
-            1 => return Some(ProtoId::SMPairingRequest),
-            2 => return Some(ProtoId::SMPairingResponse),
-            3 => return Some(ProtoId::SMConfirm),
-            4 => return Some(ProtoId::SMRandom),
-            5 => return Some(ProtoId::SMFailed),
-            6 => return Some(ProtoId::SMEncryptionInformation),
-            7 => return Some(ProtoId::SMMasterIdentification),
-            8 => return Some(ProtoId::SMIdentityInformation),
-            10 => return Some(ProtoId::SMSigningInformation),
-            11 => return Some(ProtoId::SMSecurityRequest),
-            12 => return Some(ProtoId::SMPublicKey),
-            13 => return Some(ProtoId::SMDHKeyCheck),
-            _ => {}
-        }
-    }
-    None
-}
-
-#[inline(never)]
-fn by_tftp(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 16 {
-        match crate::field::read_bits(hdr, 0, 16) {
-            3 => return Some(ProtoId::TFTPDATA),
-            4 => return Some(ProtoId::TFTPACK),
-            _ => {}
-        }
+        return Some(ProtoId::PPPoEDTags);
     }
     None
 }
 
 #[inline]
 pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTErrorResponse {
-        crate::field::write_bits(hdr, 0, 8, 1);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTExchangeMTURequest {
-        crate::field::write_bits(hdr, 0, 8, 2);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTExchangeMTUResponse {
-        crate::field::write_bits(hdr, 0, 8, 3);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTExecuteWriteRequest {
-        crate::field::write_bits(hdr, 0, 8, 24);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindByTypeValueRequest {
-        crate::field::write_bits(hdr, 0, 8, 6);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindByTypeValueResponse {
-        crate::field::write_bits(hdr, 0, 8, 7);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindInformationRequest {
-        crate::field::write_bits(hdr, 0, 8, 4);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTHandleValueIndication {
-        crate::field::write_bits(hdr, 0, 8, 29);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTHandleValueNotification {
-        crate::field::write_bits(hdr, 0, 8, 27);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTPrepareWriteRequest {
-        crate::field::write_bits(hdr, 0, 8, 22);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTPrepareWriteResponse {
-        crate::field::write_bits(hdr, 0, 8, 23);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadBlobRequest {
-        crate::field::write_bits(hdr, 0, 8, 12);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadBlobResponse {
-        crate::field::write_bits(hdr, 0, 8, 13);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByGroupTypeRequest {
-        crate::field::write_bits(hdr, 0, 8, 16);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByGroupTypeResponse {
-        crate::field::write_bits(hdr, 0, 8, 17);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadMultipleRequest {
-        crate::field::write_bits(hdr, 0, 8, 14);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadMultipleResponse {
-        crate::field::write_bits(hdr, 0, 8, 15);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadRequest {
-        crate::field::write_bits(hdr, 0, 8, 10);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadResponse {
-        crate::field::write_bits(hdr, 0, 8, 11);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTWriteCommand {
-        crate::field::write_bits(hdr, 0, 8, 82);
-    }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTWriteRequest {
-        crate::field::write_bits(hdr, 0, 8, 18);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCHANNELREPORTINGIND {
-        crate::field::write_bits(hdr, 0, 8, 40);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCISIND {
-        crate::field::write_bits(hdr, 0, 8, 33);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCISRSP {
-        crate::field::write_bits(hdr, 0, 8, 32);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCISTERMINATEIND {
-        crate::field::write_bits(hdr, 0, 8, 34);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCLOCKACCURACYREQ {
-        crate::field::write_bits(hdr, 0, 8, 29);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCLOCKACCURACYRSP {
-        crate::field::write_bits(hdr, 0, 8, 30);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCONNECTIONPARAMREQ {
-        crate::field::write_bits(hdr, 0, 8, 15);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCONNECTIONPARAMRSP {
-        crate::field::write_bits(hdr, 0, 8, 16);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCONNECTIONUPDATEIND {
-        crate::field::write_bits(hdr, 0, 8, 0);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLENCREQ {
-        crate::field::write_bits(hdr, 0, 8, 3);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLENCRSP {
-        crate::field::write_bits(hdr, 0, 8, 4);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLLENGTHREQ {
-        crate::field::write_bits(hdr, 0, 8, 20);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLLENGTHRSP {
-        crate::field::write_bits(hdr, 0, 8, 21);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLREJECTEXTIND {
-        crate::field::write_bits(hdr, 0, 8, 17);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLREJECTIND {
-        crate::field::write_bits(hdr, 0, 8, 13);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLSUBRATEIND {
-        crate::field::write_bits(hdr, 0, 8, 39);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLSUBRATEREQ {
-        crate::field::write_bits(hdr, 0, 8, 38);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLTERMINATEIND {
-        crate::field::write_bits(hdr, 0, 8, 2);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLUNKNOWNRSP {
-        crate::field::write_bits(hdr, 0, 8, 7);
-    }
-    if parent == ProtoId::BTLECTRL && child == ProtoId::LLVERSIONIND {
-        crate::field::write_bits(hdr, 0, 8, 12);
-    }
-    if parent == ProtoId::Dot11Action && child == ProtoId::Dot11SpectrumManagement {
-        crate::field::write_bits(hdr, 0, 8, 0);
-    }
-    if parent == ProtoId::Dot11Action && child == ProtoId::Dot11WNM {
-        crate::field::write_bits(hdr, 0, 8, 10);
-    }
-    if parent == ProtoId::Gre && child == ProtoId::GRErouting {
-        crate::field::write_bits(hdr, 1, 1, 1);
-    }
-    if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaConnectionUpdateComplete {
-        crate::field::write_bits(hdr, 0, 8, 3);
-    }
-    if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaLongTermKeyRequest {
-        crate::field::write_bits(hdr, 0, 8, 5);
-    }
-    if parent == ProtoId::IrLAPHead && child == ProtoId::IrLAPCommand {
-        crate::field::write_bits(hdr, 7, 1, 1);
-    }
-    if parent == ProtoId::LinuxSll2 && child == ProtoId::IrLAPHead {
-        crate::field::write_bits(hdr, 0, 16, 23);
-    }
-    if parent == ProtoId::MobileIP && child == ProtoId::MobileIPRRP {
-        crate::field::write_bits(hdr, 0, 8, 3);
-    }
-    if parent == ProtoId::MobileIP && child == ProtoId::MobileIPRRQ {
-        crate::field::write_bits(hdr, 0, 8, 1);
-    }
-    if parent == ProtoId::MobileIP && child == ProtoId::MobileIPTunnelData {
-        crate::field::write_bits(hdr, 0, 8, 4);
-    }
-    if parent == ProtoId::PppoeDisc && child == ProtoId::PPPoEDTagsX {
+    if parent == ProtoId::PppoeDisc && child == ProtoId::PPPoEDTags {
         crate::field::write_bits(hdr, 4, 4, 1);
-    }
-    if parent == ProtoId::Rtp && child == ProtoId::RTPExtension {
-        crate::field::write_bits(hdr, 3, 1, 1);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMConfirm {
-        crate::field::write_bits(hdr, 0, 8, 3);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMDHKeyCheck {
-        crate::field::write_bits(hdr, 0, 8, 13);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMEncryptionInformation {
-        crate::field::write_bits(hdr, 0, 8, 6);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMFailed {
-        crate::field::write_bits(hdr, 0, 8, 5);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMIdentityInformation {
-        crate::field::write_bits(hdr, 0, 8, 8);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMMasterIdentification {
-        crate::field::write_bits(hdr, 0, 8, 7);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMPairingRequest {
-        crate::field::write_bits(hdr, 0, 8, 1);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMPairingResponse {
-        crate::field::write_bits(hdr, 0, 8, 2);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMPublicKey {
-        crate::field::write_bits(hdr, 0, 8, 12);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMRandom {
-        crate::field::write_bits(hdr, 0, 8, 4);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMSecurityRequest {
-        crate::field::write_bits(hdr, 0, 8, 11);
-    }
-    if parent == ProtoId::SMHdr && child == ProtoId::SMSigningInformation {
-        crate::field::write_bits(hdr, 0, 8, 10);
-    }
-    if parent == ProtoId::Tftp && child == ProtoId::TFTPACK {
-        crate::field::write_bits(hdr, 0, 16, 4);
-    }
-    if parent == ProtoId::Tftp && child == ProtoId::TFTPDATA {
-        crate::field::write_bits(hdr, 0, 16, 3);
     }
 }
 
@@ -746,54 +329,8 @@ mod tests {
     #[test]
     fn every_parent_field_is_where_the_bindings_read_it() {
         assert_eq!(
-            crate::proto::field_of(ProtoId::ATTHdr, "opcode").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::BTLECTRL, "opcode").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::Dot11Action, "category")
-                .map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::Gre, "routing_present").map(|f| (f.bit_off, f.bit_len)),
-            Some((1, 1))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::HCIEventLEMeta, "event")
-                .map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::IrLAPHead, "Type").map(|f| (f.bit_off, f.bit_len)),
-            Some((7, 1))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::LinuxSll2, "proto").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 16))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::MobileIP, "type").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
-        );
-        assert_eq!(
             crate::proto::field_of(ProtoId::PppoeDisc, "type").map(|f| (f.bit_off, f.bit_len)),
             Some((4, 4))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::Rtp, "extension").map(|f| (f.bit_off, f.bit_len)),
-            Some((3, 1))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::SMHdr, "sm_command").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::Tftp, "op").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 16))
         );
     }
 

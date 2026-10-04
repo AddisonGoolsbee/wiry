@@ -34,7 +34,7 @@ fn next(_: &[u8]) -> Next {
 }
 
 pub static DESC: ProtoDesc = ProtoDesc {
-    id: ProtoId::HDLCX,
+    id: ProtoId::HDLC,
     name: "HDLC",
     fields: FIELDS,
     min_len: 2,
