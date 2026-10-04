@@ -23,8 +23,12 @@ from __future__ import annotations
 
 import abc
 import socket
+import sys
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# Module globals rather than imports at the call, so a test can patch them here.
+from .capture import AsyncSniffer, sendp, sniff
 
 __all__ = ["AnsweringMachine", "AnsweringMachineTCP", "AnsweringMachineUDP"]
 
@@ -46,6 +50,9 @@ class ReferenceAM(abc.ABCMeta):
             func.__name__ = func.__qualname__ = obj.function_name
             func.__doc__ = obj.__doc__ or obj.parse_options.__doc__
             globals()[obj.function_name] = func
+            home = sys.modules.get(obj.__module__)
+            if home is not None:
+                setattr(home, obj.function_name, func)
         return obj
 
 
@@ -143,10 +150,7 @@ class AnsweringMachine(metaclass=ReferenceAM):
         if send_function:
             send_function(reply)
             return
-        send = self.send_function
-        if send is None:
-            from .capture import sendp
-            send = sendp
+        send = self.send_function or sendp
         send(reply, **self.optsend)
 
     def print_reply(self, req: Any, reply: Any) -> None:
@@ -165,7 +169,12 @@ class AnsweringMachine(metaclass=ReferenceAM):
             reply = self.make_reply(pkt)
         if not reply:
             return
-        self.send_reply(reply, send_function=send_function)
+        # Called with one argument when there is no override, as scapy does:
+        # scripts replace send_reply with a one-argument function.
+        if send_function:
+            self.send_reply(reply, send_function=send_function)
+        else:
+            self.send_reply(reply)
         if self.verbose:
             self.print_reply(pkt, reply)
 
@@ -203,13 +212,9 @@ class AnsweringMachine(metaclass=ReferenceAM):
                 print("Interrupted by user")
 
     def sniff(self) -> None:
-        from .capture import sniff
-
         sniff(**self.optsniff)
 
     def sniff_bg(self) -> None:
-        from .capture import AsyncSniffer
-
         self.sniffer = AsyncSniffer(**self.optsniff)
         self.sniffer.start()
 

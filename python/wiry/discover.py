@@ -27,11 +27,13 @@ class FieldInfo:
     to the end of the header it is in.
     """
 
-    __slots__ = ("name", "bits", "kind", "computed", "conditional", "flags")
+    __slots__ = ("name", "bits", "kind", "computed", "conditional", "flags",
+                 "layer")
 
     def __init__(self, name: str, bits: int, kind: str, computed: bool,
-                 conditional: bool, flags: Optional[tuple]):
+                 conditional: bool, flags: Optional[tuple], layer: str = ""):
         self.name = name
+        self.layer = layer
         self.bits = bits
         self.kind = kind
         self.computed = computed
@@ -54,6 +56,15 @@ class FieldInfo:
         if self.conditional:
             extra.append("Cond")
         return f"{self.kind} ({', '.join(extra)})" if extra else self.kind
+
+    @property
+    def owners(self) -> list:
+        """The layer classes declaring this field, as scapy's ``Field.owners``
+        lists them; ``PacketList.replace`` is what reads it."""
+        import wiry
+
+        cls = wiry._LAYERS.get(self.layer)
+        return [cls] if cls is not None else []
 
     def __repr__(self) -> str:
         return f"<Field {self.name}: {self.type}>"
@@ -78,7 +89,7 @@ def field_table(layer: Any) -> list[FieldInfo]:
     if table is None:
         table = [
             FieldInfo(f, bits, kind, computed, cond,
-                      tuple(_b.flag_names(name, f) or ()) or None)
+                      tuple(_b.flag_names(name, f) or ()) or None, name)
             for f, bits, kind, computed, cond in _b.field_specs(name)
         ]
         _TABLES[name] = table

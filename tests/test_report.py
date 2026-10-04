@@ -347,9 +347,17 @@ def test_the_bulk_summary_agrees_with_the_per_packet_one(capture):
 
 def test_conversations_counts_the_edges(capture):
     dot = capture.conversations()
-    assert dot.startswith("digraph")
-    assert '"10.1.1.1" -> "10.1.1.2" [label="2"];' in dot
-    assert "10.4.4.1" not in dot
+    assert dot.startswith('digraph "conv" {\n')
+    assert '\t "10.1.1.1" -> "10.1.1.2" [label="2"]\n' in dot
+    assert '\t "10.4.4.1" -> "10.4.4.2" [label="1"]\n' in dot
+    assert '\t "2001:db8::1" -> "2001:db8::3" [label="1"]\n' in dot
+    assert dot.endswith("}\n")
+
+
+def test_the_bulk_conversations_agree_with_the_per_packet_ones(capture):
+    from wiry import PacketList
+
+    assert capture.conversations() == PacketList(list(capture)).conversations()
 
 
 def test_conversations_takes_a_custom_extractor(capture):
@@ -359,26 +367,45 @@ def test_conversations_takes_a_custom_extractor(capture):
     assert "ff:ff:ff:ff:ff:ff" in dot
 
 
+def test_conversations_quote_what_the_packet_carries():
+    from wiry import PacketList
+
+    dot = PacketList([IP()]).conversations(lambda p: ('a" [image="x"]', "b"))
+    assert '"a\\" [image=\\"x\\"]"' in dot
+
+
 def test_conversations_without_graphviz_says_so(capture, monkeypatch):
     import shutil
 
     monkeypatch.setattr(shutil, "which", lambda *a, **kw: None)
-    with pytest.raises(RuntimeError, match="not on PATH"):
+    with pytest.raises(OSError, match="not on PATH"):
         capture.conversations(target="/dev/null")
 
 
 def test_make_table_lays_out_rows_and_columns(capture):
     table = capture.make_table(
-        lambda p: (p.layers()[-1], len(p.layers()), "x"), lfilter=lambda p: True
+        lambda p: (p.layers()[-1], len(p.layers()), "x"), dump=True
     )
     lines = table.splitlines()
     assert lines[0].split() == sorted({p.layers()[-1] for p in capture})
     assert all(line.split()[0].isdigit() for line in lines[1:])
 
 
+def test_make_table_prints_unless_asked_for_the_text(capture, capsys):
+    assert capture.make_table(lambda p: ("c", "r", "z")) is None
+    assert capsys.readouterr().out == "  c \nr z \n"
+
+
 def test_make_table_takes_the_last_cell_for_a_repeated_coordinate(capture):
-    table = capture.make_table(lambda p: ("c", "r", p.layers()[-1]))
+    table = capture.make_table(lambda p: ("c", "r", p.layers()[-1]), dump=True)
     assert table.splitlines()[1].split() == ["r", capture[len(capture) - 1].layers()[-1]]
+
+
+def test_make_lined_and_tex_tables_frame_the_same_cells(capture):
+    lined = capture.make_lined_table(lambda p: ("c", "r", "z"), dump=True)
+    assert lined == "--+---+\n  | c | \n--+---+\nr | z | \n--+---+\n"
+    tex = capture.make_tex_table(lambda p: ("c", "r", "a_b"), dump=True)
+    assert tex == "\\hline\n & c \\\\\n\\hline\nr & a\\_b \\\\\n\\hline\n"
 
 
 def test_plot_without_matplotlib_says_how_to_install_it(capture, monkeypatch):

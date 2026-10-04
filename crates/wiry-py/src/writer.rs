@@ -278,6 +278,15 @@ impl PyCaptureWriter {
         Ok(())
     }
 
+    /// Hands over what a buffered target holds so far, so a file object can
+    /// be written through rather than only at close.
+    fn take<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        match self.sink.as_mut() {
+            Some(Sink::Buffer(v)) => PyBytes::new_bound(py, &std::mem::take(v)),
+            _ => PyBytes::new_bound(py, b""),
+        }
+    }
+
     /// Returns the bytes of a buffered target, for the facade to finish writing.
     fn close<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyBytes>>> {
         let Some(mut sink) = self.sink.take() else {

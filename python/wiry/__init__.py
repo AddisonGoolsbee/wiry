@@ -26,8 +26,6 @@ _STREAM = (
     "DefaultSession",
 )
 
-_DESCRIBE = ("hexdiff", "hexdiff_str")
-
 _CAPTURE = (
     "sniff", "AsyncSniffer", "send", "sendp", "sr", "sr1", "srp", "srp1",
     "get_if_list", "get_if_addr", "get_if_hwaddr", "get_working_if",
@@ -43,6 +41,11 @@ _TOOLS = (
 _SOCKETS = (
     "SuperSocket", "OfflineSocket", "StreamSocket", "L2Socket",
     "L2ListenSocket", "L3Socket", "ObjectPipe", "select_objects", "MTU",
+    "IterSocket", "SimpleSocket", "StreamSocketPeekless", "SSLStreamSocket",
+    "L3RawSocket", "L3RawSocket6", "L2ListenTcpdump", "ETH_P_IP",
+    "ETH_P_IPV6", "ETH_P_8021Q", "SOL_PACKET", "PACKET_AUXDATA",
+    "SO_TIMESTAMPNS", "TP_STATUS_VLAN_VALID", "TP_STATUS_VLAN_TPID_VALID",
+    "tpacket_auxdata",
 )
 
 _AUTOMATON = ("ATMT", "Automaton")
@@ -56,61 +59,62 @@ _DISCOVER = ("ls", "lsc", "explore", "field_table", "FieldInfo")
 _CONSOLE = ("interact", "save_session", "load_session")
 
 _EAGER = (
-    "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
-    "PcapReader", "PcapWriter", "PcapNgWriter", "raw", "hexdump",
-    "hexdump_str", "known_layers", "bind_layers",
+    "Packet", "PacketList", "SndRcvList", "QueryAnswer", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
+    "PcapReader", "PcapWriter", "PcapNgWriter", "raw", "known_layers",
+    "bind_layers",
     "VolatileValue", "RandNum", "RandByte", "RandShort", "RandInt", "RandLong",
     "RandIP", "RandIP6", "RandMAC", "RandString", "RandBin", "RandChoice",
     "RandEnumKeys", "Net", "Net6", "fuzz", "corrupt_bytes", "corrupt_bits",
     "set_rand_seed", "expand",
 )
 
+_SENDRECV = (
+    "sndrcv", "sr_func", "SndRcvHandler", "srflood", "srpflood", "sr1flood",
+    "srp1flood", "sndrcvflood", "sendpfast", "bridge_and_sniff", "tshark",
+    "debug",
+)
+
+_ANSWERING = (
+    "ARP_am", "BOOTP_am", "DHCP_am", "DNS_am", "ICMPEcho_am", "LLMNR_am",
+    "mDNS_am", "NBNS_am", "ReferenceAM",
+    "farpd", "bootpd", "dhcpd", "dnsd", "icmpechod", "llmnrd", "mdnsd",
+    "nbnsd",
+)
+
+_CONFIG = (
+    "Conf", "isPyPy", "isCryptographyValid", "isCryptographyAdvanced",
+    "isCryptographyBackendCompatible", "crypto_validator",
+    "scapy_delete_temp_files",
+)
+
+_ARCH = (
+    "get_if_addr6", "get_if_raw_addr", "get_if_raw_addr6", "read_nameservers",
+    "SIOCGIFHWADDR",
+)
+
+# Module -> the names it exports lazily: importing wiry touches none of them.
+_LAZY = {
+    "discover": _DISCOVER, "console": _CONSOLE, "columnar": _COLUMNAR,
+    "capture": _CAPTURE, "frag": _FRAG, "stream": _STREAM,
+    "tools": _TOOLS, "supersocket": _SOCKETS,
+    "automaton": _AUTOMATON, "ansmachine": _ANSMACHINE, "route": _ROUTE,
+    "sendrecv": _SENDRECV, "answering": _ANSWERING, "config": _CONFIG,
+    "arch": _ARCH,
+}
+
+_HOME = {name: mod for mod, names in _LAZY.items() for name in names}
+
 # Derived, because __dir__ answers from it: a lazy name missing here would be
 # invisible to dir(wiry) and to anything probing it for capability.
-__all__ = list(
-    _EAGER + _COLUMNAR + _FRAG + _STREAM + _DESCRIBE + _CAPTURE + _TOOLS
-    + _SOCKETS + _AUTOMATON + _ANSMACHINE + _ROUTE + _DISCOVER + _CONSOLE
-)
+__all__ = list(_EAGER) + list(_HOME)
 
 
 def __getattr__(name: str) -> Any:
-    if name in _DISCOVER:
-        from . import discover
-        return getattr(discover, name)
-    if name in _CONSOLE:
-        from . import console
-        return getattr(console, name)
-    if name in _COLUMNAR:
-        from . import columnar
-        return getattr(columnar, name)
-    if name in _CAPTURE:
-        from . import capture
-        return getattr(capture, name)
-    if name in _FRAG:
-        from . import frag
-        return getattr(frag, name)
-    if name in _STREAM:
-        from . import stream
-        return getattr(stream, name)
-    if name in _DESCRIBE:
-        from . import describe
-        return getattr(describe, name)
-    if name in _TOOLS:
-        from . import tools
-        return getattr(tools, name)
-    if name in _SOCKETS:
-        from . import supersocket
-        return getattr(supersocket, name)
-    if name in _AUTOMATON:
-        from . import automaton
-        return getattr(automaton, name)
-    if name in _ANSMACHINE:
-        from . import ansmachine
-        return getattr(ansmachine, name)
-    if name in _ROUTE:
-        from . import route
-        return getattr(route, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    mod = _HOME.get(name)
+    if mod is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+    return getattr(importlib.import_module(f".{mod}", __name__), name)
 
 
 def __dir__() -> list[str]:
@@ -605,7 +609,8 @@ class Packet(metaclass=_PacketMeta):
     _name: str | None = None
 
     __slots__ = ("_stack", "_payload", "_rust", "_written", "time", "wirelen",
-                 "sent_time", "sniffed_on")
+                 "sent_time", "sniffed_on", "comment", "direction",
+                 "process_information")
 
     def __init__(
         self,
@@ -623,6 +628,27 @@ class Packet(metaclass=_PacketMeta):
         self.wirelen = wirelen
         self.sent_time = None
         self.sniffed_on = None
+        self.comment = None
+        self.direction = None
+        self.process_information = None
+        if type(self) is Packet:
+            self._adopt_class()
+
+    def _adopt_class(self) -> None:
+        """Take the class of the outermost layer, as a scapy packet is an
+        instance of it: ``isinstance(p, Ether)`` holds and
+        ``p.__class__(bytes(p))`` dissects. A layer that declared slots of its
+        own has another layout and is left alone."""
+        if self._stack:
+            name = self._stack[0][0]
+        elif self._rust is not None:
+            names = self._rust.layer_names()
+            name = names[0] if names else None
+        else:
+            return
+        cls = _LAYERS.get(name)
+        if cls is not None and cls.__dict__.get("__slots__") == ():
+            object.__setattr__(self, "__class__", cls)
 
     def __truediv__(self, other: "Packet") -> "Packet":
         """Stack another layer beneath this one."""
@@ -1198,118 +1224,6 @@ def bind_layers(lower: Any, upper: Any, **conds: Any) -> None:
     _RUNTIME_BINDS.append((low, up, list(conds.items())))
 
 
-class PacketList:
-    """A capture. Packets stay in Rust until indexed."""
-
-    __slots__ = ("_list",)
-
-    def __init__(self, rust_list: Any):
-        self._list = rust_list
-
-    def __len__(self) -> int:
-        return len(self._list)
-
-    def __getitem__(self, i: Any) -> Any:
-        if isinstance(i, slice):
-            return [self[k] for k in range(*i.indices(len(self)))]
-        rust = self._list[i]
-        return Packet(_rust=rust, time=rust.time, wirelen=rust.wirelen)
-
-    def __iter__(self) -> Iterator[Packet]:
-        for i in range(len(self)):
-            yield self[i]
-
-    def count_layer(self, layer: Any) -> int:
-        """Count packets containing a layer. One crossing for the whole capture."""
-        return self._list.count_layer(_layer_name(layer))
-
-    def field_column(self, layer: Any, field: str) -> list[Any]:
-        """Pull one field from every packet in a single crossing."""
-        return self._list.field_column(_layer_name(layer), field)
-
-    def columns(self, specs: Any = None, where: Any = None, layer: Any = None) -> dict:
-        """Several fields from the whole capture in one pass. See `columnar`."""
-        from .columnar import columns
-        return columns(self, specs, where=where, layer=layer)
-
-    def to_dict(self, specs: Any = None, where: Any = None, layer: Any = None) -> dict:
-        """The capture as a plain dict of lists, with no extra dependency."""
-        from .columnar import to_dict
-        return to_dict(self, specs, where=where, layer=layer)
-
-    def filter(self, layer: Any = None, where: Any = None) -> "PacketList":
-        """A view over matching packets. The predicate is evaluated in Rust."""
-        from .columnar import filter_packets
-        layer, where = _as_layer_and_where(layer, where)
-        return filter_packets(self, layer, where)
-
-    def filter_indices(self, layer: Any = None, where: Any = None) -> list[int]:
-        """Positions of the matching packets."""
-        from .columnar import filter_indices
-        layer, where = _as_layer_and_where(layer, where)
-        return filter_indices(self, layer, where)
-
-    def head(self, n: int) -> "PacketList":
-        """The first n packets, as a view. Shares the capture buffer."""
-        return PacketList(self._list.head(n))
-
-    def sprintf(self, fmt: str) -> list[str]:
-        """Every packet through one format string, in one pass."""
-        from .report import sprintf_list
-        return sprintf_list(self, fmt)
-
-    def summary(self, prn: Any = None, lfilter: Any = None) -> None:
-        """Prints; `report.summary_lines` returns the lines instead."""
-        from .report import summary_lines
-        for line in summary_lines(self, prn, lfilter):
-            print(line)
-
-    def nsummary(self, prn: Any = None, lfilter: Any = None) -> None:
-        from .report import summary_lines
-        for line in summary_lines(self, prn, lfilter, numbered=True):
-            print(line)
-
-    def show(self, prn: Any = None, lfilter: Any = None) -> None:
-        self.nsummary(prn, lfilter)
-
-    def sessions(self, session_extractor: Any = None) -> Any:
-        """Which packets belong to a flow. `streams()` is what the flow said."""
-        from .report import sessions
-        return sessions(self, session_extractor)
-
-    def streams(self) -> Any:
-        """Reassembled TCP streams, keyed as `sessions()` keys its flows.
-
-        One crossing for the whole capture. See `wiry.stream`.
-        """
-        from .stream import streams
-        return streams(self)
-
-    def conversations(self, getsrcdst: Any = None, **kw: Any) -> Any:
-        """DOT source for the conversations. See `wiry.report`."""
-        from .report import conversations
-        return conversations(self, getsrcdst, **kw)
-
-    def make_table(self, fn: Any, lfilter: Any = None) -> str:
-        """`fn` returns (column, row, cell) per packet."""
-        from .report import make_table
-        return make_table(self, fn, lfilter)
-
-    def plot(self, fn: Any, lfilter: Any = None, **kw: Any) -> Any:
-        """matplotlib is optional and imported only here."""
-        from .report import plot
-        return plot(self, fn, lfilter, **kw)
-
-    def times(self) -> list[float]:
-        return self._list.times()
-
-    def raw_at(self, i: int) -> bytes:
-        return self._list.raw_at(i)
-
-    def __repr__(self) -> str:
-        return f"<PacketList: {len(self)} packets>"
-
-
 _GZIP_MAGIC = b"\x1f\x8b"
 
 _GZIP_CHUNK = 1 << 20
@@ -1411,15 +1325,20 @@ def _as_path(source: Any) -> Iterator[str]:
 
 
 def rdpcap(path: Any, count: int = -1) -> PacketList:
-    """Read a pcap file, by path or from a binary stream.
+    """Read a pcap or pcapng file, by path or from a binary stream.
 
-    Records are indexed, not dissected, so this is cheap."""
+    Records are indexed, not dissected, so this is cheap; ``count`` keeps the
+    first that many as a view over the same buffer."""
+    from .pcapio import _BadCapture
+
+    try:
+        with _as_path(path) as real:
+            got = _b.read_pcap(real)
+    except ValueError as exc:
+        raise _BadCapture(str(exc)) from exc
     if count is not None and count >= 0:
-        raise NotImplementedError(
-            "count= is not implemented yet; slice the PacketList instead"
-        )
-    with _as_path(path) as real:
-        return PacketList(_b.read_pcap(real))
+        got = got.head(count)
+    return PacketList(got)
 
 
 # A pcap file declares one link type for every record in it, so the writer has
@@ -1444,6 +1363,8 @@ def _linktype_of(pkt: Any) -> Optional[int]:
         return None
     return _LINKTYPE_OF.get(names[0]) if names else None
 
+
+from .plist import PacketList, QueryAnswer, SndRcvList  # noqa: E402
 
 _PCAPNG_SUFFIXES = (".pcapng", ".ntar")
 
@@ -1539,17 +1460,36 @@ class PcapWriter:
             pass
 
     def write(self, pkt: Any) -> None:
-        """Write a packet, a capture, an iterable of packets, or raw bytes."""
-        if isinstance(pkt, PacketList):
+        """Write a packet, a capture, an iterable of packets, or raw bytes.
+
+        Writing nothing writes nothing, header included, and leaves the link
+        type to whatever comes next.
+        """
+        if isinstance(pkt, PacketList) and getattr(pkt, "_res", None) is None:
             self._settle({pkt._list.dlt})
+            if not len(pkt):
+                return
             self._open().write_list(pkt._list)
+            self._pass_through()
             return
         if isinstance(pkt, Packet) or _is_bytes(pkt):
             pkt = [pkt]
         else:
-            pkt = list(pkt)
+            # A request/answer pair is two records, as scapy writes it.
+            pkt = [q for p in pkt for q in (p if isinstance(p, tuple) else (p,))]
+        if not pkt:
+            return
         self._settle({lt for lt in map(_linktype_of, pkt) if lt is not None})
         self._open().write_records([r for p in pkt for r in _records(p)])
+        self._pass_through()
+
+    def _pass_through(self) -> None:
+        """A plain file object gets each write as it happens, as scapy's
+        does; only a gzipped one has to wait for the whole stream."""
+        if self._target is not None and not self._gz and self._w is not None:
+            data = self._w.take()
+            if data:
+                self._target.write(data)
 
     def flush(self) -> None:
         if self._w is not None:
@@ -1574,11 +1514,13 @@ class PcapWriter:
             seen = seen | {self._linktype}
         if len(seen) > 1 and not self._warned:
             self._warned = True
-            warnings.warn(
-                "Inconsistent linktypes detected! The resulting file might "
-                "contain invalid packets.",
-                stacklevel=3,
-            )
+            msg = ("Inconsistent linktypes detected! The resulting file "
+                   "might contain invalid packets.")
+            warnings.warn(msg, stacklevel=3)
+            # scapy reports it through its logger, and scripts patch that.
+            from .pcapio import _warning
+
+            _warning(msg)
         if self._linktype is None:
             self._linktype = seen.pop() if len(seen) == 1 else _DEFAULT_LINKTYPE
 
@@ -1683,59 +1625,14 @@ def wrpcapng(filename: Any, pkt: Any, **kargs: Any) -> None:
         writer.write(pkt)
 
 
-class PcapReader:
-    """Streaming reader. Context-manager and iterator, like the familiar one."""
-
-    __slots__ = ("_pl", "_i")
-
-    def __init__(self, path: Any):
-        with _as_path(path) as real:
-            self._pl = PacketList(_b.read_pcap(real))
-        self._i = 0
-
-    def __enter__(self) -> "PcapReader":
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        self.close()
-
-    def close(self) -> None:
-        pass
-
-    def __iter__(self) -> Iterator[Packet]:
-        return self
-
-    def __next__(self) -> Packet:
-        if self._i >= len(self._pl):
-            raise StopIteration
-        pkt = self._pl[self._i]
-        self._i += 1
-        return pkt
-
-    def read_all(self) -> PacketList:
-        return self._pl
+# The reader classes need Packet and PacketList, defined above; scapy's
+# record-level interface lives with them.
+from .pcapio import PcapReader  # noqa: E402
 
 
 def raw(pkt: Any) -> bytes:
     """Serialise a packet to bytes."""
     return bytes(pkt)
-
-
-def hexdump(pkt: Any, width: int = 16) -> None:
-    """Print a packet as offset, hex and text columns."""
-    print(hexdump_str(pkt, width), end="")
-
-
-def hexdump_str(pkt: Any, width: int = 16) -> str:
-    """The hex dump `hexdump()` prints, as a string."""
-    data = bytes(pkt)
-    out = []
-    for off in range(0, len(data), width):
-        chunk = data[off : off + width]
-        hexpart = " ".join(f"{b:02x}" for b in chunk)
-        text = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-        out.append(f"{off:04x}  {hexpart:<{width * 3}} {text}\n")
-    return "".join(out)
 
 
 # Eager, unlike the capture and columnar facades: `IP(dst=[...])` has to work
@@ -1745,3 +1642,20 @@ from .volatile import (  # noqa: E402
     RandInt, RandLong, RandMAC, RandNum, RandShort, RandString, VolatileValue,
     as_generator, corrupt_bits, corrupt_bytes, fuzz, gen_spec, set_rand_seed,
 )
+
+
+def _export(module: str) -> None:
+    """Publish a module's ``__all__`` lazily: the module is imported to read
+    its names, and each value is fetched on first touch, so a database it
+    loads on demand stays unloaded until somebody asks."""
+    import importlib
+
+    for name in importlib.import_module(f".{module}", __name__).__all__:
+        if name not in globals() and name not in _HOME:
+            _HOME[name] = module
+            __all__.append(name)
+
+
+for _m in ("compat", "consts", "error", "utils", "utils6", "data", "plist",
+           "pcapio", "external"):
+    _export(_m)
