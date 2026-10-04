@@ -17,21 +17,69 @@ Outcomes are three-way and the distinction matters for honest reporting:
 Only FAIL is a defect. A SKIP is a scope boundary.
 """
 
+import ast
+import importlib
+import importlib.abc
+import importlib.util
 import re
 import sys
 import traceback
+import types
 from pathlib import Path
 
 import wiry
 
 # Names we deliberately do not provide: a scope boundary, not a defect.
-# `restart` is scapy's "exec myself again"; wiry's console does not offer one,
-# and the test imports it from `scapy.utils` anyway, so it reads scapy's own
-# `conf` rather than wiry's however wiry answers.
+# `restart` is scapy's "exec myself again"; wiry's console does not offer one.
 OUT_OF_SCOPE = {
-    "BER_Exception", "load_contrib", "load_layer",
+    "load_contrib", "load_layer",
     "pdfdump", "psdump", "restart", "tcpdump", "voip_play", "wireshark",
 }
+
+
+class _ScapyAsWiry(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Answer `import scapy.x.y` with `wiry.x.y`, or with a view of `wiry`
+    itself where wiry has no such module.
+
+    scapy is installed beside wiry for the parity oracle, so without this a
+    test's `from scapy.layers.x509 import X509_Cert` runs scapy and scores
+    scapy's answer as wiry's. A name wiry lacks then fails as an ImportError,
+    which is a skip.
+    """
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != "scapy" and not fullname.startswith("scapy."):
+            return None
+        # `from scapy.utils import missing` retries `missing` as a submodule;
+        # answering that with another view would hide the ImportError.
+        parent = sys.modules.get(fullname.rpartition(".")[0])
+        if getattr(parent, "__wiry_view__", False):
+            return None
+        return importlib.util.spec_from_loader(fullname, self)
+
+    def create_module(self, spec):
+        rest = spec.name[len("scapy"):]
+        try:
+            return importlib.import_module("wiry" + rest)
+        except ImportError:
+            pass
+        # A fresh module per name: the import system binds each child onto
+        # its parent, and binding `layers` onto `wiry` itself would shadow
+        # wiry's lazy attributes.
+        proxy = types.ModuleType(spec.name)
+        proxy.__getattr__ = lambda name: getattr(wiry, name)
+        proxy.__path__ = []
+        proxy.__all__ = [n for n in dir(wiry) if not n.startswith("_")]
+        proxy.__wiry_view__ = True
+        return proxy
+
+    def exec_module(self, module):
+        pass
+
+
+for _name in [m for m in sys.modules if m == "scapy" or m.startswith("scapy.")]:
+    del sys.modules[_name]
+sys.meta_path.insert(0, _ScapyAsWiry())
 
 
 def parse_uts(path):
@@ -63,10 +111,65 @@ def parse_uts(path):
         yield campaign, name, kw, "\n".join(buf)
 
 
+# Standard-library names `from scapy.all import *` leaks into a UTscapy
+# session, which scapy's tests use without importing. They are not wiry's API.
+_SCAPY_ALL_STDLIB = (
+    "abc", "argparse", "atexit", "builtins", "calendar", "code", "collections",
+    "copy", "ctypes", "dataclasses", "decimal", "difflib", "enum", "errno",
+    "functools", "getopt", "gzip", "hashlib", "hmac", "html", "importlib",
+    "inspect", "io", "itertools", "json", "locale", "logging", "math",
+    "operator", "os", "pathlib", "pickle", "queue", "random", "re", "select",
+    "shutil", "socket", "ssl", "string", "struct", "subprocess", "sys",
+    "tempfile", "threading", "time", "traceback", "types", "uuid", "warnings",
+    "zlib",
+)
+
+
 def namespace():
-    ns = {k: getattr(wiry, k) for k in dir(wiry) if not k.startswith("_")}
+    import datetime as dt
+
+    ns = {m: importlib.import_module(m) for m in _SCAPY_ALL_STDLIB}
+    ns.update(datetime=dt.datetime, timedelta=dt.timedelta,
+              timezone=dt.timezone, tzinfo=dt.tzinfo)
+    ns.update({k: getattr(wiry, k) for k in dir(wiry) if not k.startswith("_")})
     ns["__name__"] = "scapy_suite"
     return ns
+
+
+def utscapy_tools(root):
+    """The helpers UTscapy puts in every session (`import_UTscapy_tools`):
+    test scaffolding, not scapy's API. `scapy_path` resolves against the
+    checkout the campaign came from, where its pcaps live."""
+
+    class Bunch:
+        def __init__(self, **kw):
+            self.__dict__ = kw
+
+    def retry_test(func):
+        error = None
+        for _ in range(3):
+            try:
+                return func()
+            except Exception as exc:  # noqa: BLE001
+                error = exc
+        raise error
+
+    def scapy_path(fname):
+        return str(root / fname.lstrip("/"))
+
+    class no_debug_dissector:
+        def __init__(self, reverse=False):
+            self.new_value = reverse
+
+        def __enter__(self):
+            self.old = wiry.conf.debug_dissector
+            wiry.conf.debug_dissector = self.new_value
+
+        def __exit__(self, *exc):
+            wiry.conf.debug_dissector = self.old
+
+    return {"Bunch": Bunch, "retry_test": retry_test,
+            "scapy_path": scapy_path, "no_debug_dissector": no_debug_dissector}
 
 
 # A name after a dot is an attribute, not a global: `a.restart()` must not read
@@ -121,7 +224,35 @@ def classify_error(exc, supported):
     if isinstance(exc, AttributeError):
         m = re.search(r"'([A-Za-z0-9_.]+)'", str(exc))
         return "skip", f"needs attribute {m.group(1) if m else '?'}"
+    # A patch an earlier test started and then skipped out of before it could
+    # stop it: that test's skip, surfacing again in the shared session.
+    if isinstance(exc, RuntimeError) and str(exc) == "Patch is already started":
+        return "skip", "a mock.patch an earlier skip left started"
     return "fail", text
+
+
+class _Display(ast.NodeTransformer):
+    """Route every expression statement through `__display__`, as an
+    interactive session's display hook sees it; function and class bodies are
+    not displayed, so they are left alone."""
+
+    def visit_Expr(self, node):
+        call = ast.Call(ast.Name("__display__", ast.Load()), [node.value], [])
+        return ast.copy_location(ast.Expr(call), node)
+
+    def _skip(self, node):
+        return node
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _skip
+    visit_Lambda = _skip
+
+
+def compile_test(code, name):
+    """UTscapy runs a test as an interactive session and judges it by the
+    last value that session displayed: `"invalid" in repr(x)` on a line of its
+    own fails the test when it is False. A plain `exec` would pass it."""
+    tree = _Display().visit(ast.parse(code, f"<{name}>"))
+    return compile(ast.fix_missing_locations(tree), f"<{name}>", "exec")
 
 
 def run(path, verbose=False, limit=None):
@@ -129,6 +260,12 @@ def run(path, verbose=False, limit=None):
     results = {"pass": 0, "skip": 0, "fail": 0}
     failures = []
     skips = {}
+    # One namespace per file: UTscapy runs a campaign as one session, and
+    # later tests read what earlier ones defined.
+    ns = namespace()
+    ns.update(utscapy_tools(Path(path).resolve().parents[3]))
+    shown = []
+    ns["__display__"] = lambda v: shown.append(v) if v is not None else None
 
     for i, (campaign, name, kw, code) in enumerate(parse_uts(path)):
         if limit and i >= limit:
@@ -150,9 +287,15 @@ def run(path, verbose=False, limit=None):
                 f"uses {sorted(blocked)[0]}", 0) + 1
             continue
 
-        ns = namespace()
+        shown.clear()
         try:
-            exec(compile(code, f"<{name}>", "exec"), ns)
+            try:
+                compiled = compile_test(code, name)
+            except SyntaxError:
+                compiled = compile(code, f"<{name}>", "exec")
+            exec(compiled, ns)
+            if shown and not shown[-1]:
+                raise AssertionError(f"last value displayed was {shown[-1]!r}")
             results["pass"] += 1
             if verbose:
                 print(f"  PASS  {name}")
@@ -160,9 +303,9 @@ def run(path, verbose=False, limit=None):
             results["fail"] += 1
             line = ""
             tb = traceback.extract_tb(sys.exc_info()[2])
-            if tb:
+            if tb and tb[-1].filename.startswith("<"):
                 line = (tb[-1].line or "").strip()
-            failures.append((campaign, name, f"assertion failed: {line}"))
+            failures.append((campaign, name, f"assertion failed: {line or exc}"))
         except Exception as exc:  # noqa: BLE001
             kind, why = classify_error(exc, supported)
             results[kind] += 1
@@ -174,11 +317,43 @@ def run(path, verbose=False, limit=None):
     return results, failures, skips
 
 
+def run_isolated(path, verbose=False):
+    """`run` in a fresh interpreter. A campaign that sets `conf` and fails
+    before restoring it would otherwise change every file after it."""
+    import json
+    import subprocess
+
+    out = subprocess.run(
+        [sys.executable, __file__, path, "--json"] + (["-v"] if verbose else []),
+        capture_output=True, text=True,
+    )
+    lines = out.stdout.splitlines()
+    for line in lines[:-1]:
+        print(line)
+    if out.returncode not in (0, 1) or not lines:
+        return ({"pass": 0, "skip": 0, "fail": 1},
+                [("", Path(path).name, f"crashed: {out.stderr[-200:]}")], {})
+    r, fails, skips = json.loads(lines[-1])
+    return r, [tuple(f) for f in fails], skips
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     target = sys.argv[1]
     verbose = "-v" in sys.argv
+
+    if "--json" in sys.argv:
+        import contextlib
+        import io
+        import json
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = run(target, verbose)
+        print(buf.getvalue(), end="")
+        print(json.dumps(result))
+        sys.exit(0)
 
     files = [target]
     if Path(target).is_dir():
@@ -189,7 +364,7 @@ if __name__ == "__main__":
     all_skips = {}
 
     for f in files:
-        r, fails, skips = run(f, verbose)
+        r, fails, skips = run_isolated(f, verbose) if len(files) > 1 else run(f, verbose)
         print(f"{Path(f).name:28} pass {r['pass']:4}  skip {r['skip']:4}  "
               f"fail {r['fail']:4}")
         for k in total:
