@@ -288,8 +288,16 @@ def test_hexdump_prints(capsys):
     assert capsys.readouterr().out == hexdump_str(b"AB")
 
 
-def test_layer_view_repr(pkt):
-    assert repr(pkt[IP]) == "<IP layer 1>"
+def test_a_layer_reads_as_the_packet_from_it_on(pkt):
+    ip = pkt[IP]
+    assert repr(ip).startswith("<IP  frag=0 ttl=33 proto=tcp src=10.0.0.1 dst=10.0.0.2 |<TCP ")
+    assert isinstance(ip, IP) and isinstance(pkt.payload, IP)
+    assert isinstance(pkt.payload.payload, TCP)
+    assert not pkt.payload.payload.payload and len(pkt.payload.payload.payload) == 0
+    assert bytes(ip) == bytes(pkt)[14:]
+    assert ip.summary() == pkt.summary().split(" / ", 1)[1]
+    assert ip[TCP].dport == 80
+    assert type(Ether(bytes(pkt))) is Ether
 
 
 def test_known_layers_matches_the_exported_classes():

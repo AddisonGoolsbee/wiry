@@ -62,7 +62,7 @@ _EAGER = (
     "VolatileValue", "RandNum", "RandByte", "RandShort", "RandInt", "RandLong",
     "RandIP", "RandIP6", "RandMAC", "RandString", "RandBin", "RandChoice",
     "RandEnumKeys", "Net", "Net6", "fuzz", "corrupt_bytes", "corrupt_bits",
-    "set_rand_seed", "expand",
+    "set_rand_seed", "expand", "NoPayload",
 )
 
 # Derived, because __dir__ answers from it: a lazy name missing here would be
@@ -303,8 +303,42 @@ class FlagValue:
         return self._replace(self._bits ^ self._coerce(other))
 
 
+class NoPayload:
+    """What follows the last layer: nothing, which is false and empty."""
+
+    __slots__ = ()
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __len__(self) -> int:
+        return 0
+
+    def __bytes__(self) -> bytes:
+        return b""
+
+    def __repr__(self) -> str:
+        return ""
+
+    __str__ = __repr__
+
+    def summary(self) -> str:
+        return ""
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, NoPayload) or other == b""
+
+    def __hash__(self) -> int:
+        return hash(b"")
+
+    @property
+    def payload(self) -> "NoPayload":
+        return self
+
+
 class _LayerView:
-    """A single layer of a packet. Field reads go straight to Rust."""
+    """One layer of a packet and everything above it, as scapy's `pkt[IP]` and
+    `pkt.payload` are. Reads and writes go to the packet it is part of."""
 
     __slots__ = ("_pkt", "_idx", "_name")
 
@@ -314,8 +348,82 @@ class _LayerView:
         object.__setattr__(self, "_name", name)
 
     @property
+    def __class__(self) -> type:
+        """The layer's class, so `isinstance(pkt.payload, IP)` and
+        `layer.__class__(octets)` read as they do for scapy's packets."""
+        return _LAYERS.get(self._name, _LayerView)
+
+    @property
     def name(self) -> str:
         return self._name
+
+    def layers(self) -> list[str]:
+        return self._pkt.layers()[self._idx:]
+
+    @property
+    def payload(self) -> Any:
+        names = self._pkt.layers()
+        if self._idx + 1 < len(names):
+            return _LayerView(self._pkt, self._idx + 1, names[self._idx + 1])
+        return NoPayload()
+
+    @property
+    def underlayer(self) -> Any:
+        if self._idx == 0:
+            return None
+        return _LayerView(self._pkt, self._idx - 1, self._pkt.layers()[self._idx - 1])
+
+    def haslayer(self, layer: Any) -> bool:
+        return _layer_name(layer) in self.layers()
+
+    __contains__ = haslayer
+
+    def getlayer(self, layer: Any, nb: int = 1, **flt: Any) -> Any:
+        if type(layer) is int:
+            return self._pkt.getlayer(self._idx + layer if layer >= 0 else layer, nb, **flt)
+        seen = 0
+        name = _layer_name(layer)
+        for i, n in enumerate(self.layers(), self._idx):
+            if n != name:
+                continue
+            view = _LayerView(self._pkt, i, n)
+            if any(getattr(view, k, None) != v for k, v in flt.items()):
+                continue
+            seen += 1
+            if seen == nb:
+                return view
+        return None
+
+    def __getitem__(self, layer: Any) -> "_LayerView":
+        if type(layer) is slice:
+            view = self.getlayer(layer.start, layer.stop or 1, **(layer.step or {}))
+        else:
+            view = self.getlayer(layer)
+        if view is None:
+            raise IndexError(f"no matching layer {layer!r} in packet")
+        return view
+
+    def __bytes__(self) -> bytes:
+        return self._pkt._materialize().to_bytes_from(self._idx)
+
+    def __len__(self) -> int:
+        return len(bytes(self))
+
+    def show_str(self) -> str:
+        return self._pkt._materialize().show(self._pkt._given(), self._idx)
+
+    def show(self) -> None:
+        print(self.show_str(), end="")
+
+    def show2_str(self) -> str:
+        return _b.dissect(bytes(self), self._name).show()
+
+    def show2(self) -> None:
+        print(self.show2_str(), end="")
+
+    def sprintf(self, fmt: str) -> str:
+        from .report import sprintf
+        return sprintf(self, fmt)
 
     def fields(self) -> list[str]:
         """Field names this layer carries, conditional fields included only
@@ -346,7 +454,7 @@ class _LayerView:
         return self.get_field(field), getattr(self, field)
 
     def summary(self) -> str:
-        return self._name
+        return self._pkt._materialize().summary(self._idx)
 
     def __dir__(self) -> list[str]:
         names = set(super().__dir__())
@@ -395,15 +503,20 @@ class _LayerView:
         self._pkt._set(self._idx, field, value)
 
     def __repr__(self) -> str:
-        return f"<{self._name} layer {self._idx}>"
+        return self._pkt._materialize().repr(self._pkt._given(), self._idx)
+
+    def __str__(self) -> str:
+        return self.summary()
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, _LayerView):
-            return self._name == other._name and self._idx == other._idx
+        if isinstance(other, _LayerView) and other._pkt is self._pkt:
+            return self._idx == other._idx
+        if isinstance(other, (_LayerView, Packet)) or _is_bytes(other):
+            return bytes(self) == bytes(other)
         return NotImplemented
 
     def __hash__(self) -> int:
-        return hash((self._name, self._idx))
+        return hash((id(self._pkt), self._idx))
 
 
 def _as_layer_and_where(layer: Any, where: Any) -> tuple:
@@ -650,6 +763,13 @@ class Packet(metaclass=_PacketMeta):
         self._stack = _stack if _stack is not None else []
         self._payload = _payload
         self._rust = _rust
+        # A dissected packet is an instance of its outermost layer's class, so
+        # `isinstance(pkt, Ether)` and `pkt.__class__(octets)` read as scapy's.
+        if _rust is not None and type(self) is Packet:
+            names = _rust.layer_names()
+            cls = _LAYERS.get(names[0]) if names else None
+            if cls is not None:
+                object.__setattr__(self, "__class__", cls)
         self._written = False
         self.time = time
         self.wirelen = wirelen
@@ -1097,10 +1217,17 @@ class Packet(metaclass=_PacketMeta):
         raise AttributeError(f"no field {field!r} in {' / '.join(names)}")
 
     @property
-    def payload(self) -> bytes:
-        rust = self._materialize()
-        n = len(rust.layer_names())
-        return rust.payload(n - 1) if n else b""
+    def payload(self) -> Any:
+        """The next layer and everything above it, or `NoPayload` after the
+        last one."""
+        names = self.layers()
+        if len(names) > 1:
+            return _LayerView(self, 1, names[1])
+        return NoPayload()
+
+    @property
+    def underlayer(self) -> None:
+        return None
 
     def show(self) -> None:
         print(self.show_str(), end="")

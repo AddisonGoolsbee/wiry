@@ -674,10 +674,11 @@ impl PyPkt {
 
     /// `given` is, for a packet still being built, the fields each layer was
     /// assigned; the rest of what is computed at build time shows as `None`.
-    #[pyo3(signature = (given = None))]
-    fn show(&self, given: Option<Vec<Vec<String>>>) -> String {
+    /// `start` renders from that layer on, as a layer of a packet prints.
+    #[pyo3(signature = (given = None, start = 0))]
+    fn show(&self, given: Option<Vec<Vec<String>>>, start: usize) -> String {
         let g = given.as_deref().map(render::Given);
-        render::show_of(self.inner.raw_bytes(), self.inner.layers(), g)
+        render::show_of(self.inner.raw_bytes(), self.inner.layers(), g, start)
     }
 
     /// Rebuilding from a field spec would lose variable-length header content.
@@ -689,15 +690,35 @@ impl PyPkt {
         }
     }
 
-    fn summary(&self) -> String {
-        render::summary(&self.inner)
+    #[pyo3(signature = (start = 0))]
+    fn summary(&self, start: usize) -> String {
+        render::summary_of(self.inner.raw_bytes(), self.inner.layers(), start)
     }
 
-    /// `given` as for `show`: a layer being built shows only what it was given.
-    #[pyo3(signature = (given = None))]
-    fn repr(&self, given: Option<Vec<Vec<String>>>) -> String {
+    /// `given` and `start` as for `show`.
+    #[pyo3(signature = (given = None, start = 0))]
+    fn repr(&self, given: Option<Vec<Vec<String>>>, start: usize) -> String {
         let g = given.as_deref().map(render::Given);
-        render::repr_of(self.inner.raw_bytes(), self.inner.layers(), g)
+        render::repr_of(self.inner.raw_bytes(), self.inner.layers(), g, start)
+    }
+
+    /// The serialised octets from layer `start` on, lengths and checksums
+    /// computed: what `bytes()` of a layer of this packet is.
+    #[allow(clippy::wrong_self_convention)]
+    fn to_bytes_from<'py>(
+        &mut self,
+        py: Python<'py>,
+        start: usize,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        if let Some(e) = self.inner.oversize() {
+            return Err(PyValueError::new_err(e));
+        }
+        let off = match self.inner.layers().get(start) {
+            Some(s) => s.off as usize,
+            None => return Err(PyIndexError::new_err("layer out of range")),
+        };
+        let all = self.inner.to_bytes();
+        Ok(PyBytes::new_bound(py, all.get(off..).unwrap_or(&[])))
     }
 
     fn __len__(&self) -> usize {
@@ -1221,7 +1242,7 @@ impl PyPktList {
             idx.iter()
                 .map(|(off, len, ..)| {
                     let bytes = &buf[*off..*off + *len as usize];
-                    render::summary_of(bytes, &dissect_spans(bytes, link))
+                    render::summary_of(bytes, &dissect_spans(bytes, link), 0)
                 })
                 .collect()
         })

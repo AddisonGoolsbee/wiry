@@ -720,9 +720,11 @@ fn dhcp_summary(v: &View, i: usize) -> String {
 
 /// scapy's `Packet._do_summary`: only the outermost `mysummary()` that returns
 /// something is used; every layer under it contributes just its name.
-pub fn summary_of(buf: &[u8], spans: &[LayerSpan]) -> String {
+/// From layer `from` on, with the layers under it still there to be read,
+/// as scapy's `pkt[TCP].summary()` still sees the IP under the TCP.
+pub fn summary_of(buf: &[u8], spans: &[LayerSpan], from: usize) -> String {
     let v = View { buf, spans };
-    let shown = visible_layers(&v);
+    let shown = visible_layers(&v, from);
     let mut found = false;
     let mut s = String::new();
     for &i in shown.iter().rev() {
@@ -748,7 +750,7 @@ pub fn summary_of(buf: &[u8], spans: &[LayerSpan]) -> String {
 }
 
 pub fn summary(pkt: &Packet) -> String {
-    summary_of(pkt.raw_bytes(), pkt.layers())
+    summary_of(pkt.raw_bytes(), pkt.layers(), 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -830,8 +832,8 @@ fn folds_payload(v: &View, i: usize) -> bool {
     v.name_of(i) == "DNS" && v.spans.get(i + 1).is_some_and(|s| s.proto.name() == "Raw")
 }
 
-fn visible_layers(v: &View) -> Vec<usize> {
-    (0..v.spans.len())
+fn visible_layers(v: &View, from: usize) -> Vec<usize> {
+    (from..v.spans.len())
         .filter(|i| !i.checked_sub(1).is_some_and(|j| folds_payload(v, j)))
         .collect()
 }
@@ -895,9 +897,9 @@ fn sub_repr(s: &Sub) -> String {
     out
 }
 
-pub fn repr_of(buf: &[u8], spans: &[LayerSpan], given: Option<Given>) -> String {
+pub fn repr_of(buf: &[u8], spans: &[LayerSpan], given: Option<Given>, from: usize) -> String {
     let v = View { buf, spans };
-    let shown = visible_layers(&v);
+    let shown = visible_layers(&v, from);
     let mut out = String::new();
     for &i in &shown {
         out.push('<');
@@ -934,7 +936,7 @@ pub fn repr_of(buf: &[u8], spans: &[LayerSpan], given: Option<Given>) -> String 
 }
 
 pub fn repr_packet(pkt: &Packet) -> String {
-    repr_of(pkt.raw_bytes(), pkt.layers(), None)
+    repr_of(pkt.raw_bytes(), pkt.layers(), None, 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -950,9 +952,9 @@ fn show_field(out: &mut String, lvl: &str, name: &str, text: &str) {
     ));
 }
 
-pub fn show_of(buf: &[u8], spans: &[LayerSpan], given: Option<Given>) -> String {
+pub fn show_of(buf: &[u8], spans: &[LayerSpan], given: Option<Given>, from: usize) -> String {
     let v = View { buf, spans };
-    let shown = visible_layers(&v);
+    let shown = visible_layers(&v, from);
     let mut out = String::new();
     for (depth, &i) in shown.iter().enumerate() {
         let lvl = " ".repeat(3 * depth);
@@ -994,7 +996,7 @@ pub fn show_of(buf: &[u8], spans: &[LayerSpan], given: Option<Given>) -> String 
 }
 
 pub fn show(pkt: &Packet) -> String {
-    show_of(pkt.raw_bytes(), pkt.layers(), None)
+    show_of(pkt.raw_bytes(), pkt.layers(), None, 0)
 }
 
 #[cfg(test)]
