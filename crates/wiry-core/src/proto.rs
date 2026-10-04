@@ -144,6 +144,120 @@ impl ProtoId {
     pub const PPPLCPTerminate: ProtoId = ProtoId(1126);
     pub const PPPLCPDiscardRequest: ProtoId = ProtoId(1129);
     pub const PPPLCPEcho: ProtoId = ProtoId(1130);
+    pub const HCIPHDRHdr: ProtoId = ProtoId(2000);
+    pub const HCIHdr: ProtoId = ProtoId(2001);
+    pub const L2CAPConnReq: ProtoId = ProtoId(2005);
+    pub const L2CAPConnResp: ProtoId = ProtoId(2006);
+    pub const L2CAPCmdRej: ProtoId = ProtoId(2007);
+    pub const L2CAPConfReq: ProtoId = ProtoId(2008);
+    pub const L2CAPConfResp: ProtoId = ProtoId(2009);
+    pub const L2CAPDisconnReq: ProtoId = ProtoId(2010);
+    pub const L2CAPDisconnResp: ProtoId = ProtoId(2011);
+    pub const L2CAPEchoReq: ProtoId = ProtoId(2012);
+    pub const L2CAPEchoResp: ProtoId = ProtoId(2013);
+    pub const L2CAPInfoReq: ProtoId = ProtoId(2014);
+    pub const L2CAPInfoResp: ProtoId = ProtoId(2015);
+    pub const L2CAPCreateChannelRequest: ProtoId = ProtoId(2016);
+    pub const L2CAPCreateChannelResponse: ProtoId = ProtoId(2017);
+    pub const L2CAPMoveChannelRequest: ProtoId = ProtoId(2018);
+    pub const L2CAPMoveChannelResponse: ProtoId = ProtoId(2019);
+    pub const L2CAPMoveChannelConfirmationRequest: ProtoId = ProtoId(2020);
+    pub const L2CAPMoveChannelConfirmationResponse: ProtoId = ProtoId(2021);
+    pub const L2CAPConnectionParameterUpdateRequest: ProtoId = ProtoId(2022);
+    pub const L2CAPConnectionParameterUpdateResponse: ProtoId = ProtoId(2023);
+    pub const L2CAPLECreditBasedConnectionRequest: ProtoId = ProtoId(2024);
+    pub const L2CAPLECreditBasedConnectionResponse: ProtoId = ProtoId(2025);
+    pub const L2CAPFlowControlCreditInd: ProtoId = ProtoId(2026);
+    pub const L2CAPCreditBasedConnectionRequest: ProtoId = ProtoId(2027);
+    pub const L2CAPCreditBasedConnectionResponse: ProtoId = ProtoId(2028);
+    pub const L2CAPCreditBasedReconfigureRequest: ProtoId = ProtoId(2029);
+    pub const L2CAPCreditBasedReconfigureResponse: ProtoId = ProtoId(2030);
+    pub const ATTHdr: ProtoId = ProtoId(2031);
+    pub const ATTHandle: ProtoId = ProtoId(2032);
+    pub const ATTErrorResponse: ProtoId = ProtoId(2034);
+    pub const ATTExchangeMTURequest: ProtoId = ProtoId(2035);
+    pub const ATTExchangeMTUResponse: ProtoId = ProtoId(2036);
+    pub const ATTFindInformationRequest: ProtoId = ProtoId(2037);
+    pub const ATTFindByTypeValueRequest: ProtoId = ProtoId(2039);
+    pub const ATTFindByTypeValueResponse: ProtoId = ProtoId(2040);
+    pub const ATTReadByTypeRequest: ProtoId = ProtoId(2042);
+    pub const ATTReadRequest: ProtoId = ProtoId(2045);
+    pub const ATTReadResponse: ProtoId = ProtoId(2046);
+    pub const ATTReadMultipleRequest: ProtoId = ProtoId(2047);
+    pub const ATTReadMultipleResponse: ProtoId = ProtoId(2048);
+    pub const ATTReadByGroupTypeRequest: ProtoId = ProtoId(2049);
+    pub const ATTReadByGroupTypeResponse: ProtoId = ProtoId(2050);
+    pub const ATTWriteRequest: ProtoId = ProtoId(2051);
+    pub const ATTWriteCommand: ProtoId = ProtoId(2052);
+    pub const ATTPrepareWriteRequest: ProtoId = ProtoId(2054);
+    pub const ATTPrepareWriteResponse: ProtoId = ProtoId(2055);
+    pub const ATTHandleValueNotification: ProtoId = ProtoId(2056);
+    pub const ATTExecuteWriteRequest: ProtoId = ProtoId(2057);
+    pub const ATTReadBlobRequest: ProtoId = ProtoId(2059);
+    pub const ATTReadBlobResponse: ProtoId = ProtoId(2060);
+    pub const ATTHandleValueIndication: ProtoId = ProtoId(2061);
+    pub const SMHdr: ProtoId = ProtoId(2062);
+    pub const SMPairingRequest: ProtoId = ProtoId(2063);
+    pub const SMPairingResponse: ProtoId = ProtoId(2064);
+    pub const SMConfirm: ProtoId = ProtoId(2065);
+    pub const SMRandom: ProtoId = ProtoId(2066);
+    pub const SMFailed: ProtoId = ProtoId(2067);
+    pub const SMEncryptionInformation: ProtoId = ProtoId(2068);
+    pub const SMMasterIdentification: ProtoId = ProtoId(2069);
+    pub const SMIdentityInformation: ProtoId = ProtoId(2070);
+    pub const SMSigningInformation: ProtoId = ProtoId(2072);
+    pub const SMSecurityRequest: ProtoId = ProtoId(2073);
+    pub const SMPublicKey: ProtoId = ProtoId(2074);
+    pub const SMDHKeyCheck: ProtoId = ProtoId(2075);
+    pub const EIRFlags: ProtoId = ProtoId(2079);
+    pub const EIRSecurityManagerOOBFlags: ProtoId = ProtoId(2092);
+    pub const EIRPeripheralConnectionIntervalRange: ProtoId = ProtoId(2093);
+    pub const EIRDeviceID: ProtoId = ProtoId(2095);
+    pub const HCICmdInquiry: ProtoId = ProtoId(2108);
+    pub const HCICmdPeriodicInquiryMode: ProtoId = ProtoId(2110);
+    pub const HCICmdDisconnect: ProtoId = ProtoId(2113);
+    pub const HCICmdChangeConnectionPacketType: ProtoId = ProtoId(2121);
+    pub const HCICmdAuthenticationRequested: ProtoId = ProtoId(2122);
+    pub const HCICmdSetConnectionEncryption: ProtoId = ProtoId(2123);
+    pub const HCICmdChangeConnectionLinkKey: ProtoId = ProtoId(2124);
+    pub const HCICmdLinkKeySelection: ProtoId = ProtoId(2125);
+    pub const HCICmdReadRemoteSupportedFeatures: ProtoId = ProtoId(2128);
+    pub const HCICmdReadRemoteExtendedFeatures: ProtoId = ProtoId(2129);
+    pub const HCICmdHoldMode: ProtoId = ProtoId(2137);
+    pub const HCICmdSetEventMask: ProtoId = ProtoId(2138);
+    pub const HCICmdSetEventFilter: ProtoId = ProtoId(2140);
+    pub const HCICmdWriteLocalName: ProtoId = ProtoId(2141);
+    pub const HCICmdWriteConnectAcceptTimeout: ProtoId = ProtoId(2143);
+    pub const HCICmdWriteLEHostSupport: ProtoId = ProtoId(2146);
+    pub const HCICmdReadLocalExtendedFeatures: ProtoId = ProtoId(2148);
+    pub const HCICmdReadLinkQuality: ProtoId = ProtoId(2150);
+    pub const HCICmdReadRSSI: ProtoId = ProtoId(2151);
+    pub const HCICmdWriteLoopbackMode: ProtoId = ProtoId(2153);
+    pub const HCICmdLESetScanResponseData: ProtoId = ProtoId(2160);
+    pub const HCICmdLESetAdvertiseEnable: ProtoId = ProtoId(2161);
+    pub const HCICmdLESetScanParameters: ProtoId = ProtoId(2162);
+    pub const HCICmdLESetScanEnable: ProtoId = ProtoId(2163);
+    pub const HCICmdLEConnectionUpdate: ProtoId = ProtoId(2170);
+    pub const HCICmdLEReadRemoteFeatures: ProtoId = ProtoId(2171);
+    pub const HCICmdLEEnableEncryption: ProtoId = ProtoId(2172);
+    pub const HCICmdLELongTermKeyRequestReply: ProtoId = ProtoId(2173);
+    pub const HCICmdLELongTermKeyRequestNegativeReply: ProtoId = ProtoId(2174);
+    pub const HCIEventInquiryComplete: ProtoId = ProtoId(2176);
+    pub const HCIEventDisconnectionComplete: ProtoId = ProtoId(2179);
+    pub const HCIEventEncryptionChange: ProtoId = ProtoId(2181);
+    pub const HCIEventReadRemoteVersionInformationComplete: ProtoId = ProtoId(2183);
+    pub const HCIEventCommandComplete: ProtoId = ProtoId(2184);
+    pub const HCIEventCommandStatus: ProtoId = ProtoId(2185);
+    pub const HCIEventReadRemoteExtendedFeaturesComplete: ProtoId = ProtoId(2189);
+    pub const HCIEventLEMeta: ProtoId = ProtoId(2192);
+    pub const HCICmdCompleteReadLocalName: ProtoId = ProtoId(2193);
+    pub const HCICmdCompleteReadLocalVersionInformation: ProtoId = ProtoId(2194);
+    pub const HCICmdCompleteReadLocalExtendedFeatures: ProtoId = ProtoId(2195);
+    pub const HCICmdCompleteLEReadWhiteListSize: ProtoId = ProtoId(2197);
+    pub const HCILEMetaConnectionUpdateComplete: ProtoId = ProtoId(2199);
+    pub const HCILEMetaLongTermKeyRequest: ProtoId = ProtoId(2202);
+    pub const HCIMonHdr: ProtoId = ProtoId(2205);
+    pub const HCIMonPcapHdr: ProtoId = ProtoId(2206);
     // protogen:ids end
 
     pub fn name(self) -> &'static str {
@@ -343,6 +457,120 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::PPPLCPTerminate,
     ProtoId::PPPLCPDiscardRequest,
     ProtoId::PPPLCPEcho,
+    ProtoId::HCIPHDRHdr,
+    ProtoId::HCIHdr,
+    ProtoId::L2CAPConnReq,
+    ProtoId::L2CAPConnResp,
+    ProtoId::L2CAPCmdRej,
+    ProtoId::L2CAPConfReq,
+    ProtoId::L2CAPConfResp,
+    ProtoId::L2CAPDisconnReq,
+    ProtoId::L2CAPDisconnResp,
+    ProtoId::L2CAPEchoReq,
+    ProtoId::L2CAPEchoResp,
+    ProtoId::L2CAPInfoReq,
+    ProtoId::L2CAPInfoResp,
+    ProtoId::L2CAPCreateChannelRequest,
+    ProtoId::L2CAPCreateChannelResponse,
+    ProtoId::L2CAPMoveChannelRequest,
+    ProtoId::L2CAPMoveChannelResponse,
+    ProtoId::L2CAPMoveChannelConfirmationRequest,
+    ProtoId::L2CAPMoveChannelConfirmationResponse,
+    ProtoId::L2CAPConnectionParameterUpdateRequest,
+    ProtoId::L2CAPConnectionParameterUpdateResponse,
+    ProtoId::L2CAPLECreditBasedConnectionRequest,
+    ProtoId::L2CAPLECreditBasedConnectionResponse,
+    ProtoId::L2CAPFlowControlCreditInd,
+    ProtoId::L2CAPCreditBasedConnectionRequest,
+    ProtoId::L2CAPCreditBasedConnectionResponse,
+    ProtoId::L2CAPCreditBasedReconfigureRequest,
+    ProtoId::L2CAPCreditBasedReconfigureResponse,
+    ProtoId::ATTHdr,
+    ProtoId::ATTHandle,
+    ProtoId::ATTErrorResponse,
+    ProtoId::ATTExchangeMTURequest,
+    ProtoId::ATTExchangeMTUResponse,
+    ProtoId::ATTFindInformationRequest,
+    ProtoId::ATTFindByTypeValueRequest,
+    ProtoId::ATTFindByTypeValueResponse,
+    ProtoId::ATTReadByTypeRequest,
+    ProtoId::ATTReadRequest,
+    ProtoId::ATTReadResponse,
+    ProtoId::ATTReadMultipleRequest,
+    ProtoId::ATTReadMultipleResponse,
+    ProtoId::ATTReadByGroupTypeRequest,
+    ProtoId::ATTReadByGroupTypeResponse,
+    ProtoId::ATTWriteRequest,
+    ProtoId::ATTWriteCommand,
+    ProtoId::ATTPrepareWriteRequest,
+    ProtoId::ATTPrepareWriteResponse,
+    ProtoId::ATTHandleValueNotification,
+    ProtoId::ATTExecuteWriteRequest,
+    ProtoId::ATTReadBlobRequest,
+    ProtoId::ATTReadBlobResponse,
+    ProtoId::ATTHandleValueIndication,
+    ProtoId::SMHdr,
+    ProtoId::SMPairingRequest,
+    ProtoId::SMPairingResponse,
+    ProtoId::SMConfirm,
+    ProtoId::SMRandom,
+    ProtoId::SMFailed,
+    ProtoId::SMEncryptionInformation,
+    ProtoId::SMMasterIdentification,
+    ProtoId::SMIdentityInformation,
+    ProtoId::SMSigningInformation,
+    ProtoId::SMSecurityRequest,
+    ProtoId::SMPublicKey,
+    ProtoId::SMDHKeyCheck,
+    ProtoId::EIRFlags,
+    ProtoId::EIRSecurityManagerOOBFlags,
+    ProtoId::EIRPeripheralConnectionIntervalRange,
+    ProtoId::EIRDeviceID,
+    ProtoId::HCICmdInquiry,
+    ProtoId::HCICmdPeriodicInquiryMode,
+    ProtoId::HCICmdDisconnect,
+    ProtoId::HCICmdChangeConnectionPacketType,
+    ProtoId::HCICmdAuthenticationRequested,
+    ProtoId::HCICmdSetConnectionEncryption,
+    ProtoId::HCICmdChangeConnectionLinkKey,
+    ProtoId::HCICmdLinkKeySelection,
+    ProtoId::HCICmdReadRemoteSupportedFeatures,
+    ProtoId::HCICmdReadRemoteExtendedFeatures,
+    ProtoId::HCICmdHoldMode,
+    ProtoId::HCICmdSetEventMask,
+    ProtoId::HCICmdSetEventFilter,
+    ProtoId::HCICmdWriteLocalName,
+    ProtoId::HCICmdWriteConnectAcceptTimeout,
+    ProtoId::HCICmdWriteLEHostSupport,
+    ProtoId::HCICmdReadLocalExtendedFeatures,
+    ProtoId::HCICmdReadLinkQuality,
+    ProtoId::HCICmdReadRSSI,
+    ProtoId::HCICmdWriteLoopbackMode,
+    ProtoId::HCICmdLESetScanResponseData,
+    ProtoId::HCICmdLESetAdvertiseEnable,
+    ProtoId::HCICmdLESetScanParameters,
+    ProtoId::HCICmdLESetScanEnable,
+    ProtoId::HCICmdLEConnectionUpdate,
+    ProtoId::HCICmdLEReadRemoteFeatures,
+    ProtoId::HCICmdLEEnableEncryption,
+    ProtoId::HCICmdLELongTermKeyRequestReply,
+    ProtoId::HCICmdLELongTermKeyRequestNegativeReply,
+    ProtoId::HCIEventInquiryComplete,
+    ProtoId::HCIEventDisconnectionComplete,
+    ProtoId::HCIEventEncryptionChange,
+    ProtoId::HCIEventReadRemoteVersionInformationComplete,
+    ProtoId::HCIEventCommandComplete,
+    ProtoId::HCIEventCommandStatus,
+    ProtoId::HCIEventReadRemoteExtendedFeaturesComplete,
+    ProtoId::HCIEventLEMeta,
+    ProtoId::HCICmdCompleteReadLocalName,
+    ProtoId::HCICmdCompleteReadLocalVersionInformation,
+    ProtoId::HCICmdCompleteReadLocalExtendedFeatures,
+    ProtoId::HCICmdCompleteLEReadWhiteListSize,
+    ProtoId::HCILEMetaConnectionUpdateComplete,
+    ProtoId::HCILEMetaLongTermKeyRequest,
+    ProtoId::HCIMonHdr,
+    ProtoId::HCIMonPcapHdr,
     // protogen:builtins end
 ];
 
@@ -500,6 +728,166 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::PPPLCPTerminate.0 as usize] = &ppp_ppp_lcp_terminate::DESC;
     t[ProtoId::PPPLCPDiscardRequest.0 as usize] = &ppp_ppp_lcp_discard_request::DESC;
     t[ProtoId::PPPLCPEcho.0 as usize] = &ppp_ppp_lcp_echo::DESC;
+    t[ProtoId::HCIPHDRHdr.0 as usize] = &bluetooth_hci_phdr_hdr::DESC;
+    t[ProtoId::HCIHdr.0 as usize] = &bluetooth_hci_hdr::DESC;
+    t[ProtoId::L2CAPConnReq.0 as usize] = &bluetooth_l2cap_connreq::DESC;
+    t[ProtoId::L2CAPConnResp.0 as usize] = &bluetooth_l2cap_connresp::DESC;
+    t[ProtoId::L2CAPCmdRej.0 as usize] = &bluetooth_l2cap_cmdrej::DESC;
+    t[ProtoId::L2CAPConfReq.0 as usize] = &bluetooth_l2cap_confreq::DESC;
+    t[ProtoId::L2CAPConfResp.0 as usize] = &bluetooth_l2cap_confresp::DESC;
+    t[ProtoId::L2CAPDisconnReq.0 as usize] = &bluetooth_l2cap_disconnreq::DESC;
+    t[ProtoId::L2CAPDisconnResp.0 as usize] = &bluetooth_l2cap_disconnresp::DESC;
+    t[ProtoId::L2CAPEchoReq.0 as usize] = &bluetooth_l2cap_echoreq::DESC;
+    t[ProtoId::L2CAPEchoResp.0 as usize] = &bluetooth_l2cap_echoresp::DESC;
+    t[ProtoId::L2CAPInfoReq.0 as usize] = &bluetooth_l2cap_inforeq::DESC;
+    t[ProtoId::L2CAPInfoResp.0 as usize] = &bluetooth_l2cap_inforesp::DESC;
+    t[ProtoId::L2CAPCreateChannelRequest.0 as usize] =
+        &bluetooth_l2cap_create_channel_request::DESC;
+    t[ProtoId::L2CAPCreateChannelResponse.0 as usize] =
+        &bluetooth_l2cap_create_channel_response::DESC;
+    t[ProtoId::L2CAPMoveChannelRequest.0 as usize] = &bluetooth_l2cap_move_channel_request::DESC;
+    t[ProtoId::L2CAPMoveChannelResponse.0 as usize] = &bluetooth_l2cap_move_channel_response::DESC;
+    t[ProtoId::L2CAPMoveChannelConfirmationRequest.0 as usize] =
+        &bluetooth_l2cap_move_channel_confirmation_request::DESC;
+    t[ProtoId::L2CAPMoveChannelConfirmationResponse.0 as usize] =
+        &bluetooth_l2cap_move_channel_confirmation_response::DESC;
+    t[ProtoId::L2CAPConnectionParameterUpdateRequest.0 as usize] =
+        &bluetooth_l2cap_connection_parameter_update_request::DESC;
+    t[ProtoId::L2CAPConnectionParameterUpdateResponse.0 as usize] =
+        &bluetooth_l2cap_connection_parameter_update_response::DESC;
+    t[ProtoId::L2CAPLECreditBasedConnectionRequest.0 as usize] =
+        &bluetooth_l2cap_le_credit_based_connection_request::DESC;
+    t[ProtoId::L2CAPLECreditBasedConnectionResponse.0 as usize] =
+        &bluetooth_l2cap_le_credit_based_connection_response::DESC;
+    t[ProtoId::L2CAPFlowControlCreditInd.0 as usize] =
+        &bluetooth_l2cap_flow_control_credit_ind::DESC;
+    t[ProtoId::L2CAPCreditBasedConnectionRequest.0 as usize] =
+        &bluetooth_l2cap_credit_based_connection_request::DESC;
+    t[ProtoId::L2CAPCreditBasedConnectionResponse.0 as usize] =
+        &bluetooth_l2cap_credit_based_connection_response::DESC;
+    t[ProtoId::L2CAPCreditBasedReconfigureRequest.0 as usize] =
+        &bluetooth_l2cap_credit_based_reconfigure_request::DESC;
+    t[ProtoId::L2CAPCreditBasedReconfigureResponse.0 as usize] =
+        &bluetooth_l2cap_credit_based_reconfigure_response::DESC;
+    t[ProtoId::ATTHdr.0 as usize] = &bluetooth_att_hdr::DESC;
+    t[ProtoId::ATTHandle.0 as usize] = &bluetooth_att_handle::DESC;
+    t[ProtoId::ATTErrorResponse.0 as usize] = &bluetooth_att_error_response::DESC;
+    t[ProtoId::ATTExchangeMTURequest.0 as usize] = &bluetooth_att_exchange_mtu_request::DESC;
+    t[ProtoId::ATTExchangeMTUResponse.0 as usize] = &bluetooth_att_exchange_mtu_response::DESC;
+    t[ProtoId::ATTFindInformationRequest.0 as usize] =
+        &bluetooth_att_find_information_request::DESC;
+    t[ProtoId::ATTFindByTypeValueRequest.0 as usize] =
+        &bluetooth_att_find_by_type_value_request::DESC;
+    t[ProtoId::ATTFindByTypeValueResponse.0 as usize] =
+        &bluetooth_att_find_by_type_value_response::DESC;
+    t[ProtoId::ATTReadByTypeRequest.0 as usize] = &bluetooth_att_read_by_type_request::DESC;
+    t[ProtoId::ATTReadRequest.0 as usize] = &bluetooth_att_read_request::DESC;
+    t[ProtoId::ATTReadResponse.0 as usize] = &bluetooth_att_read_response::DESC;
+    t[ProtoId::ATTReadMultipleRequest.0 as usize] = &bluetooth_att_read_multiple_request::DESC;
+    t[ProtoId::ATTReadMultipleResponse.0 as usize] = &bluetooth_att_read_multiple_response::DESC;
+    t[ProtoId::ATTReadByGroupTypeRequest.0 as usize] =
+        &bluetooth_att_read_by_group_type_request::DESC;
+    t[ProtoId::ATTReadByGroupTypeResponse.0 as usize] =
+        &bluetooth_att_read_by_group_type_response::DESC;
+    t[ProtoId::ATTWriteRequest.0 as usize] = &bluetooth_att_write_request::DESC;
+    t[ProtoId::ATTWriteCommand.0 as usize] = &bluetooth_att_write_command::DESC;
+    t[ProtoId::ATTPrepareWriteRequest.0 as usize] = &bluetooth_att_prepare_write_request::DESC;
+    t[ProtoId::ATTPrepareWriteResponse.0 as usize] = &bluetooth_att_prepare_write_response::DESC;
+    t[ProtoId::ATTHandleValueNotification.0 as usize] =
+        &bluetooth_att_handle_value_notification::DESC;
+    t[ProtoId::ATTExecuteWriteRequest.0 as usize] = &bluetooth_att_execute_write_request::DESC;
+    t[ProtoId::ATTReadBlobRequest.0 as usize] = &bluetooth_att_read_blob_request::DESC;
+    t[ProtoId::ATTReadBlobResponse.0 as usize] = &bluetooth_att_read_blob_response::DESC;
+    t[ProtoId::ATTHandleValueIndication.0 as usize] = &bluetooth_att_handle_value_indication::DESC;
+    t[ProtoId::SMHdr.0 as usize] = &bluetooth_sm_hdr::DESC;
+    t[ProtoId::SMPairingRequest.0 as usize] = &bluetooth_sm_pairing_request::DESC;
+    t[ProtoId::SMPairingResponse.0 as usize] = &bluetooth_sm_pairing_response::DESC;
+    t[ProtoId::SMConfirm.0 as usize] = &bluetooth_sm_confirm::DESC;
+    t[ProtoId::SMRandom.0 as usize] = &bluetooth_sm_random::DESC;
+    t[ProtoId::SMFailed.0 as usize] = &bluetooth_sm_failed::DESC;
+    t[ProtoId::SMEncryptionInformation.0 as usize] = &bluetooth_sm_encryption_information::DESC;
+    t[ProtoId::SMMasterIdentification.0 as usize] = &bluetooth_sm_master_identification::DESC;
+    t[ProtoId::SMIdentityInformation.0 as usize] = &bluetooth_sm_identity_information::DESC;
+    t[ProtoId::SMSigningInformation.0 as usize] = &bluetooth_sm_signing_information::DESC;
+    t[ProtoId::SMSecurityRequest.0 as usize] = &bluetooth_sm_security_request::DESC;
+    t[ProtoId::SMPublicKey.0 as usize] = &bluetooth_sm_public_key::DESC;
+    t[ProtoId::SMDHKeyCheck.0 as usize] = &bluetooth_sm_dhkey_check::DESC;
+    t[ProtoId::EIRFlags.0 as usize] = &bluetooth_eir_flags::DESC;
+    t[ProtoId::EIRSecurityManagerOOBFlags.0 as usize] =
+        &bluetooth_eir_securitymanageroobflags::DESC;
+    t[ProtoId::EIRPeripheralConnectionIntervalRange.0 as usize] =
+        &bluetooth_eir_peripheralconnectionintervalrange::DESC;
+    t[ProtoId::EIRDeviceID.0 as usize] = &bluetooth_eir_device_id::DESC;
+    t[ProtoId::HCICmdInquiry.0 as usize] = &bluetooth_hci_cmd_inquiry::DESC;
+    t[ProtoId::HCICmdPeriodicInquiryMode.0 as usize] =
+        &bluetooth_hci_cmd_periodic_inquiry_mode::DESC;
+    t[ProtoId::HCICmdDisconnect.0 as usize] = &bluetooth_hci_cmd_disconnect::DESC;
+    t[ProtoId::HCICmdChangeConnectionPacketType.0 as usize] =
+        &bluetooth_hci_cmd_change_connection_packet_type::DESC;
+    t[ProtoId::HCICmdAuthenticationRequested.0 as usize] =
+        &bluetooth_hci_cmd_authentication_requested::DESC;
+    t[ProtoId::HCICmdSetConnectionEncryption.0 as usize] =
+        &bluetooth_hci_cmd_set_connection_encryption::DESC;
+    t[ProtoId::HCICmdChangeConnectionLinkKey.0 as usize] =
+        &bluetooth_hci_cmd_change_connection_link_key::DESC;
+    t[ProtoId::HCICmdLinkKeySelection.0 as usize] = &bluetooth_hci_cmd_link_key_selection::DESC;
+    t[ProtoId::HCICmdReadRemoteSupportedFeatures.0 as usize] =
+        &bluetooth_hci_cmd_read_remote_supported_features::DESC;
+    t[ProtoId::HCICmdReadRemoteExtendedFeatures.0 as usize] =
+        &bluetooth_hci_cmd_read_remote_extended_features::DESC;
+    t[ProtoId::HCICmdHoldMode.0 as usize] = &bluetooth_hci_cmd_hold_mode::DESC;
+    t[ProtoId::HCICmdSetEventMask.0 as usize] = &bluetooth_hci_cmd_set_event_mask::DESC;
+    t[ProtoId::HCICmdSetEventFilter.0 as usize] = &bluetooth_hci_cmd_set_event_filter::DESC;
+    t[ProtoId::HCICmdWriteLocalName.0 as usize] = &bluetooth_hci_cmd_write_local_name::DESC;
+    t[ProtoId::HCICmdWriteConnectAcceptTimeout.0 as usize] =
+        &bluetooth_hci_cmd_write_connect_accept_timeout::DESC;
+    t[ProtoId::HCICmdWriteLEHostSupport.0 as usize] =
+        &bluetooth_hci_cmd_write_le_host_support::DESC;
+    t[ProtoId::HCICmdReadLocalExtendedFeatures.0 as usize] =
+        &bluetooth_hci_cmd_read_local_extended_features::DESC;
+    t[ProtoId::HCICmdReadLinkQuality.0 as usize] = &bluetooth_hci_cmd_read_link_quality::DESC;
+    t[ProtoId::HCICmdReadRSSI.0 as usize] = &bluetooth_hci_cmd_read_rssi::DESC;
+    t[ProtoId::HCICmdWriteLoopbackMode.0 as usize] = &bluetooth_hci_cmd_write_loopback_mode::DESC;
+    t[ProtoId::HCICmdLESetScanResponseData.0 as usize] =
+        &bluetooth_hci_cmd_le_set_scan_response_data::DESC;
+    t[ProtoId::HCICmdLESetAdvertiseEnable.0 as usize] =
+        &bluetooth_hci_cmd_le_set_advertise_enable::DESC;
+    t[ProtoId::HCICmdLESetScanParameters.0 as usize] =
+        &bluetooth_hci_cmd_le_set_scan_parameters::DESC;
+    t[ProtoId::HCICmdLESetScanEnable.0 as usize] = &bluetooth_hci_cmd_le_set_scan_enable::DESC;
+    t[ProtoId::HCICmdLEConnectionUpdate.0 as usize] = &bluetooth_hci_cmd_le_connection_update::DESC;
+    t[ProtoId::HCICmdLEReadRemoteFeatures.0 as usize] =
+        &bluetooth_hci_cmd_le_read_remote_features::DESC;
+    t[ProtoId::HCICmdLEEnableEncryption.0 as usize] = &bluetooth_hci_cmd_le_enable_encryption::DESC;
+    t[ProtoId::HCICmdLELongTermKeyRequestReply.0 as usize] =
+        &bluetooth_hci_cmd_le_long_term_key_request_reply::DESC;
+    t[ProtoId::HCICmdLELongTermKeyRequestNegativeReply.0 as usize] =
+        &bluetooth_hci_cmd_le_long_term_key_request_negative_reply::DESC;
+    t[ProtoId::HCIEventInquiryComplete.0 as usize] = &bluetooth_hci_event_inquiry_complete::DESC;
+    t[ProtoId::HCIEventDisconnectionComplete.0 as usize] =
+        &bluetooth_hci_event_disconnection_complete::DESC;
+    t[ProtoId::HCIEventEncryptionChange.0 as usize] = &bluetooth_hci_event_encryption_change::DESC;
+    t[ProtoId::HCIEventReadRemoteVersionInformationComplete.0 as usize] =
+        &bluetooth_hci_event_read_remote_version_information_complete::DESC;
+    t[ProtoId::HCIEventCommandComplete.0 as usize] = &bluetooth_hci_event_command_complete::DESC;
+    t[ProtoId::HCIEventCommandStatus.0 as usize] = &bluetooth_hci_event_command_status::DESC;
+    t[ProtoId::HCIEventReadRemoteExtendedFeaturesComplete.0 as usize] =
+        &bluetooth_hci_event_read_remote_extended_features_complete::DESC;
+    t[ProtoId::HCIEventLEMeta.0 as usize] = &bluetooth_hci_event_le_meta::DESC;
+    t[ProtoId::HCICmdCompleteReadLocalName.0 as usize] =
+        &bluetooth_hci_cmd_complete_read_local_name::DESC;
+    t[ProtoId::HCICmdCompleteReadLocalVersionInformation.0 as usize] =
+        &bluetooth_hci_cmd_complete_read_local_version_information::DESC;
+    t[ProtoId::HCICmdCompleteReadLocalExtendedFeatures.0 as usize] =
+        &bluetooth_hci_cmd_complete_read_local_extended_features::DESC;
+    t[ProtoId::HCICmdCompleteLEReadWhiteListSize.0 as usize] =
+        &bluetooth_hci_cmd_complete_le_read_white_list_size::DESC;
+    t[ProtoId::HCILEMetaConnectionUpdateComplete.0 as usize] =
+        &bluetooth_hci_le_meta_connection_update_complete::DESC;
+    t[ProtoId::HCILEMetaLongTermKeyRequest.0 as usize] =
+        &bluetooth_hci_le_meta_long_term_key_request::DESC;
+    t[ProtoId::HCIMonHdr.0 as usize] = &bluetooth_hci_mon_hdr::DESC;
+    t[ProtoId::HCIMonPcapHdr.0 as usize] = &bluetooth_hci_mon_pcap_hdr::DESC;
     // protogen:desc end
     t
 };
@@ -646,6 +1034,12 @@ pub fn group_of(id: ProtoId) -> Option<&'static crate::repeat::GroupDesc> {
         ProtoId::OspfLsAck => Some(&crate::layers::ospf_lsack::GROUP),
         ProtoId::BgpOpen => Some(&crate::layers::bgp_open::GROUP),
         ProtoId::PPPoEDTags => Some(&crate::layers::ppp_pppoed_tags::GROUP),
+        ProtoId::ATTFindByTypeValueResponse => {
+            Some(&crate::layers::bluetooth_att_find_by_type_value_response::GROUP)
+        }
+        ProtoId::ATTReadMultipleRequest => {
+            Some(&crate::layers::bluetooth_att_read_multiple_request::GROUP)
+        }
         // protogen:groups end
         _ => None,
     }
@@ -712,6 +1106,8 @@ pub fn parsed_field_name(id: ProtoId) -> &'static str {
         ProtoId::BgpOpen => "opt_params",
         ProtoId::BgpUpdate => "body",
         ProtoId::PPPoEDTags => "tag_list",
+        ProtoId::ATTFindByTypeValueResponse => "handles",
+        ProtoId::ATTReadMultipleRequest => "handles",
         // protogen:parsed end
         _ => "options",
     }

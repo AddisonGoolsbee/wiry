@@ -240,6 +240,14 @@ fn a_dirty_rebuild_is_the_identity() {
 /// generated `bind_next` and the generated `next` disagree — different offset,
 /// different width, a value written but not matched — the chain the user built
 /// is not the chain that comes back.
+/// A spec bound under another spec's layer writes its selector through
+/// `dispatch::bind_layer`, not through the parent's descriptor.
+fn binds_by_layer(head: &[u8], parent: ProtoId, child: ProtoId) -> bool {
+    let mut hdr = head.to_vec();
+    wiry_core::layers::dispatch::bind_layer(&mut hdr, parent, child);
+    hdr != head
+}
+
 #[test]
 fn stacking_a_child_produces_a_chain_that_dissects_to_itself() {
     let all = layers();
@@ -266,7 +274,8 @@ fn stacking_a_child_produces_a_chain_that_dissects_to_itself() {
                 bytes.starts_with(&head[..head.len().min(bytes.len())])
                     || desc(parent).bind_next.is_some()
                     || desc(parent).bind_next_bytes.is_some()
-                    || desc(parent).fields.iter().any(|f| f.computed),
+                    || desc(parent).fields.iter().any(|f| f.computed)
+                    || binds_by_layer(&head, parent, child),
                 "{}/{}:  stacking rewrote the parent header with no binder",
                 desc(parent).name,
                 desc(child).name

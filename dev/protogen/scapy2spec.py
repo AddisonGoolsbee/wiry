@@ -1695,6 +1695,8 @@ def field_blockers(cls) -> list[str]:
             out.add("multiple_type")
             fields.extend(fl for fl, _ in f.flds)
             fields.append(f.dflt)
+        elif n in BITS and (f.size < 0 or getattr(f, "rev", False)):
+            out.add("le_bitfield")
         elif n not in SUPPORTED:
             out.add(refusal_code(n))
     return sorted(out)
