@@ -363,6 +363,10 @@ impl PyPkt {
         Ok(self.inner.has_layer(proto_by_name(name)?))
     }
 
+    fn layer_offset(&self, layer: usize) -> Option<usize> {
+        self.inner.layers().get(layer).map(|s| s.off as usize)
+    }
+
     fn layer_index(&self, name: &str) -> PyResult<Option<usize>> {
         Ok(self.inner.find_layer(proto_by_name(name)?))
     }

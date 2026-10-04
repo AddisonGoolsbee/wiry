@@ -111,6 +111,39 @@ impl ProtoId {
     pub const BgpUpdate: ProtoId = ProtoId(99);
     pub const BgpNotification: ProtoId = ProtoId(100);
     pub const BgpRouteRefresh: ProtoId = ProtoId(101);
+    pub const NTPSystemStatusPacket: ProtoId = ProtoId(1005);
+    pub const NTPPeerStatusPacket: ProtoId = ProtoId(1006);
+    pub const NTPClockStatusPacket: ProtoId = ProtoId(1007);
+    pub const NTPErrorStatusPacket: ProtoId = ProtoId(1008);
+    pub const NTPInfoPeerList: ProtoId = ProtoId(1011);
+    pub const NTPInfoPeerStats: ProtoId = ProtoId(1014);
+    pub const NTPInfoSysStats: ProtoId = ProtoId(1017);
+    pub const NTPInfoIOStats: ProtoId = ProtoId(1019);
+    pub const NTPInfoTimerStats: ProtoId = ProtoId(1020);
+    pub const NTPConfPeer: ProtoId = ProtoId(1021);
+    pub const NTPConfUnpeer: ProtoId = ProtoId(1022);
+    pub const NTPConfRestrict: ProtoId = ProtoId(1023);
+    pub const NTPInfoKernel: ProtoId = ProtoId(1024);
+    pub const NTPInfoIfStatsIPv4: ProtoId = ProtoId(1025);
+    pub const NTPInfoIfStatsIPv6: ProtoId = ProtoId(1026);
+    pub const NTPInfoMonitor1: ProtoId = ProtoId(1027);
+    pub const NTPInfoAuth: ProtoId = ProtoId(1028);
+    pub const NTPConfTrap: ProtoId = ProtoId(1029);
+    pub const NTPInfoControl: ProtoId = ProtoId(1030);
+    pub const NTPPrivateReqPacket: ProtoId = ProtoId(1031);
+    pub const PPPoETag: ProtoId = ProtoId(1102);
+    pub const PPPoEDTags: ProtoId = ProtoId(1103);
+    pub const HDLC: ProtoId = ProtoId(1104);
+    pub const DIRPPP: ProtoId = ProtoId(1105);
+    pub const PPPECPOptionOUI: ProtoId = ProtoId(1115);
+    pub const PPPLCPMRUOption: ProtoId = ProtoId(1119);
+    pub const PPPLCPACCMOption: ProtoId = ProtoId(1120);
+    pub const PPPLCPQualityProtocolOption: ProtoId = ProtoId(1122);
+    pub const PPPLCPMagicNumberOption: ProtoId = ProtoId(1123);
+    pub const PPPLCPCallbackOption: ProtoId = ProtoId(1124);
+    pub const PPPLCPTerminate: ProtoId = ProtoId(1126);
+    pub const PPPLCPDiscardRequest: ProtoId = ProtoId(1129);
+    pub const PPPLCPEcho: ProtoId = ProtoId(1130);
     // protogen:ids end
 
     pub fn name(self) -> &'static str {
@@ -277,6 +310,39 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::BgpUpdate,
     ProtoId::BgpNotification,
     ProtoId::BgpRouteRefresh,
+    ProtoId::NTPSystemStatusPacket,
+    ProtoId::NTPPeerStatusPacket,
+    ProtoId::NTPClockStatusPacket,
+    ProtoId::NTPErrorStatusPacket,
+    ProtoId::NTPInfoPeerList,
+    ProtoId::NTPInfoPeerStats,
+    ProtoId::NTPInfoSysStats,
+    ProtoId::NTPInfoIOStats,
+    ProtoId::NTPInfoTimerStats,
+    ProtoId::NTPConfPeer,
+    ProtoId::NTPConfUnpeer,
+    ProtoId::NTPConfRestrict,
+    ProtoId::NTPInfoKernel,
+    ProtoId::NTPInfoIfStatsIPv4,
+    ProtoId::NTPInfoIfStatsIPv6,
+    ProtoId::NTPInfoMonitor1,
+    ProtoId::NTPInfoAuth,
+    ProtoId::NTPConfTrap,
+    ProtoId::NTPInfoControl,
+    ProtoId::NTPPrivateReqPacket,
+    ProtoId::PPPoETag,
+    ProtoId::PPPoEDTags,
+    ProtoId::HDLC,
+    ProtoId::DIRPPP,
+    ProtoId::PPPECPOptionOUI,
+    ProtoId::PPPLCPMRUOption,
+    ProtoId::PPPLCPACCMOption,
+    ProtoId::PPPLCPQualityProtocolOption,
+    ProtoId::PPPLCPMagicNumberOption,
+    ProtoId::PPPLCPCallbackOption,
+    ProtoId::PPPLCPTerminate,
+    ProtoId::PPPLCPDiscardRequest,
+    ProtoId::PPPLCPEcho,
     // protogen:builtins end
 ];
 
@@ -401,6 +467,39 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::BgpUpdate.0 as usize] = &bgp_update::DESC;
     t[ProtoId::BgpNotification.0 as usize] = &bgp_notification::DESC;
     t[ProtoId::BgpRouteRefresh.0 as usize] = &bgp_route_refresh::DESC;
+    t[ProtoId::NTPSystemStatusPacket.0 as usize] = &ntp_ntpsystemstatuspacket::DESC;
+    t[ProtoId::NTPPeerStatusPacket.0 as usize] = &ntp_ntppeerstatuspacket::DESC;
+    t[ProtoId::NTPClockStatusPacket.0 as usize] = &ntp_ntpclockstatuspacket::DESC;
+    t[ProtoId::NTPErrorStatusPacket.0 as usize] = &ntp_ntperrorstatuspacket::DESC;
+    t[ProtoId::NTPInfoPeerList.0 as usize] = &ntp_ntpinfopeerlist::DESC;
+    t[ProtoId::NTPInfoPeerStats.0 as usize] = &ntp_ntpinfopeerstats::DESC;
+    t[ProtoId::NTPInfoSysStats.0 as usize] = &ntp_ntpinfosysstats::DESC;
+    t[ProtoId::NTPInfoIOStats.0 as usize] = &ntp_ntpinfoiostats::DESC;
+    t[ProtoId::NTPInfoTimerStats.0 as usize] = &ntp_ntpinfotimerstats::DESC;
+    t[ProtoId::NTPConfPeer.0 as usize] = &ntp_ntpconfpeer::DESC;
+    t[ProtoId::NTPConfUnpeer.0 as usize] = &ntp_ntpconfunpeer::DESC;
+    t[ProtoId::NTPConfRestrict.0 as usize] = &ntp_ntpconfrestrict::DESC;
+    t[ProtoId::NTPInfoKernel.0 as usize] = &ntp_ntpinfokernel::DESC;
+    t[ProtoId::NTPInfoIfStatsIPv4.0 as usize] = &ntp_ntpinfoifstatsipv4::DESC;
+    t[ProtoId::NTPInfoIfStatsIPv6.0 as usize] = &ntp_ntpinfoifstatsipv6::DESC;
+    t[ProtoId::NTPInfoMonitor1.0 as usize] = &ntp_ntpinfomonitor1::DESC;
+    t[ProtoId::NTPInfoAuth.0 as usize] = &ntp_ntpinfoauth::DESC;
+    t[ProtoId::NTPConfTrap.0 as usize] = &ntp_ntpconftrap::DESC;
+    t[ProtoId::NTPInfoControl.0 as usize] = &ntp_ntpinfocontrol::DESC;
+    t[ProtoId::NTPPrivateReqPacket.0 as usize] = &ntp_ntpprivatereqpacket::DESC;
+    t[ProtoId::PPPoETag.0 as usize] = &ppp_pppoetag::DESC;
+    t[ProtoId::PPPoEDTags.0 as usize] = &ppp_pppoed_tags::DESC;
+    t[ProtoId::HDLC.0 as usize] = &ppp_hdlc::DESC;
+    t[ProtoId::DIRPPP.0 as usize] = &ppp_dir_ppp::DESC;
+    t[ProtoId::PPPECPOptionOUI.0 as usize] = &ppp_ppp_ecp_option_oui::DESC;
+    t[ProtoId::PPPLCPMRUOption.0 as usize] = &ppp_ppp_lcp_mru_option::DESC;
+    t[ProtoId::PPPLCPACCMOption.0 as usize] = &ppp_ppp_lcp_accm_option::DESC;
+    t[ProtoId::PPPLCPQualityProtocolOption.0 as usize] = &ppp_ppp_lcp_quality_protocol_option::DESC;
+    t[ProtoId::PPPLCPMagicNumberOption.0 as usize] = &ppp_ppp_lcp_magic_number_option::DESC;
+    t[ProtoId::PPPLCPCallbackOption.0 as usize] = &ppp_ppp_lcp_callback_option::DESC;
+    t[ProtoId::PPPLCPTerminate.0 as usize] = &ppp_ppp_lcp_terminate::DESC;
+    t[ProtoId::PPPLCPDiscardRequest.0 as usize] = &ppp_ppp_lcp_discard_request::DESC;
+    t[ProtoId::PPPLCPEcho.0 as usize] = &ppp_ppp_lcp_echo::DESC;
     // protogen:desc end
     t
 };
@@ -546,6 +645,7 @@ pub fn group_of(id: ProtoId) -> Option<&'static crate::repeat::GroupDesc> {
         ProtoId::OspfLsUpd => Some(&crate::layers::ospf_lsupd::GROUP),
         ProtoId::OspfLsAck => Some(&crate::layers::ospf_lsack::GROUP),
         ProtoId::BgpOpen => Some(&crate::layers::bgp_open::GROUP),
+        ProtoId::PPPoEDTags => Some(&crate::layers::ppp_pppoed_tags::GROUP),
         // protogen:groups end
         _ => None,
     }
@@ -611,6 +711,7 @@ pub fn parsed_field_name(id: ProtoId) -> &'static str {
         ProtoId::OspfLsAck => "lsaheaders",
         ProtoId::BgpOpen => "opt_params",
         ProtoId::BgpUpdate => "body",
+        ProtoId::PPPoEDTags => "tag_list",
         // protogen:parsed end
         _ => "options",
     }

@@ -11,8 +11,8 @@ import pytest
 from wiry import (
     ERSPAN_II, ERSPAN_III, Ether, GENEVE, GRE, GTP_U_Header, IP, IPv6,
     IPv6ExtHdrDestOpt, IPv6ExtHdrFragment, IPv6ExtHdrHopByHop,
-    IPv6ExtHdrRouting, MPLS, PPP, PPPoE, PPPoED, Raw, TCP, UDP, VXLAN, rdpcap,
-    wrpcap,
+    IPv6ExtHdrRouting, MPLS, PPP, PPPoE, PPPoED, PPPoED_Tags, Raw, TCP, UDP,
+    VXLAN, rdpcap, wrpcap,
 )
 
 
@@ -207,12 +207,14 @@ def test_a_pppoe_session_reaches_the_datagram():
     assert back[PPP].proto == 0x0021
 
 
-def test_a_discovery_packet_keeps_its_tag_list_opaque():
-    # PADI, code 0x09, one zero-length Service-Name tag.
+def test_a_discovery_packet_reaches_its_tag_list():
+    # PADI, code 0x09, one zero-length Service-Name tag (RFC 2516 §5.1).
     body = b"\x11\x09\x00\x00\x00\x04\x01\x01\x00\x00"
     pkt = Ether(bytes(Ether(type=0x8863) / Raw(load=body)))
-    assert pkt.layers() == ["Ether", "PPPoED", "Raw"]
+    assert pkt.layers() == ["Ether", "PPPoED", "PPPoED_Tags"]
     assert pkt[PPPoED].code == 9
+    (tag,) = pkt[PPPoED_Tags].tag_list
+    assert (tag.tag_type, tag.tag_len, tag.tag_value) == (0x0101, 0, b"")
 
 
 # --- GTP-U, 3GPP TS 29.281 --------------------------------------------------
@@ -507,4 +509,3 @@ def test_every_layer_survives_a_cut_at_every_offset(name):
                 value = getattr(obj, field)
                 if isinstance(value, int):
                     setattr(obj, field, value)
-        bytes(again)

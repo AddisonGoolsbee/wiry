@@ -258,12 +258,27 @@ pub fn by_icmpv6_type_of(p: ProtoId) -> Option<u8> {
 }
 
 #[inline]
-pub fn by_layer(_parent: ProtoId, _hdr: &[u8]) -> Option<ProtoId> {
+pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
+    match parent {
+        ProtoId::PppoeDisc => by_pppoe_disc(hdr),
+        _ => None,
+    }
+}
+
+#[inline(never)]
+fn by_pppoe_disc(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 && crate::field::read_bits(hdr, 4, 4) == 1 {
+        return Some(ProtoId::PPPoEDTags);
+    }
     None
 }
 
 #[inline]
-pub fn bind_layer(_hdr: &mut [u8], _parent: ProtoId, _child: ProtoId) {}
+pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
+    if parent == ProtoId::PppoeDisc && child == ProtoId::PPPoEDTags {
+        crate::field::write_bits(hdr, 4, 4, 1);
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -305,6 +320,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A parent's field is placed by the spec that binds under it, which
+    /// for a hand-written parent is a claim about a table protogen cannot
+    /// see. The engine's own table has to agree, or dispatch reads the
+    /// wrong bits.
+    #[test]
+    fn every_parent_field_is_where_the_bindings_read_it() {
+        assert_eq!(
+            crate::proto::field_of(ProtoId::PppoeDisc, "type").map(|f| (f.bit_off, f.bit_len)),
+            Some((4, 4))
+        );
     }
 
     /// The reverse map is what stacking a layer writes, so a port it
