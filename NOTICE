@@ -106,6 +106,8 @@ per-file blocks are authoritative.
 | `python/wiry/asn1fields.py` | `scapy/asn1fields.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/asn1packet.py` | `scapy/asn1packet.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/snmp.py` | `scapy/layers/snmp.py` | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/layers/x509.py` | `scapy/layers/x509.py` | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/_pyfields.py` | `scapy/fields.py` (`MultipleTypeField`, `PacketField`) | master / `e2e35c0` | 2026-10-03 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift

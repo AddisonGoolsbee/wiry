@@ -113,8 +113,11 @@ def parse_uts(path):
 
 # Standard-library names `from scapy.all import *` leaks into a UTscapy
 # session, which scapy's tests use without importing. They are not wiry's API.
+# `base64` is not one of them: scapy's CI runs every campaign in one session,
+# and x509.uts uses the `base64` inet.uts imported.
 _SCAPY_ALL_STDLIB = (
-    "abc", "argparse", "atexit", "builtins", "calendar", "code", "collections",
+    "abc", "argparse", "atexit", "base64", "builtins", "calendar", "code",
+    "collections",
     "copy", "ctypes", "dataclasses", "decimal", "difflib", "enum", "errno",
     "functools", "getopt", "gzip", "hashlib", "hmac", "html", "importlib",
     "inspect", "io", "itertools", "json", "locale", "logging", "math",

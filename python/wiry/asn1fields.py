@@ -27,6 +27,9 @@ from .asn1.asn1 import (
     ASN1_Object,
     ASN1_STRING,
     GeneralizedTime,
+    PyRandChoice as RandChoice,
+    PyRandNum as RandNum,
+    PyRandString as RandString,
     RandOID,
 )
 from .asn1.ber import (
@@ -35,7 +38,6 @@ from .asn1.ber import (
     Elements,
 )
 from ._pylayer import PyPacket, PyRaw, fuzz as _fuzz
-from .volatile import RandChoice, RandInt, RandNum, RandString
 
 from typing import (
     Any,
@@ -263,7 +265,7 @@ class ASN1F_field(ASN1F_element, Generic[_I, _A]):
         return repr(self)
 
     def randval(self):
-        return RandInt()
+        return RandNum(0, 2**32 - 1)
 
     def copy(self):
         return copy.copy(self)

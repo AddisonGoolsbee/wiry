@@ -55,67 +55,9 @@ _DISCOVER = ("ls", "lsc", "explore", "field_table", "FieldInfo")
 
 _CONSOLE = ("interact", "save_session", "load_session")
 
-# scapy's ASN.1 surface, by the module that defines each name.
-_ASN1 = {
-    "asn1.asn1": (
-        "ASN1_Error", "ASN1_Encoding_Error", "ASN1_Decoding_Error",
-        "ASN1_BadTag_Decoding_Error", "ASN1Codec", "ASN1_Codecs", "ASN1Tag",
-        "ASN1_Class", "ASN1_Class_UNIVERSAL", "ASN1_Object",
-        "ASN1_DECODING_ERROR", "ASN1_force", "ASN1_BADTAG", "ASN1_INTEGER",
-        "ASN1_BOOLEAN", "ASN1_BIT_STRING", "ASN1_STRING", "ASN1_NULL",
-        "ASN1_OID", "ASN1_ENUMERATED", "ASN1_UTF8_STRING",
-        "ASN1_NUMERIC_STRING", "ASN1_PRINTABLE_STRING", "ASN1_T61_STRING",
-        "ASN1_VIDEOTEX_STRING", "ASN1_IA5_STRING", "ASN1_GENERAL_STRING",
-        "ASN1_GENERALIZED_TIME", "ASN1_UTC_TIME", "ASN1_ISO646_STRING",
-        "ASN1_UNIVERSAL_STRING", "ASN1_BMP_STRING", "ASN1_SEQUENCE",
-        "ASN1_SET", "ASN1_IPADDRESS", "ASN1_COUNTER32", "ASN1_COUNTER64",
-        "ASN1_GAUGE32", "ASN1_TIME_TICKS", "RandASN1Object", "RandOID",
-        "GeneralizedTime", "IntAutoTime",
-    ),
-    "asn1.ber": (
-        "BER_Exception", "BER_Encoding_Error", "BER_Decoding_Error",
-        "BER_BadTag_Decoding_Error", "BER_len_enc", "BER_len_dec",
-        "BER_num_enc", "BER_num_dec", "BER_id_dec", "BER_id_enc",
-        "BER_tagging_dec", "BER_tagging_enc", "BERcodec_Object",
-        "BERcodec_INTEGER", "BERcodec_BOOLEAN", "BERcodec_BIT_STRING",
-        "BERcodec_STRING", "BERcodec_NULL", "BERcodec_OID",
-        "BERcodec_ENUMERATED", "BERcodec_UTF8_STRING",
-        "BERcodec_NUMERIC_STRING", "BERcodec_PRINTABLE_STRING",
-        "BERcodec_T61_STRING", "BERcodec_VIDEOTEX_STRING",
-        "BERcodec_IA5_STRING", "BERcodec_GENERAL_STRING",
-        "BERcodec_UTC_TIME", "BERcodec_GENERALIZED_TIME",
-        "BERcodec_ISO646_STRING", "BERcodec_UNIVERSAL_STRING",
-        "BERcodec_BMP_STRING", "BERcodec_SEQUENCE", "BERcodec_SET",
-        "BERcodec_IPADDRESS", "BERcodec_COUNTER32", "BERcodec_COUNTER64",
-        "BERcodec_GAUGE32", "BERcodec_TIME_TICKS",
-    ),
-    "asn1.mib": ("MIBDict", "load_mib"),
-    "asn1fields": (
-        "ASN1F_badsequence", "ASN1F_element", "ASN1F_field", "ASN1F_BOOLEAN",
-        "ASN1F_INTEGER", "ASN1F_enum_INTEGER", "ASN1F_BIT_STRING",
-        "ASN1F_STRING", "ASN1F_NULL", "ASN1F_OID", "ASN1F_ENUMERATED",
-        "ASN1F_UTF8_STRING", "ASN1F_NUMERIC_STRING", "ASN1F_PRINTABLE_STRING",
-        "ASN1F_T61_STRING", "ASN1F_VIDEOTEX_STRING", "ASN1F_IA5_STRING",
-        "ASN1F_GENERAL_STRING", "ASN1F_UTC_TIME", "ASN1F_GENERALIZED_TIME",
-        "ASN1F_ISO646_STRING", "ASN1F_UNIVERSAL_STRING", "ASN1F_BMP_STRING",
-        "ASN1F_SEQUENCE", "ASN1F_SET", "ASN1F_SEQUENCE_OF", "ASN1F_SET_OF",
-        "ASN1F_IPADDRESS", "ASN1F_TIME_TICKS", "ASN1F_optional", "ASN1F_omit",
-        "ASN1F_CHOICE", "ASN1F_PACKET", "ASN1F_BIT_STRING_ENCAPS",
-        "ASN1F_FLAGS", "ASN1F_STRING_PacketField", "ASN1F_STRING_ENCAPS",
-    ),
-    "asn1packet": ("ASN1_Packet",),
-    "layers.snmp": (
-        "SNMP", "SNMPvarbind", "SNMPget", "SNMPnext", "SNMPresponse",
-        "SNMPset", "SNMPtrapv1", "SNMPbulk", "SNMPinform", "SNMPtrapv2",
-        "ASN1_Class_SNMP", "snmpget", "snmpwalk",
-    ),
-}
-_ASN1_HOME = {n: m for m, names in _ASN1.items() for n in names}
+from ._pynames import EXPORTS as _PY_EXPORTS, PY_MODELLED as _PY_MODELLED  # noqa: E402
 
-# Rust layers whose scapy contract is a tree of Python objects. The Rust layer
-# stays in the dissection chain, so a capture of them is found, counted and
-# filtered without Python; the name exported is the Python model.
-_PY_MODELLED = {"SNMP": "layers.snmp"}
+_PY_HOME = {n: m for m, names in _PY_EXPORTS.items() for n in names}
 
 _EAGER = (
     "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
@@ -132,7 +74,7 @@ _EAGER = (
 __all__ = list(
     _EAGER + _COLUMNAR + _FRAG + _STREAM + _DESCRIBE + _CAPTURE + _TOOLS
     + _SOCKETS + _AUTOMATON + _ANSMACHINE + _ROUTE + _DISCOVER + _CONSOLE
-    + tuple(_ASN1_HOME)
+    + tuple(_PY_HOME)
 )
 
 
@@ -173,9 +115,9 @@ def __getattr__(name: str) -> Any:
     if name in _ROUTE:
         from . import route
         return getattr(route, name)
-    if name in _ASN1_HOME:
+    if name in _PY_HOME:
         import importlib
-        return getattr(importlib.import_module("." + _ASN1_HOME[name], __name__), name)
+        return getattr(importlib.import_module("." + _PY_HOME[name], __name__), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
