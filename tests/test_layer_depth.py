@@ -191,15 +191,15 @@ def test_names_end_in_the_root_dot_and_escape_a_dot_inside_a_label():
 # --- RFC 2018 SACK ----------------------------------------------------------
 
 
-def test_sack_blocks_read_as_edge_pairs_and_encode_back():
+def test_sack_blocks_read_as_scapys_flat_edge_tuple_and_encode_back():
     pkt = IP() / TCP(
         options=[("SAckOK", None), ("SAck", [(1000, 2000), (3000, 4000)])]
     )
     raw = bytes(pkt)
     back = IP(raw)
     assert back[TCP].options == [
-        ("SAckOK", None),
-        ("SAck", [(1000, 2000), (3000, 4000)]),
+        ("SAckOK", b""),
+        ("SAck", (1000, 2000, 3000, 4000)),
     ]
     again = IP() / TCP(options=back[TCP].options)
     assert bytes(again)[20:] == raw[20:]

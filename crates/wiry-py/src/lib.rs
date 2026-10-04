@@ -14,7 +14,7 @@ mod writer;
 
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PySequence};
+use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PySequence, PyTuple};
 use std::collections::HashMap;
 use std::sync::Arc;
 use wiry_capture::Flow;
@@ -209,6 +209,8 @@ fn options_to_py(py: Python<'_>, items: &[Item]) -> PyResult<Py<PyList>> {
     let out = PyList::empty_bound(py);
     for it in items {
         let v: PyObject = match &it.value {
+            // scapy keeps SAckOK's empty value as an empty string.
+            ItemValue::Flag if it.name.as_ref() == "SAckOK" => PyBytes::new_bound(py, b"").into(),
             ItemValue::Flag => py.None(),
             ItemValue::Uint(n) => n.into_py(py),
             ItemValue::Pair(a, b) => (*a, *b).into_py(py),
@@ -219,7 +221,11 @@ fn options_to_py(py: Python<'_>, items: &[Item]) -> PyResult<Py<PyList>> {
                 .map(|a| format!("{}.{}.{}.{}", a[0], a[1], a[2], a[3]))
                 .collect::<Vec<_>>()
                 .into_py(py),
-            ItemValue::Pairs(l) => PyList::new_bound(py, l).into(),
+            // A SACK block list is one flat tuple of edges in scapy.
+            ItemValue::Pairs(l) => {
+                let edges: Vec<u64> = l.iter().flat_map(|(a, b)| [*a, *b]).collect();
+                PyTuple::new_bound(py, edges).into()
+            }
             ItemValue::Items(v) => options_to_py(py, v)?.into_py(py),
         };
         out.append((it.name.as_ref(), v))?;

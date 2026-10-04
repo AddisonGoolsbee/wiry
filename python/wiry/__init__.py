@@ -1194,15 +1194,7 @@ class Packet(metaclass=_PacketMeta):
         names = self.layers()
         for i, n in enumerate(names):
             if field in _b.layer_fields(n):
-                gen = self._generator_at(i, field)
-                if gen is not None:
-                    return gen
-                value = self._materialize().get_field(i, field)
-                if field in _FLAG_FIELDS:
-                    flags = _flag_names(n, field)
-                    if flags is not None:
-                        return FlagValue.from_str(value, flags, self, i, field)
-                return value
+                return getattr(_LayerView(self, i, n), field)
         raise AttributeError(f"no field {field!r} in {' / '.join(names)}")
 
     def __setattr__(self, field: str, value: Any) -> None:

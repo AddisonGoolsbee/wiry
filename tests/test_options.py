@@ -35,7 +35,7 @@ def test_reads_a_realistic_syn_option_block():
     pkt = Ether(_tcp_with(opts))
     assert pkt[TCP].options == [
         ("MSS", 1460),
-        ("SAckOK", None),
+        ("SAckOK", b""),
         ("NOP", None),
         ("WScale", 7),
         ("EOL", None),
@@ -79,8 +79,8 @@ def test_a_layer_without_an_option_region_reports_none_shaped_result():
     "opts, padded",
     [
         ([("MSS", 1460)], False),
-        ([("MSS", 1460), ("SAckOK", None)], True),
-        ([("MSS", 1460), ("SAckOK", None), ("NOP", None), ("WScale", 7)], True),
+        ([("MSS", 1460), ("SAckOK", b"")], True),
+        ([("MSS", 1460), ("SAckOK", b""), ("NOP", None), ("WScale", 7)], True),
         ([("Timestamp", (111, 222))], True),
         ([("WScale", 7)], True),
     ],
