@@ -539,13 +539,15 @@ def test_smb2_reads_its_little_endian_fields():
     assert pkt["SMB2_Header"].StructureSize == 64
 
 
-def test_ldap_names_its_protocol_operation():
+def test_ldap_dissects_into_scapys_object_tree():
     """RFC 4511 §4.2."""
     body = bytes([0x30, 0x0C, 0x02, 0x01, 0x01, 0x60, 0x07, 0x02,
                   0x01, 0x03, 0x04, 0x00, 0x80, 0x00])
-    got = dict(Ether(tcp_frame(body, dport=389))["LDAP"].vars)
-    assert got["messageID"] == 1
-    assert got["protocolOp"] == "bindRequest"
+    ldap = Ether(tcp_frame(body, dport=389))[B.LDAP]
+    assert ldap.messageID.val == 1
+    assert isinstance(ldap.protocolOp, B.LDAP_BindRequest)
+    assert ldap.protocolOp.version.val == 3
+    assert ldap.protocolOp.authentication.val == b""
 
 
 def test_nbt_session_service_carries_smb2():

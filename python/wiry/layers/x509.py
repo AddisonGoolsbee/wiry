@@ -56,7 +56,7 @@ from ..asn1fields import (
     ASN1F_UTC_TIME,
     ASN1F_UTF8_STRING,
 )
-from .._pylayer import PyPacket as Packet, PyRaw
+from .._pylayer import PyPacket, PyRaw
 from .._pyfields import MultipleTypeField, PacketField
 
 
@@ -1237,7 +1237,7 @@ class _PacketFieldRaw(PacketField):
         return remain, i
 
 
-class ECDSAPrivateKey_OpenSSL(Packet):
+class ECDSAPrivateKey_OpenSSL(PyPacket):
     name = "ECDSA Params + Private Key"
     fields_desc = [
         _PacketFieldRaw("ecparam", ECParameters(), ECParameters),

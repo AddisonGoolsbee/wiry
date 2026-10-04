@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# Derived from scapy: scapy/fields.py (MultipleTypeField, PacketField)
+# Derived from scapy: scapy/fields.py (MultipleTypeField, PacketField, Field,
+#   FieldLenField, StrLenField)
 #   scapy master, upstream commit e2e35c0
 #   Copyright (C) Philippe Biondi and the scapy contributors
 #
 # Changed by the wiry authors:
-#   2026-10-03 — transcribed the two generic fields X.509 builds on.
+#   2026-10-03 — transcribed the generic fields X.509 and LDAP build on.
 """The generic scapy fields Python-modelled layers need beyond ASN.1."""
 
 from __future__ import annotations
 
 import inspect
+import struct
 from typing import Any
 
 from ._pylayer import PyField, PyPacket, PyPadding, fuzz
@@ -156,3 +158,83 @@ class PacketField(PyField):
     def randval(self) -> Any:
         return fuzz(self.cls())
 
+
+
+class Field(PyField):
+    """A fixed-width value packed with a `struct` format."""
+
+    def __init__(self, name: str, default: Any, fmt: str = "H"):
+        super().__init__(name, default)
+        self.fmt = fmt if fmt[0] in "@=<>!" else "!" + fmt
+        self.struct = struct.Struct(self.fmt)
+        self.sz = self.struct.size
+
+    def i2m(self, pkt: Any, x: Any) -> Any:
+        return 0 if x is None else x
+
+    def m2i(self, pkt: Any, x: Any) -> Any:
+        return x
+
+    def i2len(self, pkt: Any, x: Any) -> int:
+        return self.sz
+
+    def addfield(self, pkt: Any, s: bytes, val: Any) -> bytes:
+        return s + self.struct.pack(self.i2m(pkt, val))
+
+    def getfield(self, pkt: Any, s: bytes) -> tuple:
+        return s[self.sz:], self.m2i(pkt, self.struct.unpack_from(s)[0])
+
+
+class FieldLenField(Field):
+    """The length of another field, computed when left as None."""
+
+    def __init__(self, name: str, default: Any, length_of: Any = None,
+                 fmt: str = "H", count_of: Any = None,
+                 adjust: Any = lambda pkt, x: x):
+        super().__init__(name, default, fmt)
+        self.length_of = length_of
+        self.count_of = count_of
+        self.adjust = adjust
+
+    def i2m(self, pkt: Any, x: Any) -> Any:
+        if x is None and pkt is not None:
+            if self.length_of is not None:
+                fld, fval = pkt.getfield_and_val(self.length_of)
+                f = fld.i2len(pkt, fval)
+            elif self.count_of is not None:
+                fld, fval = pkt.getfield_and_val(self.count_of)
+                f = fld.i2count(pkt, fval)
+            else:
+                raise ValueError("Field should have either length_of or count_of")
+            x = self.adjust(pkt, f)
+        elif x is None:
+            x = 0
+        return x
+
+
+class StrLenField(PyField):
+    """Octets whose length another field gives."""
+
+    def __init__(self, name: str, default: Any, length_from: Any = None,
+                 max_length: Any = None):
+        super().__init__(name, default)
+        self.length_from = length_from
+        self.max_length = max_length
+
+    def any2i(self, pkt: Any, x: Any) -> Any:
+        return x.encode() if isinstance(x, str) else x
+
+    def i2m(self, pkt: Any, x: Any) -> bytes:
+        return b"" if x is None else bytes(x)
+
+    def i2len(self, pkt: Any, x: Any) -> int:
+        return len(self.i2m(pkt, x))
+
+    def addfield(self, pkt: Any, s: bytes, val: Any) -> bytes:
+        return s + self.i2m(pkt, val)
+
+    def getfield(self, pkt: Any, s: bytes) -> tuple:
+        n = (self.length_from or (lambda x: 0))(pkt)
+        if n == 0:
+            return s, b""
+        return s[n:], s[:n]

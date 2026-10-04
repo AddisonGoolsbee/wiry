@@ -62,7 +62,8 @@ _PY_HOME = {n: m for m, names in _PY_EXPORTS.items() for n in names}
 _EAGER = (
     "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
     "PcapReader", "PcapWriter", "PcapNgWriter", "raw", "hexdump",
-    "hexdump_str", "known_layers", "bind_layers",
+    "hexdump_str", "known_layers", "bind_layers", "bind_bottom_up",
+    "bind_top_down",
     "VolatileValue", "RandNum", "RandByte", "RandShort", "RandInt", "RandLong",
     "RandIP", "RandIP6", "RandMAC", "RandString", "RandBin", "RandChoice",
     "RandEnumKeys", "Net", "Net6", "fuzz", "corrupt_bytes", "corrupt_bits",
@@ -542,6 +543,19 @@ def _py_model(wire: str) -> Any:
     return getattr(importlib.import_module("." + home, __name__), wire)
 
 
+def _bound_py(rust: Any, i: int, lower: str) -> Any:
+    """The Python class `bind_bottom_up` put above layer `i`, if any."""
+    for low, fval, cls in _PY_BOUND:
+        if low != lower:
+            continue
+        try:
+            if all(rust.get_field(i, k) == v for k, v in fval.items()):
+                return cls
+        except KeyError:
+            continue
+    return None
+
+
 def _held(obj: Any) -> "Packet":
     """A one-layer packet carrying a Python-modelled layer: under the Rust
     layer it models, which keeps that layer's binding (UDP port 161 for
@@ -654,7 +668,7 @@ class Packet(metaclass=_PacketMeta):
     _name: str | None = None
 
     __slots__ = ("_stack", "_payload", "_rust", "_written", "time", "wirelen",
-                 "sent_time", "sniffed_on", "_py")
+                 "sent_time", "sniffed_on", "_py", "_original")
 
     def __init__(
         self,
@@ -673,6 +687,7 @@ class Packet(metaclass=_PacketMeta):
         self.sent_time = None
         self.sniffed_on = None
         self._py = None
+        self._original = None
 
     def __truediv__(self, other: "Packet") -> "Packet":
         """Stack another layer beneath this one."""
@@ -689,6 +704,11 @@ class Packet(metaclass=_PacketMeta):
             clone._py_top()[1].add_payload(other.copy() if _is_py(other) else other)
             return clone
         if _is_py(other):
+            bound = _PY_OVERLOAD.get(type(other))
+            if bound is not None and self._spec_live and self._stack[-1][0] == bound[0]:
+                self = self.copy()
+                for k, v in bound[1].items():
+                    self._stack[-1][1].setdefault(k, v)
             other = _held(other.copy())
 
         # A materialised packet cannot be turned back into a field spec:
@@ -839,7 +859,7 @@ class Packet(metaclass=_PacketMeta):
             if self._py_top() is not None:
                 return rust
             self._rust = rust
-        elif self._py:
+        elif type(self._py) is tuple:
             self._sync_py()
         return self._rust
 
@@ -855,9 +875,11 @@ class Packet(metaclass=_PacketMeta):
                     if _is_py(v):
                         return i, v
             return None
-        if self._py is None:
-            self._py = self._decode_py() or False
-        return self._py[:2] if self._py else None
+        # An int records that nothing decoded while that many Python
+        # bindings existed; importing a layer module adds some.
+        if self._py is None or (type(self._py) is int and self._py != len(_PY_BOUND)):
+            self._py = self._decode_py() or len(_PY_BOUND)
+        return self._py[:2] if type(self._py) is tuple else None
 
     def _decode_py(self) -> Any:
         rust = self._rust
@@ -865,11 +887,14 @@ class Packet(metaclass=_PacketMeta):
             return None
         names = rust.layer_names()
         for i, n in enumerate(names):
-            if n not in _PY_MODELLED:
+            cls = _py_model(n) if n in _PY_MODELLED else None
+            if cls is None and n == "Raw" and i:
+                cls = _bound_py(rust, i - 1, names[i - 1])
+            if cls is None:
                 continue
             data = rust.payload(i - 1) if i else rust.to_bytes()
             try:
-                obj = _py_model(n)(data)
+                obj = cls(data)
             except Exception:
                 from .capture import conf
                 if conf.debug_dissector:
@@ -880,12 +905,33 @@ class Packet(metaclass=_PacketMeta):
             return i, obj, bytes(obj)
         return None
 
+    def _keep_original(self) -> None:
+        if self._original is None and not self._stack and self._rust is not None:
+            self._original = self._rust.to_bytes()
+
+    @property
+    def original(self) -> bytes:
+        """The octets this packet was dissected from, before any change."""
+        if self._original is not None:
+            return self._original
+        if self._rust is not None and not self._stack:
+            return self._rust.to_bytes()
+        return b""
+
+    def clear_cache(self) -> None:
+        """Re-encode a Python-modelled layer from its fields on the next build;
+        the Rust layers have no cache, their octets being the packet."""
+        top = self._py_top()
+        if top is not None:
+            top[1].clear_cache()
+
     def _sync_py(self) -> None:
         """Write a changed Python layer back into the octets."""
         i, obj, built = self._py
         now = bytes(obj)
         if now == built:
             return
+        self._keep_original()
         if i:
             self._rust.set_payload(i - 1, now)
         else:
@@ -916,6 +962,7 @@ class Packet(metaclass=_PacketMeta):
 
     def _set(self, layer: int, field: str, value: Any) -> None:
         if self._rust is not None:
+            self._keep_original()
             self._written = True
             if isinstance(value, (bool, FlagValue)):
                 self._rust.set_field(layer, field, int(value))
@@ -1381,9 +1428,46 @@ _RUNTIME_BINDS: list[tuple[str, str, list]] = []
 def bind_layers(lower: Any, upper: Any, **conds: Any) -> None:
     """Make dissection reach `upper` from `lower` when every named field of
     `lower` holds the given value, and stacking write those values back."""
+    if _is_py_class(upper):
+        bind_top_down(lower, upper, **conds)
+        bind_bottom_up(lower, upper, **conds)
+        return
     low, up = _layer_name(lower), _layer_name(upper)
     _b.bind_layer(low, up, list(conds.items()))
     _RUNTIME_BINDS.append((low, up, list(conds.items())))
+
+
+# Python-modelled layers reached from a Rust layer, as (lower layer name,
+# field values, class): a dissected packet decodes the Raw payload of such a
+# lower layer as that class on first ask. Kept in Python, so the bulk paths
+# see that payload as Raw.
+_PY_BOUND: list = []
+
+# Python-modelled class -> (lower layer name, field values written into that
+# layer when the class is stacked on it, unless set already).
+_PY_OVERLOAD: dict = {}
+
+
+def bind_bottom_up(lower: Any, upper: Any, **fval: Any) -> None:
+    """Dissection only: reach `upper` from `lower` when `fval` holds."""
+    if not _is_py_class(upper):
+        raise NotImplementedError(
+            "a binding between Rust layers goes both ways; use bind_layers")
+    if _is_py_class(lower):
+        lower.payload_guess = lower.payload_guess[:] + [(fval, upper)]
+    else:
+        _PY_BOUND.append((_layer_name(lower), dict(fval), upper))
+
+
+def bind_top_down(lower: Any, upper: Any, **fval: Any) -> None:
+    """Building only: stacking `upper` on `lower` writes `fval` into it."""
+    if not _is_py_class(upper):
+        raise NotImplementedError(
+            "a binding between Rust layers goes both ways; use bind_layers")
+    if _is_py_class(lower):
+        upper._overload_fields = {**upper._overload_fields, lower: fval}
+    else:
+        _PY_OVERLOAD[upper] = (_layer_name(lower), dict(fval))
 
 
 class PacketList:

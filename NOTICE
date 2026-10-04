@@ -91,6 +91,7 @@ per-file blocks are authoritative.
 | `crates/wiry-core/src/layers/rtp.rs` | `scapy/layers/rtp.py` | scapy 2.7.0 | 2026-09-18 |
 | `crates/wiry-core/src/layers/sctp.rs` | `scapy/layers/sctp.py` | scapy 2.7.0 | 2026-09-18 |
 | `crates/wiry-core/src/layers/snmp.rs` | `scapy/layers/snmp.py` (field and class names) | master / `e2e35c0` | 2026-10-03 |
+| `crates/wiry-core/src/layers/ldap.rs` | `scapy/layers/ldap.py` (class names) | master / `e2e35c0` | 2026-10-03 |
 | `crates/wiry-pcap/src/sys.rs` | `scapy/libs/winpcapy.py`, `scapy/libs/structures.py` | 2.7.0 / `7d69454` | 2026-09-18 |
 | `crates/wiry-pcap/src/lib.rs` | `scapy/libs/winpcapy.py`, `scapy/arch/libpcap.py` | 2.7.0 / `7d69454` | 2026-09-18 |
 | `crates/wiry-capture/src/pcap_backend.rs` | `scapy/interfaces.py` | 2.7.0 / `7d69454` | 2026-09-18 |
@@ -108,7 +109,8 @@ per-file blocks are authoritative.
 | `python/wiry/asn1packet.py` | `scapy/asn1packet.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/snmp.py` | `scapy/layers/snmp.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/x509.py` | `scapy/layers/x509.py` | master / `e2e35c0` | 2026-10-03 |
-| `python/wiry/_pyfields.py` | `scapy/fields.py` (`MultipleTypeField`, `PacketField`) | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/layers/ldap.py` | `scapy/layers/ldap.py` | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/_pyfields.py` | `scapy/fields.py` (`MultipleTypeField`, `PacketField`, `Field`, `FieldLenField`, `StrLenField`) | master / `e2e35c0` | 2026-10-03 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift

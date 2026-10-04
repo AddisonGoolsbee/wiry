@@ -97,6 +97,29 @@ def test_the_bulk_path_and_the_object_tree_agree(tmp_path):
         assert items == as_items(pl[i][SNMP]), i
 
 
+def test_ldaps_bulk_items_name_the_operation_its_object_tree_holds(tmp_path):
+    from wiry import (LDAP, LDAP_BindRequest, LDAP_SearchRequest,
+                      LDAP_UnbindRequest, LDAP_Authentication_simple, TCP)
+
+    msgs = [
+        LDAP(messageID=1, protocolOp=LDAP_BindRequest(
+            bind_name=b"cn=a", authentication=LDAP_Authentication_simple(b"pw"))),
+        LDAP(messageID=2, protocolOp=LDAP_SearchRequest(baseObject=b"dc=x")),
+        LDAP(messageID=300, protocolOp=LDAP_UnbindRequest()),
+    ]
+    frames = [Ether() / IP() / TCP(sport=50000, dport=389, flags="PA") / m
+              for m in msgs]
+    path = tmp_path / "ldap.pcap"
+    wrpcap(str(path), frames)
+    pl = rdpcap(str(path))
+    bulk = pl.columns([("LDAP", "vars")])["LDAP.vars"]
+    for i, items in enumerate(bulk):
+        got = dict(items)
+        tree = pl[i][LDAP]
+        assert got["messageID"] == tree.messageID.val
+        assert got["protocolOp"] == type(tree.protocolOp).__name__
+
+
 def test_a_layer_reads_the_same_whichever_way_it_was_reached():
     msg = next(messages())
     built = IP() / UDP() / msg

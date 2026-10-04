@@ -319,7 +319,11 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
         if attr in self.__all_slots__:
             object.__setattr__(self, attr, val)
             return
-        self.setfieldval(attr, val)
+        try:
+            self.setfieldval(attr, val)
+        except AttributeError:
+            # A property a layer defines, LDAP's `serverCreds` for one.
+            object.__setattr__(self, attr, val)
 
     def delfieldval(self, attr: str) -> None:
         if attr in self.fields:
@@ -341,7 +345,10 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
         elif attr in self.__all_slots__:
             object.__delattr__(self, attr)
         else:
-            self.delfieldval(attr)
+            try:
+                self.delfieldval(attr)
+            except AttributeError:
+                object.__delattr__(self, attr)
 
     def __dir__(self) -> list:
         return sorted(set(super().__dir__()) | set(self.default_fields))
