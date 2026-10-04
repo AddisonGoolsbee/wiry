@@ -1203,7 +1203,6 @@ pub fn register(
 struct Bind {
     parent: ProtoId,
     child: ProtoId,
-    /// Values are already in wire form.
     conds: &'static [(&'static FieldDesc, u64)],
 }
 
@@ -1232,10 +1231,6 @@ pub fn bind(
         BOUND.store(MAX_BINDS, Ordering::Release);
         return Err(format!("no room for more than {MAX_BINDS} layer bindings"));
     }
-    let conds = conds
-        .into_iter()
-        .map(|(f, v)| (f, field::wire_uint(f, v)))
-        .collect::<Vec<_>>();
     let _ = BINDS[slot].set(Bind {
         parent,
         child,
@@ -1263,12 +1258,7 @@ pub fn bound_next(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
 #[inline(never)]
 fn search_binds(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
     binds()
-        .find(|b| {
-            b.parent == parent
-                && b.conds
-                    .iter()
-                    .all(|(f, v)| field::read_bits(hdr, f.bit_off, f.bit_len) == *v)
-        })
+        .find(|b| b.parent == parent && b.conds.iter().all(|(f, v)| field::read_uint(hdr, f) == *v))
         .map(|b| b.child)
 }
 
@@ -1286,7 +1276,7 @@ pub fn apply_bind(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
 fn write_bind(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if let Some(b) = binds().find(|b| b.parent == parent && b.child == child) {
         for (f, v) in b.conds {
-            field::write_bits(hdr, f.bit_off, f.bit_len, *v);
+            field::write_uint(hdr, f, *v);
         }
     }
 }

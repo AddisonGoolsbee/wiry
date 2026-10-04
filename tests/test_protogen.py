@@ -160,3 +160,36 @@ def test_a_malformed_enum_is_refused(fd, why):
     pg = _protogen()
     with pytest.raises(pg.SpecError, match=why):
         pg.validate_enum("x.toml", fd)
+
+
+def _le(name, off, ln, at, n, kind="uint"):
+    return {"name": name, "off": off, "len": ln, "kind": kind, "le": {"at": at, "len": n}}
+
+
+def test_a_little_endian_group_is_emitted_on_every_field_in_it():
+    pg = _protogen()
+    fields = [_le("BC", 0, 2, 0, 2), _le("PB", 2, 2, 0, 2), _le("handle", 4, 12, 0, 2),
+              {"name": "len", "off": 16, "len": 16, "kind": "le_uint"}]
+    assert pg.validate_le("x.toml", fields) == [(0, 16), (16, 32)]
+    assert pg.render_field(fields[2]).endswith(".little_endian(0, 2),")
+
+
+@pytest.mark.parametrize("fields, why", [
+    ([_le("a", 0, 8, 0, 9)], "2 to 8"),
+    ([_le("a", 8, 16, 0, 2)], "outside its group"),
+    ([_le("a", 0, 16, 0, 2), _le("b", 8, 16, 1, 2)], "overlap"),
+    ([_le("a", 0, 8, 0, 2), {"name": "b", "off": 8, "len": 8}], "big-endian inside"),
+    ([_le("a", 0, 48, 1, 6, "mac")], "exactly its own"),
+    ([_le("a", 0, 32, 0, 4, "ipv4")], "cannot be little-endian"),
+    ([dict(_le("a", 0, 16, 0, 2), kind="le_uint")], "already one group"),
+])
+def test_a_malformed_little_endian_group_is_refused(fields, why):
+    pg = _protogen()
+    with pytest.raises(pg.SpecError, match=why):
+        pg.validate_le("x.toml", fields)
+
+
+def test_a_selector_inside_a_little_endian_group_is_refused():
+    pg = _protogen()
+    with pytest.raises(pg.SpecError, match="little-endian group"):
+        pg.refuse_le_overlap("x.toml", [(0, 16)], 8, 8, "[next]")

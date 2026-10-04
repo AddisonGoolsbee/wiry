@@ -115,8 +115,7 @@ impl Packet {
                     let n = b.len().min(hdr_end.saturating_sub(a));
                     buf[a..a + n].copy_from_slice(&b[..n]);
                 } else if f.default != 0 {
-                    let v = field::wire_uint(f, f.default);
-                    field::write_bits(&mut buf[off..hdr_end], f.bit_off, f.bit_len, v);
+                    field::write_uint(&mut buf[off..hdr_end], f, f.default);
                 }
             }
             if i > 0 {
@@ -263,8 +262,7 @@ impl Packet {
             return false;
         }
         let (a, b) = self.hdr_range(&s);
-        let wire = field::wire_uint(f, val);
-        field::write_bits(&mut self.buf[a..b], f.bit_off, f.bit_len, wire);
+        field::write_uint(&mut self.buf[a..b], f, val);
         // `write_bits` drops a write past the end of a clipped header, and a
         // value that never landed is not one the user pinned.
         if f.computed && (f.bit_off as usize + f.bit_len as usize) <= (b - a) * 8 {
@@ -331,6 +329,7 @@ impl Packet {
             self.replace_region(layer, a, val);
             return true;
         }
+        let val = field::wire_octets(f, val);
         let room = self
             .buf
             .len()

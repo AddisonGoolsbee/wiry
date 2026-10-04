@@ -513,7 +513,7 @@ fn encode_one(g: &GroupDesc, it: &Item) -> Result<Vec<u8>, String> {
     let mut e = vec![0u8; g.base_len()];
     for f in g.fields {
         if f.default != 0 {
-            field::write_bits(&mut e, f.bit_off, f.bit_len, field::wire_uint(f, f.default));
+            field::write_uint(&mut e, f, f.default);
         }
         if let Some(d) = f.default_bytes {
             put_bytes(&mut e, f, d);
@@ -571,7 +571,7 @@ fn encode_one(g: &GroupDesc, it: &Item) -> Result<Vec<u8>, String> {
 fn write_value(e: &mut [u8], f: &FieldDesc, v: &ItemValue) -> Result<(), String> {
     match v {
         ItemValue::Uint(n) => {
-            field::write_bits(e, f.bit_off, f.bit_len, field::wire_uint(f, *n));
+            field::write_uint(e, f, *n);
             Ok(())
         }
         ItemValue::Bytes(b) => {
@@ -597,14 +597,14 @@ fn write_value(e: &mut [u8], f: &FieldDesc, v: &ItemValue) -> Result<(), String>
             FieldKind::Flags => {
                 let bits = crate::parse::flags(s, f.flags)
                     .ok_or_else(|| format!("cannot encode {s:?} into {:?}", f.name))?;
-                field::write_bits(e, f.bit_off, f.bit_len, bits);
+                field::write_uint(e, f, bits);
                 Ok(())
             }
             _ => {
                 let n = s
                     .parse::<u64>()
                     .map_err(|_| format!("cannot encode {s:?} into {:?}", f.name))?;
-                field::write_bits(e, f.bit_off, f.bit_len, field::wire_uint(f, n));
+                field::write_uint(e, f, n);
                 Ok(())
             }
         },
@@ -619,6 +619,7 @@ fn put_bytes(e: &mut [u8], f: &FieldDesc, b: &[u8]) {
     } else {
         (f.bit_len / 8) as usize
     };
+    let b = field::wire_octets(f, b);
     let n = b.len().min(want).min(e.len().saturating_sub(a));
     e[a..a + n].copy_from_slice(&b[..n]);
 }

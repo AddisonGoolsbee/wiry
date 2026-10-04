@@ -98,6 +98,42 @@ fn declared_defaults_read_back() {
     }
 }
 
+/// A little-endian group the engine cannot hold in a u64, or one its field
+/// does not lie inside, reads as zero rather than failing, so the table has to
+/// be right by construction.
+#[test]
+fn every_little_endian_field_lies_inside_its_group() {
+    for id in layers() {
+        for f in desc(id).fields.iter().filter(|f| f.le_len > 1) {
+            let (lo, hi) = (
+                f.le_at as usize * 8,
+                (f.le_at as usize + f.le_len as usize) * 8,
+            );
+            let name = format!("{}.{}", desc(id).name, f.name);
+            assert!(
+                lo <= f.bit_off as usize && f.bit_off as usize + f.bit_len as usize <= hi,
+                "{name}: bits {}+{} outside octets {}..{}",
+                f.bit_off,
+                f.bit_len,
+                f.le_at,
+                f.le_at as usize + f.le_len as usize
+            );
+            if matches!(
+                f.kind,
+                FieldKind::Uint | FieldKind::LeUint | FieldKind::Flags
+            ) {
+                assert!(f.le_len <= 8, "{name}: a {}-octet group", f.le_len);
+            } else {
+                assert_eq!(
+                    (lo, hi - lo),
+                    (f.bit_off as usize, f.bit_len as usize),
+                    "{name}"
+                );
+            }
+        }
+    }
+}
+
 /// 0 and the field's maximum are accepted and read back exactly; one past the
 /// maximum is refused and leaves the buffer alone. A field that silently wraps
 /// emits a packet the caller did not ask for.

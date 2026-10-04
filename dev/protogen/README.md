@@ -79,6 +79,11 @@ enum = { 0 = "echo-reply", 8 = "echo-request" }
                           # "UDP_SERVICES", "SCTP_SERVICES"
 default_bytes = [255, 255]
 overlaps = true           # only where two fields deliberately share octets
+le = { at = 0, len = 2 }  # octets 0..2 are one little-endian integer, and `off`
+                          # counts from its most significant bit as if it were
+                          # written big-endian in their place; on a mac or bytes
+                          # field the group is the field and its octets reverse.
+                          # le_uint is the one-field case of this
 
 [next]                    # generates `next` and `bind_next` from one table
 off = 0
@@ -175,6 +180,10 @@ raise:
   variable-length record field that is not last, or that sits in a group of
   fixed `elem_len`, where it would have nothing to cover
 - a `[provenance]` table missing `source`, `version` or `changed`
+- a little-endian group wider than eight octets, a field outside its own group,
+  two groups that overlap, a big-endian field inside one, or a `[next]`,
+  selector, count or length term that reads into one: those are read
+  big-endian at a bit range and would take the octets in the wrong order
 - an `enum` on a field that is not an integer, with a key that does not read as
   an integer, a value that does not fit the field, a value named twice, or a
   string naming no shared table

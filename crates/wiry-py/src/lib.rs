@@ -2323,6 +2323,12 @@ fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
                 .map(|b| &*Box::leak(b.into_boxed_slice()) as &'static [u8]),
             to_end: false,
             names: leak_names(enum_names),
+            le_at: bit_off / 8,
+            le_len: if kind == FieldKind::LeUint {
+                (bit_len / 8) as u8
+            } else {
+                0
+            },
         });
         bit_off = bit_off.checked_add(bit_len).ok_or_else(|| {
             PyValueError::new_err(format!("{name} has too many bits to describe"))
