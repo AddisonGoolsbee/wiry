@@ -103,6 +103,14 @@ def chb(x):
     return bytes([x])
 
 
+def orb(x):
+    return x if isinstance(x, int) else ord(x)
+
+
+def warning(msg, *args):
+    log_runtime.warning(msg, *args)
+
+
 raw = bytes
 
 
@@ -132,6 +140,15 @@ class _Conf:
     def route6(self):
         from .capture import conf
         return conf.route6
+
+    @property
+    def crypto_valid(self):
+        from ._pysupport import crypto_available
+        return crypto_available()
+
+    def __getattr__(self, name):
+        from .capture import conf
+        return getattr(conf, name)
 
 
 conf = _Conf()

@@ -1271,7 +1271,7 @@ class NoPayload(PyPacket):
         return ""
 
 
-class _Raw(PyPacket):
+class Raw(PyPacket):
     name = "Raw"
     fields_desc = [StrField("load", b"")]
 
@@ -1284,7 +1284,7 @@ class _Raw(PyPacket):
         return 1
 
 
-class _Padding(_Raw):
+class Padding(Raw):
     name = "Padding"
 
     def self_build(self) -> bytes:
@@ -1296,8 +1296,8 @@ class _Padding(_Raw):
         return load + self.payload.build_padding()
 
 
-PyRaw = _Raw
-PyPadding = _Padding
+PyRaw = Raw
+PyPadding = Padding
 
 
 def fuzz(p: PyPacket, _inplace: int = 0) -> PyPacket:
