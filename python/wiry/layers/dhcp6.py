@@ -14,8 +14,8 @@
 #     client (RFC 8415 §7.2) and answers ADDR-REG-INFORM (RFC 9686 §4.3); VSS
 #     data excludes its type octet (RFC 6607 §3.4); a civic address element's
 #     length is one octet (RFC 4776 §3.3); dhcp6d stamps its DUID-LLT from
-#     midnight UTC (RFC 8415 §11.2). DNSStrField reads no compression
-#     pointers, since no DHCPv6 option may carry one.
+#     midnight UTC (RFC 8415 §11.2). DNSStrField has no DNS message to
+#     follow a compression pointer into, as in scapy.
 """DHCPv6: Dynamic Host Configuration Protocol for IPv6 (RFC 8415).
 
 The Rust DHCP6 layer finds the message on UDP 546 and 547 and is what
