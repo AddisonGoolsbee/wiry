@@ -130,6 +130,8 @@ pub static DESC: ProtoDesc = ProtoDesc {
 pub mod rtype {
     pub const A: u16 = 1;
     pub const NS: u16 = 2;
+    pub const MD: u16 = 3;
+    pub const MF: u16 = 4;
     pub const CNAME: u16 = 5;
     pub const SOA: u16 = 6;
     pub const PTR: u16 = 12;
@@ -137,6 +139,7 @@ pub mod rtype {
     pub const TXT: u16 = 16;
     pub const AAAA: u16 = 28;
     pub const SRV: u16 = 33;
+    pub const DNAME: u16 = 39;
     pub const OPT: u16 = 41;
     pub const DS: u16 = 43;
     pub const RRSIG: u16 = 46;
@@ -174,6 +177,8 @@ pub fn rtype_name(t: u16) -> &'static str {
     match t {
         rtype::A => "A",
         rtype::NS => "NS",
+        rtype::MD => "MD",
+        rtype::MF => "MF",
         rtype::CNAME => "CNAME",
         rtype::SOA => "SOA",
         rtype::PTR => "PTR",
@@ -181,6 +186,7 @@ pub fn rtype_name(t: u16) -> &'static str {
         rtype::TXT => "TXT",
         rtype::AAAA => "AAAA",
         rtype::SRV => "SRV",
+        rtype::DNAME => "DNAME",
         rtype::OPT => "OPT",
         rtype::DS => "DS",
         rtype::RRSIG => "RRSIG",
@@ -235,7 +241,7 @@ pub struct Edns {
 pub enum RData {
     A([u8; 4]),
     Aaaa([u8; 16]),
-    /// CNAME, NS, PTR.
+    /// NS, MD, MF, CNAME, PTR and DNAME (RFC 6672 §2.1).
     Name(String),
     Txt(Vec<String>),
     Mx {
@@ -532,10 +538,12 @@ fn decode_rdata(msg: &[u8], rtype: u16, start: usize, end: usize) -> RData {
             Ok(a) => RData::Aaaa(a),
             Err(_) => other(),
         },
-        rtype::NS | rtype::CNAME | rtype::PTR => match read_name_within(msg, start, end) {
-            Some((n, _)) => RData::Name(n),
-            None => other(),
-        },
+        rtype::NS | rtype::MD | rtype::MF | rtype::CNAME | rtype::PTR | rtype::DNAME => {
+            match read_name_within(msg, start, end) {
+                Some((n, _)) => RData::Name(n),
+                None => other(),
+            }
+        }
         rtype::MX => match (be16(msg, start), read_name_within(msg, start + 2, end)) {
             (Some(pref), Some((exchange, _))) => RData::Mx { pref, exchange },
             _ => other(),

@@ -187,3 +187,17 @@ def test_dns_resolve_answers_from_its_cache_without_asking():
 def test_a_record_round_trips_through_its_own_octets(cls):
     rr = cls(rrname="x.example")
     assert bytes(cls(bytes(rr))) == bytes(rr)
+
+
+def test_the_summary_names_rdata_only_for_a_plain_record_as_scapys_does():
+    def answer(*rrs):
+        return IP(bytes(IP() / UDP() / DNS(qr=1, qd=[], an=list(rrs))))
+
+    assert answer(DNSRR(rdata="192.0.2.1")).summary().endswith("DNS Ans 192.0.2.1")
+    assert answer(DNSRRMX(exchange="mx.example")).summary().endswith("DNS Ans")
+    assert answer(DNSRR(type="TXT", rdata=["a", "b"])).summary().endswith(
+        "DNS Ans [b'a', b'b']")
+    trailed = IP(bytes(IP() / UDP() / DNS(qd=[]) / Raw(load=b"x")))
+    assert trailed.summary() == "IP / UDP / DNS Qry / Raw"
+    for p in (answer(DNSRRMX(exchange="mx.example")), trailed):
+        assert p.summary().split(" / ")[-1] in (p[DNS].summary(), "Raw")

@@ -648,8 +648,8 @@ fn dns_summary(v: &View, i: usize) -> String {
     let recs = dns::parse_records(body);
     let mut name = String::new();
     let kind = if v.uint(i, "qr").unwrap_or(0) != 0 {
-        match recs.an.first() {
-            Some(rr) => name = format!(" {}", rdata_str(&rr.rdata)),
+        match recs.an.first().and_then(summary_rdata) {
+            Some(rd) => name = format!(" {rd}"),
             None => {
                 if let Some(f) = v.field_named(i, "rcode") {
                     if v.value(i, f).as_uint() != Some(0) {
@@ -677,6 +677,40 @@ fn rdata_str(rd: &crate::layers::dns::RData) -> String {
         RData::Other(b) => py_bytes(b),
         other => format!("{other:?}"),
     }
+}
+
+/// scapy names an answer only when its first record is a plain `DNSRR`, the
+/// class of every type its `DNSRR_DISPATCHER` does not claim; the rest print
+/// no RDATA.
+fn summary_rdata(rr: &crate::layers::dns::ResourceRecord) -> Option<String> {
+    use crate::layers::dns::RData;
+    const DISPATCHED: &[u16] = &[
+        6, 13, 15, 33, 35, 41, 43, 46, 47, 48, 50, 51, 64, 65, 250, 32769,
+    ];
+    if DISPATCHED.contains(&rr.rtype) {
+        return None;
+    }
+    Some(match &rr.rdata {
+        RData::A(b) => format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3]),
+        RData::Aaaa(b) => crate::show::render_ipv6(b),
+        RData::Name(n) => py_bytes(n.as_bytes()),
+        RData::Txt(parts) => format!(
+            "[{}]",
+            parts
+                .iter()
+                .map(|t| py_bytes(t.as_bytes()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        RData::Caa { flags, tag, value } => {
+            let mut raw = vec![*flags, tag.len() as u8];
+            raw.extend_from_slice(tag.as_bytes());
+            raw.extend_from_slice(value.as_bytes());
+            py_bytes(&raw)
+        }
+        RData::Other(b) => py_bytes(b),
+        _ => return None,
+    })
 }
 
 /// RFC 2132 §9.6 message types, as scapy's `DHCPTypes` names them.
@@ -828,15 +862,8 @@ fn dns_sections(v: &View, i: usize) -> Option<Vec<(&'static str, Vec<Sub>)>> {
     ])
 }
 
-/// True where this layer's payload is already displayed as part of it.
-fn folds_payload(v: &View, i: usize) -> bool {
-    v.name_of(i) == "DNS" && v.spans.get(i + 1).is_some_and(|s| s.proto.name() == "Raw")
-}
-
 fn visible_layers(v: &View, from: usize) -> Vec<usize> {
-    (from..v.spans.len())
-        .filter(|i| !i.checked_sub(1).is_some_and(|j| folds_payload(v, j)))
-        .collect()
+    (from..v.spans.len()).collect()
 }
 
 // ---------------------------------------------------------------------------
