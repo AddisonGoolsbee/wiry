@@ -92,7 +92,9 @@ def test_indexing_supports_negatives_and_slices(capture):
 def test_repr_and_times(capture):
     path, pkts = capture
     got = rdpcap(path)
-    assert repr(got) == "<PacketList: %d packets>" % len(pkts)
+    # scapy's form: named after the file, counting each packet once, under
+    # the first of TCP, UDP and ICMP it carries.
+    assert repr(got) == "<sample.pcap: TCP:6 UDP:2 ICMP:1 Other:1>"
     times = got.times()
     assert len(times) == len(pkts)
     assert all(isinstance(t, float) for t in times)

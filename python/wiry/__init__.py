@@ -1242,10 +1242,14 @@ def bind_layers(lower: Any, upper: Any, **conds: Any) -> None:
 class PacketList:
     """A capture. Packets stay in Rust until indexed."""
 
-    __slots__ = ("_list",)
+    __slots__ = ("_list", "listname")
 
-    def __init__(self, rust_list: Any):
+    #: What `repr()` counts, as scapy's `conf.stats_classic_protocols`.
+    stats = ("TCP", "UDP", "ICMP")
+
+    def __init__(self, rust_list: Any, name: str = "PacketList"):
         self._list = rust_list
+        self.listname = name
 
     def __len__(self) -> int:
         return len(self._list)
@@ -1266,7 +1270,8 @@ class PacketList:
 
     def field_column(self, layer: Any, field: str) -> list[Any]:
         """Pull one field from every packet in a single crossing."""
-        return self._list.field_column(_layer_name(layer), field)
+        from .columnar import Column
+        return Column(self._list.field_column(_layer_name(layer), field))
 
     def columns(self, specs: Any = None, where: Any = None, layer: Any = None) -> dict:
         """Several fields from the whole capture in one pass. See `columnar`."""
@@ -1292,7 +1297,7 @@ class PacketList:
 
     def head(self, n: int) -> "PacketList":
         """The first n packets, as a view. Shares the capture buffer."""
-        return PacketList(self._list.head(n))
+        return PacketList(self._list.head(n), self.listname)
 
     def sprintf(self, fmt: str) -> list[str]:
         """Every packet through one format string, in one pass."""
@@ -1348,7 +1353,9 @@ class PacketList:
         return self._list.raw_at(i)
 
     def __repr__(self) -> str:
-        return f"<PacketList: {len(self)} packets>"
+        counts = self._list.stats(list(self.stats))
+        body = " ".join(f"{n}:{c}" for n, c in zip((*self.stats, "Other"), counts))
+        return f"<{self.listname}: {body}>"
 
 
 _GZIP_MAGIC = b"\x1f\x8b"
@@ -1459,8 +1466,11 @@ def rdpcap(path: Any, count: int = -1) -> PacketList:
         raise NotImplementedError(
             "count= is not implemented yet; slice the PacketList instead"
         )
+    # scapy names the list after the file, which is what its repr prints.
+    source = path if isinstance(path, (str, os.PathLike)) else getattr(path, "name", None)
+    name = os.path.basename(os.fspath(source)) if isinstance(source, (str, os.PathLike)) else ""
     with _as_path(path) as real:
-        return PacketList(_b.read_pcap(real))
+        return PacketList(_b.read_pcap(real), name or "PacketList")
 
 
 # A pcap file declares one link type for every record in it, so the writer has

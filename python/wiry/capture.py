@@ -255,7 +255,7 @@ def sniff(
             quiet=quiet, promisc=promisc, snaplen=snaplen, where=where,
         )
         _add_session(args, session, store)
-        return PacketList(_b.sniff_live(**args))
+        return PacketList(_b.sniff_live(**args), "Sniffed")
     src = _offline_source(offline)
     if bulk is not None:
         # The capture filter runs first, as libpcap's would, so a session never
@@ -282,7 +282,7 @@ def sniff(
     )
     if bulk is None:
         _add_session(offline_args, session, store)
-    return PacketList(src.sniff_offline(**offline_args))
+    return PacketList(src.sniff_offline(**offline_args), "Sniffed")
 
 
 _RUNNING: "weakref.WeakSet[AsyncSniffer]" = weakref.WeakSet()

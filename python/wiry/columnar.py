@@ -19,8 +19,54 @@ from . import _layer_name
 
 __all__ = [
     "DEFAULT_SPECS", "columns", "to_dict", "filter_packets", "filter_indices",
-    "to_arrow", "to_polars", "to_pandas",
+    "to_arrow", "to_polars", "to_pandas", "Column", "Columns",
 ]
+
+# A capture's column can hold millions of values, and an interactive prompt
+# prints whatever an expression returns. These bound what that costs.
+_HEAD = 5
+_CELL = 60
+
+
+def _cell(v: Any) -> str:
+    r = repr(v)
+    return r if len(r) <= _CELL else r[: _CELL - 3] + "..."
+
+
+def _head(values: list) -> str:
+    cells = [_cell(v) for v in values[:_HEAD]]
+    if len(values) > _HEAD:
+        cells.append("...")
+    return "[" + ", ".join(cells) + "]"
+
+
+class Column(list):
+    """A list whose repr is its length and first few values, so printing a
+    column of a large capture does not render every value."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return f"<Column of {len(self)}: {_head(self)}>"
+
+    def _repr_pretty_(self, p: Any, cycle: bool) -> None:
+        p.text(repr(self))
+
+
+class Columns(dict):
+    """Column name to `Column`. Its repr is the shape and each column's head."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        rows = len(next(iter(self.values()))) if self else 0
+        width = max((len(k) for k in self), default=0)
+        lines = [f"<Columns: {rows} rows x {len(self)} columns"]
+        lines += [f"  {k:<{width}}  {_head(v)}" for k, v in self.items()]
+        return "\n".join(lines) + ">"
+
+    def _repr_pretty_(self, p: Any, cycle: bool) -> None:
+        p.text(repr(self))
 
 Spec = Any
 Where = Any
@@ -118,7 +164,7 @@ def columns(
         None if layer is None else _layer_name(layer),
         _normalize_where(where),
     )
-    return dict(zip(names, cols))
+    return Columns(zip(names, map(Column, cols)))
 
 
 def to_dict(
@@ -133,7 +179,7 @@ def to_dict(
 
 def filter_indices(cap: Any, layer: Any = None, where: Where = None) -> list[int]:
     """Positions of the packets matching the query, evaluated in Rust."""
-    return list(
+    return Column(
         _rust(cap).filter_indices(
             None if layer is None else _layer_name(layer), _normalize_where(where)
         )
@@ -147,7 +193,8 @@ def filter_packets(cap: Any, layer: Any = None, where: Where = None) -> Any:
     return PacketList(
         _rust(cap).filter(
             None if layer is None else _layer_name(layer), _normalize_where(where)
-        )
+        ),
+        "filtered " + getattr(cap, "listname", "PacketList"),
     )
 
 

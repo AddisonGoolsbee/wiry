@@ -909,6 +909,32 @@ impl PyPktList {
         }))
     }
 
+    /// Per name, the packets whose first match among `names` it is; the last
+    /// entry counts the packets matching none. One pass, as scapy's
+    /// `PacketList.__repr__` counts.
+    fn stats(&self, py: Python<'_>, names: Vec<String>) -> PyResult<Vec<usize>> {
+        let ids = names
+            .iter()
+            .map(|n| proto_by_name(n))
+            .collect::<PyResult<Vec<_>>>()?;
+        let buf = Arc::clone(&self.buf);
+        let idx = self.index.clone();
+        let link = self.link;
+        Ok(py.allow_threads(move || {
+            let mut out = vec![0usize; ids.len() + 1];
+            for (off, len, ..) in idx.iter() {
+                let spans =
+                    wiry_core::packet::dissect_spans(&buf[*off..*off + *len as usize], link);
+                let at = ids
+                    .iter()
+                    .position(|id| spans.iter().any(|s| s.proto == *id))
+                    .unwrap_or(ids.len());
+                out[at] += 1;
+            }
+            out
+        }))
+    }
+
     fn field_column(&self, py: Python<'_>, layer_name: &str, field: &str) -> PyResult<Py<PyList>> {
         let id = proto_by_name(layer_name)?;
         if proto::field_of(id, field).is_none() {
