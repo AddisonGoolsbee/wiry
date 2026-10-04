@@ -80,6 +80,13 @@ pub mod optkind {
     pub const SACKOK: u8 = 4;
     pub const SACK: u8 = 5;
     pub const TIMESTAMP: u8 = 8;
+    /// RFC 1146, historic.
+    pub const ALT_CHKSUM: u8 = 14;
+    pub const ALT_CHKSUM_OPT: u8 = 15;
+    /// RFC 2385.
+    pub const MD5: u8 = 19;
+    /// RFC 5841, an April Fools' RFC scapy names all the same.
+    pub const MOOD: u8 = 25;
     pub const UTO: u8 = 28;
     pub const AO: u8 = 29;
     pub const TFO: u8 = 34;
@@ -99,9 +106,15 @@ pub static OPTIONS: OptTable = OptTable {
         // RFC 2018 §3: 8n octets, one left and one right edge per block.
         OptDesc::new("SAck", optkind::SACK, Shape::PairList),
         OptDesc::new("Timestamp", optkind::TIMESTAMP, Shape::Pair),
+        OptDesc::new("AltChkSum", optkind::ALT_CHKSUM, Shape::Uint(1)),
+        OptDesc::new("AltChkSumOpt", optkind::ALT_CHKSUM_OPT, Shape::Bytes),
+        OptDesc::new("MD5", optkind::MD5, Shape::Bytes),
+        OptDesc::new("Mood", optkind::MOOD, Shape::Text),
         OptDesc::new("UTO", optkind::UTO, Shape::Uint(2)),
         OptDesc::new("AO", optkind::AO, Shape::Bytes),
-        OptDesc::new("TFO", optkind::TFO, Shape::Bytes),
+        // RFC 7413 §4.1.1 allows a cookie of 4 to 16 octets; scapy reads
+        // only an 8-octet one, as two words, which is what this decodes to.
+        OptDesc::new("TFO", optkind::TFO, Shape::Pair),
     ],
 };
 
