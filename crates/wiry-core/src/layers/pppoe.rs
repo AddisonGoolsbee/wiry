@@ -370,14 +370,14 @@ mod tests {
     }
 
     #[test]
-    fn a_discovery_packet_keeps_its_tag_list_as_raw() {
+    fn a_discovery_packet_reaches_its_tag_list() {
         // PADI, code 0x09, one Service-Name tag of zero length.
         let mut disc = vec![0x11, 0x09, 0x00, 0x00, 0x00, 0x04];
         disc.extend_from_slice(&[0x01, 0x01, 0x00, 0x00]);
         let p = Packet::dissect(frame(0x8863, &disc), ProtoId::Ether);
         assert_eq!(
             p.layers().iter().map(|s| s.proto).collect::<Vec<_>>(),
-            vec![ProtoId::Ether, ProtoId::PppoeDisc, ProtoId::Raw]
+            vec![ProtoId::Ether, ProtoId::PppoeDisc, ProtoId::PPPoEDTags]
         );
         assert_eq!(p.get(1, "code").unwrap(), FieldValue::Uint(9));
     }
