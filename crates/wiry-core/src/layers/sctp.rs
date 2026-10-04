@@ -6,6 +6,7 @@
 //
 // Changed by the wiry authors:
 //   2026-09-18 — sctpchunktypes, sctpchunkparamtypes and the SCTPChunkInit field names transcribed; the chunks and their parameters are one nested item list rather than a chain of sub-packets. Checked against RFC 9260 §3.2 and §3.3
+//   2026-10-03 — enumerated names of sport, dport transcribed
 
 //! RFC 9260 §3.1: the common header is a 16-bit source port, a 16-bit destination
 //! port, a 32-bit verification tag and a 32-bit checksum. §3.2 gives the chunk
@@ -155,8 +156,8 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("sport", 0, 16, 0),
-    FieldDesc::uint("dport", 16, 16, 0),
+    FieldDesc::uint("sport", 0, 16, 0).host_named(crate::names::Host::SctpServices),
+    FieldDesc::uint("dport", 16, 16, 0).host_named(crate::names::Host::SctpServices),
     FieldDesc::uint("tag", 32, 32, 0),
     FieldDesc::uint("chksum", 64, 32, 0),
     FieldDesc::var_bytes("options", 96),

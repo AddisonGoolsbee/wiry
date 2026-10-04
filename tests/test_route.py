@@ -8,15 +8,18 @@ separately and only for shape, because a machine's routes are not a fixture.
 import pytest
 
 from wiry import Route, Route6, read_routes, read_routes6
-from wiry.route import (
+from wiry.utils import valid_ip6
+from wiry.utils6 import (
     IPV6_ADDR_GLOBAL,
     IPV6_ADDR_LINKLOCAL,
     IPV6_ADDR_LOOPBACK,
-    IPV6_ADDR_MULTICAST,
-    atol,
+    IPV6_ADDR_SITELOCAL,
     get_source_addr_from_candidate_set,
-    in6_getifaddr,
     in6_getscope,
+)
+from wiry.route import (
+    atol,
+    in6_getifaddr,
     itom,
     loopback_name,
     ltoa,
@@ -139,9 +142,11 @@ def test_resync_reads_the_host_and_drops_what_was_added(table):
 def test_an_ipv6_address_is_classified_by_scope():
     assert in6_getscope("::1") == IPV6_ADDR_LOOPBACK
     assert in6_getscope("fe80::1") == IPV6_ADDR_LINKLOCAL
-    assert in6_getscope("ff02::1") == IPV6_ADDR_MULTICAST
+    assert in6_getscope("ff02::1") == IPV6_ADDR_LINKLOCAL
     assert in6_getscope("2001:db8::1") == IPV6_ADDR_GLOBAL
-    assert in6_getscope("nonsense") == -1
+    assert in6_getscope("ff05::2") == IPV6_ADDR_SITELOCAL
+    with pytest.raises(OSError):
+        in6_getscope("nonsense")
 
 
 @pytest.fixture
@@ -192,7 +197,7 @@ def test_a_source_is_chosen_by_scope_then_by_longest_common_prefix():
     assert get_source_addr_from_candidate_set("2001:db8:9::1", cset) == \
         "2001:db8:9::5"
     assert get_source_addr_from_candidate_set("fe80::1", cset) == "fe80::9"
-    assert get_source_addr_from_candidate_set("2001:db8::1", []) is None
+    assert get_source_addr_from_candidate_set("2001:db8::1", []) == ""
 
 
 def test_a_bad_ipv6_destination_is_refused_rather_than_guessed(table6):
@@ -224,11 +229,11 @@ def test_the_host_table_has_the_shape_every_reader_expects():
 
 def test_the_host_ipv6_table_has_the_shape_every_reader_expects():
     for prefix, plen, nh, iface, cset, metric in read_routes6():
-        assert in6_getscope(prefix) != -1
+        assert valid_ip6(prefix)
         assert 0 <= plen <= 128
-        assert in6_getscope(nh) != -1
+        assert valid_ip6(nh)
         assert isinstance(iface, str) and iface
-        assert cset and all(in6_getscope(a) != -1 for a in cset)
+        assert cset and all(valid_ip6(a) for a in cset)
         assert isinstance(metric, int)
 
 

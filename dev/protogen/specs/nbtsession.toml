@@ -16,6 +16,13 @@ next = "hand"
 name = "TYPE"
 off = 0
 len = 8
+[fields.enum]
+0 = "Session Message"
+129 = "Session Request"
+130 = "Positive Session Response"
+131 = "Negative Session Response"
+132 = "Retarget Session Response"
+133 = "Session Keepalive"
 
 [[fields]]
 name = "FLAGS"
@@ -39,3 +46,8 @@ bytes = [0x00, 0x00, 0x00, 0x04, 0xff, 0x53, 0x4d, 0x42]
 TYPE = 0
 FLAGS = 0
 LENGTH = 4
+
+[provenance]
+source = "scapy/layers/netbios.py"
+version = "scapy 2.7.0"
+changed = ["2026-10-03 — enumerated names of TYPE transcribed"]

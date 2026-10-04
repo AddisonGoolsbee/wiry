@@ -280,10 +280,10 @@ def test_offline_accepts_a_path_object(cap, tmp_path):
     assert len(P.sniff(offline=pathlib.Path(cap))) == TOTAL
 
 
-def test_offline_refuses_a_list_of_packets(cap):
-    with pytest.raises(NotImplementedError) as exc:
-        P.sniff(offline=_corpus())
-    assert "wrpcap" in str(exc.value)
+def test_offline_reads_a_list_of_packets_as_it_reads_their_capture(cap):
+    pkts = _corpus()
+    got = P.sniff(offline=pkts)
+    assert [bytes(p) for p in got] == [bytes(p) for p in P.sniff(offline=cap)]
 
 
 def test_iface_and_snaplen_are_ignored_offline(cap):

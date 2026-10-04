@@ -67,6 +67,8 @@ len = 16
 name = "age"
 off = 216
 len = 16
+# scapy's default; IEEE 802.1D-2004 §9.2.8 has a root bridge send 0.
+default = 0x0100
 
 [[fields]]
 name = "maxage"
@@ -111,3 +113,8 @@ age = 0
 maxage = 0x1400
 hellotime = 0x0200
 fwddelay = 0x0f00
+
+[provenance]
+source = "scapy/layers/l2.py"
+version = "scapy 2.7.0"
+changed = ["2026-10-04 — the message age default of one second taken from STP.age"]

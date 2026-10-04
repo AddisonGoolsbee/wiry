@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/dhcp6.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of msgtype transcribed
+
 //! RFC 8415 §8: a client/server message is a one-octet message type and a 24-bit
 //! transaction id, followed by options. §9 gives the Relay-forward (12) and
 //! Relay-reply (13) messages instead a one-octet hop count and two 128-bit
@@ -72,7 +81,23 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("msgtype", 0, 8, 1),
+    FieldDesc::uint("msgtype", 0, 8, 1).named(&[
+        (1, "SOLICIT"),
+        (2, "ADVERTISE"),
+        (3, "REQUEST"),
+        (4, "CONFIRM"),
+        (5, "RENEW"),
+        (6, "REBIND"),
+        (7, "REPLY"),
+        (8, "RELEASE"),
+        (9, "DECLINE"),
+        (10, "RECONFIGURE"),
+        (11, "INFORMATION-REQUEST"),
+        (12, "RELAY-FORW"),
+        (13, "RELAY-REPL"),
+        (36, "ADDR-REG-INFORM"),
+        (37, "ADDR-REG-REPLY"),
+    ]),
     FieldDesc::uint("trid", 8, 24, 0).when(is_client_server),
     FieldDesc::uint("hopcount", 8, 8, 0).when(is_relay),
     FieldDesc::ipv6("linkaddr", 16).when(is_relay),

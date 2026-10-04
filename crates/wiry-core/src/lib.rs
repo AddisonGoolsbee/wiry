@@ -18,6 +18,8 @@ pub mod parse;
 pub mod pcap;
 pub mod pcapng;
 pub mod proto;
+pub mod render;
+pub mod render_tables;
 pub mod repeat;
 pub mod show;
 pub mod stream;

@@ -6,6 +6,7 @@
 //
 // Changed by the wiry authors:
 //   2026-09-18 — RIPEntry's field table (AF, RouteTag, addr, mask, nextHop, metric) transcribed as a repeating group rather than a chain of sub-packets; checked against RFC 2453 §4
+//   2026-10-03 — enumerated names of cmd transcribed
 
 //! RFC 1058 §3.1 and RFC 2453 §3.6: a RIP message is a one-octet command, a
 //! one-octet version and two octets that must be zero, followed by up to 25 route
@@ -30,7 +31,19 @@ use crate::repeat::{ElemLen, Extent, GroupDesc};
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("cmd", 0, 8, 1),
+    FieldDesc::uint("cmd", 0, 8, 1).named(&[
+        (1, "req"),
+        (2, "resp"),
+        (3, "traceOn"),
+        (4, "traceOff"),
+        (5, "sun"),
+        (6, "trigReq"),
+        (7, "trigResp"),
+        (8, "trigAck"),
+        (9, "updateReq"),
+        (10, "updateResp"),
+        (11, "updateAck"),
+    ]),
     FieldDesc::uint("version", 8, 8, 2),
     FieldDesc::uint("null", 16, 16, 0),
     FieldDesc::var_bytes("entries", 32),

@@ -191,15 +191,15 @@ def test_names_end_in_the_root_dot_and_escape_a_dot_inside_a_label():
 # --- RFC 2018 SACK ----------------------------------------------------------
 
 
-def test_sack_blocks_read_as_edge_pairs_and_encode_back():
+def test_sack_blocks_read_as_scapys_flat_edge_tuple_and_encode_back():
     pkt = IP() / TCP(
         options=[("SAckOK", None), ("SAck", [(1000, 2000), (3000, 4000)])]
     )
     raw = bytes(pkt)
     back = IP(raw)
     assert back[TCP].options == [
-        ("SAckOK", None),
-        ("SAck", [(1000, 2000), (3000, 4000)]),
+        ("SAckOK", b""),
+        ("SAck", (1000, 2000, 3000, 4000)),
     ]
     again = IP() / TCP(options=back[TCP].options)
     assert bytes(again)[20:] == raw[20:]
@@ -269,8 +269,8 @@ def test_a_long_value_split_over_repeated_codes_is_joined():
     opts += bytes([255])
     pkt = Ether(bytes(dhcp_frame(bytes(bare_bootp()), opts)))
     names = [n for n, _ in pkt[DHCP].options]
-    assert names == ["message-type", "60", "end"]
-    assert dict(pkt[DHCP].options)["60"] == b"abcde"
+    assert names == ["message-type", "vendor_class_id", "end"]
+    assert dict(pkt[DHCP].options)["vendor_class_id"] == b"abcde"
 
 
 def test_options_in_sname_and_file_are_read_when_option_52_says_so():

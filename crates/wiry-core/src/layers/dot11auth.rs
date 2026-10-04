@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/dot11.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of algo, status transcribed
+
 //! IEEE Std 802.11-2020 §9.3.3.12: the Authentication frame body is a 16-bit
 //! Authentication Algorithm Number, a 16-bit Authentication Transaction Sequence
 //! Number and a 16-bit Status Code, little-endian, followed by any information
@@ -18,9 +27,21 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::le_uint("algo", 0, 16, 0),
+    FieldDesc::le_uint("algo", 0, 16, 0).named(&[(0, "open"), (1, "sharedkey")]),
     FieldDesc::le_uint("seqnum", 16, 16, 1),
-    FieldDesc::le_uint("status", 32, 16, 0),
+    FieldDesc::le_uint("status", 32, 16, 0).named(&[
+        (0, "success"),
+        (1, "failure"),
+        (10, "cannot-support-all-cap"),
+        (11, "inexist-asso"),
+        (12, "asso-denied"),
+        (13, "algo-unsupported"),
+        (14, "bad-seq-num"),
+        (15, "challenge-failure"),
+        (16, "timeout"),
+        (17, "AP-full"),
+        (18, "rate-unsupported"),
+    ]),
     FieldDesc::var_bytes("options", 48),
 ];
 

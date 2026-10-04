@@ -228,10 +228,10 @@ def test_show_and_summary_name_the_layer_and_its_fields():
     pkt = IP() / UDP(dport=9999) / MyProto(version=4)
     text = pkt.show_str()
     assert "###[ MyProto ]###" in text
-    assert "version    = 4" in text
-    assert "peer       = 0.0.0.0" in text
-    assert pkt.summary().endswith("MyProto")
-    assert IP(bytes(pkt)).summary() == "IP / UDP / MyProto"
+    assert "version   = 4" in text
+    assert "peer      = 0.0.0.0" in text
+    assert pkt.summary().endswith(" / MyProto")
+    assert IP(bytes(pkt)).summary() == pkt.summary()
 
 
 def test_field_names_are_listed_in_declaration_order():

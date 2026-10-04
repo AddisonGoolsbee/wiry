@@ -944,6 +944,8 @@ pub mod ports {
     pub const GTP_U: u16 = 2152;
     pub const VXLAN: u16 = 4789;
     pub const GENEVE: u16 = 6081;
+    /// RFC 8086 §3: GRE over UDP.
+    pub const GRE_UDP: u16 = 4754;
 }
 
 #[cfg(test)]

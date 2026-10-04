@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/l2.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-04 — the message age default of one second taken from STP.age
+
 //! IEEE Std 802.1D-2004 §9.3.1, Configuration BPDU: protocol identifier (0x0000),
 //! version, BPDU type, flags, root identifier (a two-octet priority and a
 //! six-octet address), root path cost, bridge identifier, port identifier, and the
@@ -25,7 +34,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("bridgeid", 136, 16, 0),
     FieldDesc::mac("bridgemac", 152),
     FieldDesc::uint("portid", 200, 16, 0),
-    FieldDesc::uint("age", 216, 16, 0),
+    FieldDesc::uint("age", 216, 16, 256),
     FieldDesc::uint("maxage", 232, 16, 5120),
     FieldDesc::uint("hellotime", 248, 16, 512),
     FieldDesc::uint("fwddelay", 264, 16, 3840),

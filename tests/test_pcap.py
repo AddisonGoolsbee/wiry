@@ -92,17 +92,20 @@ def test_indexing_supports_negatives_and_slices(capture):
 def test_repr_and_times(capture):
     path, pkts = capture
     got = rdpcap(path)
-    assert repr(got) == "<PacketList: %d packets>" % len(pkts)
+    # scapy's form: named after the file, counting each packet once, under
+    # the first of TCP, UDP and ICMP it carries.
+    assert repr(got) == "<sample.pcap: TCP:6 UDP:2 ICMP:1 Other:1>"
     times = got.times()
     assert len(times) == len(pkts)
     assert all(isinstance(t, float) for t in times)
     assert [p.time for p in got] == times
 
 
-def test_rdpcap_rejects_the_unimplemented_count_argument(capture):
-    path, _ = capture
-    with pytest.raises(NotImplementedError):
-        rdpcap(path, count=2)
+def test_rdpcap_count_keeps_the_first_records(capture):
+    path, pkts = capture
+    assert [bytes(p) for p in rdpcap(path, count=2)] == [bytes(p) for p in pkts[:2]]
+    assert len(rdpcap(path, count=0)) == 0
+    assert len(rdpcap(path, count=10 ** 6)) == len(pkts)
 
 
 def test_pcapreader_is_a_context_manager_and_iterator(capture):

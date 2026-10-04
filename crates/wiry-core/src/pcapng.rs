@@ -10,6 +10,9 @@ pub use crate::pcap::{link_to_proto, Record};
 /// A palindrome, so it reads the same in either byte order.
 pub const BLOCK_SHB: u32 = 0x0A0D_0D0A;
 pub const BLOCK_IDB: u32 = 0x0000_0001;
+/// Obsolete, but still written by old tools: an EPB whose interface id is 16
+/// bits wide and followed by a 16-bit drop count.
+pub const BLOCK_PB: u32 = 0x0000_0002;
 pub const BLOCK_SPB: u32 = 0x0000_0003;
 pub const BLOCK_EPB: u32 = 0x0000_0006;
 
@@ -195,17 +198,22 @@ impl<'a> Reader<'a> {
         Some(next)
     }
 
+    /// The extent returned is padded to four octets. A declared length that is
+    /// not a multiple of four breaks the spec, but old writers produced it with
+    /// the padding present and the trailing copy after it; Wireshark and scapy
+    /// both read such a block, and so does this.
     fn read_block_at(&self, off: usize) -> Option<(u32, usize)> {
         if off + 12 > self.end {
             return None;
         }
         let btype = rd32(self.buf, off, self.swapped)?;
-        let total = rd32(self.buf, off + 4, self.swapped)? as usize;
-        if total < 12 || total % 4 != 0 || off + total > self.end {
+        let declared = rd32(self.buf, off + 4, self.swapped)? as usize;
+        let total = pad4(declared);
+        if declared < 12 || off + total > self.end {
             return None;
         }
         let trailing = rd32(self.buf, off + total - 4, self.swapped)? as usize;
-        if trailing != total {
+        if trailing != declared {
             return None;
         }
         Some((btype, total))
@@ -304,12 +312,16 @@ impl<'a> Reader<'a> {
                     let iface = self.parse_idb(start, total);
                     self.ifaces.push(iface);
                 }
-                BLOCK_EPB => {
+                BLOCK_EPB | BLOCK_PB => {
                     // iface(4) ts_high(4) ts_low(4) caplen(4) origlen(4) then data.
                     if total < 32 {
                         return None;
                     }
-                    let iface_id = rd32(self.buf, start + 8, self.swapped)?;
+                    let iface_id = if btype == BLOCK_PB {
+                        rd16(self.buf, start + 8, self.swapped)? as u32
+                    } else {
+                        rd32(self.buf, start + 8, self.swapped)?
+                    };
                     // No IDB for this id means no link type for the frame, so
                     // there is nothing it could honestly be decoded as.
                     if self.ifaces.get(iface_id as usize).is_none() {
@@ -646,6 +658,43 @@ mod tests {
         assert_eq!(recs[0].ts_frac, 0);
         assert_eq!(recs[0].data, &[0x77; 14]);
         assert_eq!(recs[1].ts_sec, 5);
+    }
+
+    #[test]
+    fn reads_the_obsolete_packet_block() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&w16(0, false));
+        body.extend_from_slice(&w16(7, false));
+        body.extend_from_slice(&w32(0, false));
+        body.extend_from_slice(&w32(3_000_001, false));
+        body.extend_from_slice(&w32(4, false));
+        body.extend_from_slice(&w32(9, false));
+        body.extend_from_slice(&[0x66; 4]);
+        let mut v = shb(false);
+        v.extend_from_slice(&idb(linktype::ETHERNET, None, false));
+        v.extend_from_slice(&block(BLOCK_PB, &body, false));
+        let recs: Vec<_> = Reader::new(&v).unwrap().collect();
+        assert_eq!(recs.len(), 1);
+        assert_eq!((recs[0].ts_sec, recs[0].ts_frac), (3, 1));
+        assert_eq!((recs[0].caplen, recs[0].origlen), (4, 9));
+        assert_eq!(recs[0].data, &[0x66; 4]);
+    }
+
+    #[test]
+    fn a_length_short_of_its_padding_is_read_past_the_padding() {
+        let mut v = shb(false);
+        v.extend_from_slice(&idb(linktype::ETHERNET, None, false));
+        let mut b = epb(0, 1_000_000, &[0x5a; 6], 6, false);
+        let declared = (b.len() - 2) as u32;
+        b[4..8].copy_from_slice(&declared.to_le_bytes());
+        let n = b.len();
+        b[n - 4..].copy_from_slice(&declared.to_le_bytes());
+        v.extend_from_slice(&b);
+        v.extend_from_slice(&epb(0, 2_000_000, &[0x5b; 4], 4, false));
+        let recs: Vec<_> = Reader::new(&v).unwrap().collect();
+        assert_eq!(recs.len(), 2);
+        assert_eq!(recs[0].data, &[0x5a; 6]);
+        assert_eq!(recs[1].data, &[0x5b; 4]);
     }
 
     #[test]

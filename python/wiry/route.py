@@ -13,6 +13,9 @@
 #                ioctl so routing works in a build without the live feature,
 #                and RFC 3484 source selection is reduced to scope plus longest
 #                common prefix.
+#   2026-10-03 — IPv6 scopes and source selection now come from wiry.utils6,
+#                so in6_getifaddr answers in scapy's scope values; added
+#                Route6.ifchange.
 
 """The routing table, read from the OS.
 
@@ -38,6 +41,11 @@ import struct
 import subprocess
 import sys
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from .utils6 import (
+    IPV6_ADDR_LINKLOCAL, construct_source_candidate_set,
+    get_source_addr_from_candidate_set, in6_getscope, in6_ismaddr,
+)
 
 __all__ = [
     "Route", "Route6", "read_routes", "read_routes6", "in6_getifaddr",
@@ -262,13 +270,6 @@ def read_routes() -> List[IPv4Route]:
 
 # ------------------------------------------------------------------ IPv6 read
 
-IPV6_ADDR_GLOBAL = 0x01
-IPV6_ADDR_SITELOCAL = 0x02
-IPV6_ADDR_LINKLOCAL = 0x04
-IPV6_ADDR_LOOPBACK = 0x08
-IPV6_ADDR_MULTICAST = 0x10
-
-
 def _in6_bytes(addr: str) -> bytes:
     return socket.inet_pton(socket.AF_INET6, addr)
 
@@ -279,23 +280,6 @@ def _in6_valid(addr: str) -> bool:
     except (OSError, ValueError):
         return False
     return True
-
-
-def in6_getscope(addr: str) -> int:
-    """Which scope an IPv6 address belongs to."""
-    try:
-        b = _in6_bytes(addr)
-    except (OSError, ValueError):
-        return -1
-    if b == b"\x00" * 15 + b"\x01":
-        return IPV6_ADDR_LOOPBACK
-    if b[0] == 0xFF:
-        return IPV6_ADDR_MULTICAST
-    if b[0] == 0xFE and b[1] & 0xC0 == 0x80:
-        return IPV6_ADDR_LINKLOCAL
-    if b[0] == 0xFE and b[1] & 0xC0 == 0xC0:
-        return IPV6_ADDR_SITELOCAL
-    return IPV6_ADDR_GLOBAL
 
 
 def _in6_included(dst: str, prefix: str, plen: int) -> bool:
@@ -310,61 +294,6 @@ def _in6_included(dst: str, prefix: str, plen: int) -> bool:
         mask = (0xFF << (8 - rest)) & 0xFF
         return d[whole] & mask == p[whole] & mask
     return True
-
-
-def _common_prefix_bits(a: str, b: str) -> int:
-    try:
-        x, y = _in6_bytes(a), _in6_bytes(b)
-    except (OSError, ValueError):
-        return 0
-    n = 0
-    for p, q in zip(x, y):
-        if p == q:
-            n += 8
-            continue
-        diff = p ^ q
-        while not diff & 0x80:
-            n += 1
-            diff <<= 1
-        break
-    return n
-
-
-def construct_source_candidate_set(addr: str, plen: int,
-                                   laddr: Iterable[Tuple[str, int, str]]
-                                   ) -> List[str]:
-    """The interface addresses that share a scope with ``addr/plen``.
-
-    A global destination is not reachable from a link-local source, so a route
-    whose interface has no address of the right scope is no route at all.
-    """
-    scope = in6_getscope(addr)
-    if scope == IPV6_ADDR_MULTICAST:
-        # A multicast group is joined from whatever the interface has; a global
-        # address is the better source where there is one.
-        cset = [x for x in laddr]
-    elif scope in (IPV6_ADDR_LOOPBACK, -1):
-        cset = [x for x in laddr]
-    else:
-        cset = [x for x in laddr if x[1] == scope]
-    out = [x[0] for x in cset]
-    out.sort(key=lambda a: in6_getscope(a) != IPV6_ADDR_GLOBAL)
-    return out
-
-
-def get_source_addr_from_candidate_set(dst: str,
-                                       candidate_set: List[str]
-                                       ) -> Optional[str]:
-    """RFC 3484 §5, reduced: prefer a matching scope, then the longest common
-    prefix. The rules this leaves out are named in DEVIATIONS E16."""
-    if not candidate_set:
-        return None
-    want = in6_getscope(dst)
-    scored = sorted(
-        candidate_set,
-        key=lambda a: (in6_getscope(a) != want, -_common_prefix_bits(a, dst)),
-    )
-    return scored[0]
 
 
 def _in6_getifaddr_proc() -> List[Tuple[str, int, str]]:
@@ -437,7 +366,7 @@ def _read_routes6_proc() -> List[IPv6Route]:
         dev = f[9]
         if not flags & 0x1:  # RTF_UP
             continue
-        if in6_getscope(prefix) == IPV6_ADDR_MULTICAST:
+        if in6_ismaddr(prefix):
             continue  # multicast routing is decided in Route6.route()
         devaddrs = [x for x in lifaddr if x[2] == dev]
         cset = construct_source_candidate_set(prefix, plen, devaddrs)
@@ -487,7 +416,7 @@ def _read_routes6_netstat() -> List[IPv6Route]:
             plen = int(plen)
         except (TypeError, ValueError):
             continue
-        if in6_getscope(destination) == IPV6_ADDR_MULTICAST:
+        if in6_ismaddr(destination):
             continue
         if dev == loopback_name():
             cset = ["::1"]
@@ -741,6 +670,24 @@ class Route6:
 
     delete = delt
 
+    def ifchange(self, iff: str, addr: str) -> None:
+        """Tell the table an interface's address changed."""
+        from .utils6 import in6_and, in6_cidr2mask
+
+        the_addr, plen_b = (addr.split("/") + ["128"])[:2]
+        plen = int(plen_b)
+        the_net = socket.inet_ntop(
+            socket.AF_INET6, in6_and(in6_cidr2mask(plen), _in6_bytes(the_addr)))
+        for i, (net, rplen, gw, iface, _, metric) in enumerate(self.routes):
+            if iface != iff:
+                continue
+            self.ipv6_ifaces.add(iface)
+            if gw == "::":
+                self.routes[i] = (the_net, plen, gw, iface, [the_addr], metric)
+            else:
+                self.routes[i] = (net, rplen, gw, iface, [the_addr], metric)
+        self.invalidate_cache()
+
     def ifdel(self, iff: str) -> None:
         self.invalidate_cache()
         self.routes = [rt for rt in self.routes if rt[3] != iff]
@@ -783,7 +730,7 @@ class Route6:
                 continue
             if _in6_included(dst, p, plen):
                 paths.append((plen, me, (iface, cset, gw)))
-            elif (in6_getscope(dst) == IPV6_ADDR_MULTICAST and
+            elif (in6_ismaddr(dst) and
                     in6_getscope(p) == IPV6_ADDR_LINKLOCAL and cset and
                     in6_getscope(cset[0]) == IPV6_ADDR_LINKLOCAL):
                 paths.append((plen, me, (iface, cset, gw)))
@@ -799,8 +746,8 @@ class Route6:
 
         res = []
         for plen, me, (iface, cset, gw) in paths:
-            src = get_source_addr_from_candidate_set(dst, cset)
-            if src is not None:
+            src = get_source_addr_from_candidate_set(dst, list(cset))
+            if src:
                 res.append((iface, src, gw))
         if not res:
             return (loopback_name(), "::", "::")

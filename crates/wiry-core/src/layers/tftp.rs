@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/tftp.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of op transcribed
+
 //! RFC 1350 §5: every TFTP packet opens with a two-octet opcode. A Read or Write
 //! Request (1, 2) is followed by NUL-terminated filename and mode strings; DATA
 //! (3) and ACK (4) carry a two-octet block number; ERROR (5) carries a two-octet
@@ -73,7 +82,14 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("op", 0, 16, 1),
+    FieldDesc::uint("op", 0, 16, 1).named(&[
+        (1, "RRQ"),
+        (2, "WRQ"),
+        (3, "DATA"),
+        (4, "ACK"),
+        (5, "ERROR"),
+        (6, "OACK"),
+    ]),
     FieldDesc::uint("block", 16, 16, 0).when(has_block),
     FieldDesc::uint("errorcode", 16, 16, 0).when(is_error),
     FieldDesc::var_bytes("options", 32),

@@ -207,9 +207,19 @@ def test_send_refuses_the_arguments_it_does_not_implement():
     from wiry import Ether, IP
 
     with pytest.raises(NotImplementedError):
-        P.sendp(Ether() / IP(), socket=object(), iface=NO_SUCH_IF)
-    with pytest.raises(NotImplementedError):
         P.sendp(Ether() / IP(), realtime=True, iface=NO_SUCH_IF)
+
+
+def test_send_through_a_socket_object_needs_no_interface():
+    from wiry import IP, Ether, OfflineSocket
+
+    sock = OfflineSocket()
+    sent = P.sendp([Ether() / IP(), Ether()], socket=sock, count=2, verbose=0,
+                   return_packets=True)
+    assert len(sent) == 2
+    assert [bytes(p) for p in sock.sent] == [bytes(p) for p in sent] * 2
+    P.send(IP(), socket=sock, verbose=0)
+    assert bytes(sock.sent[-1]) == bytes(IP())
 
 
 @live

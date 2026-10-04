@@ -33,7 +33,7 @@ def test_a_name_assigns_through_a_built_packet():
 def test_rendering_uses_the_name_and_an_unknown_value_its_number():
     p = IP() / ICMP(type=8)
     assert p.sprintf("%ICMP.type% %r,ICMP.type%") == "echo-request 8"
-    assert "type       = echo-request" in p.show_str()
+    assert "type      = echo-request" in p.show_str()
     assert (IP() / ICMP(type=200)).sprintf("%ICMP.type%") == "200"
 
 
@@ -71,3 +71,14 @@ def test_a_declared_layer_carries_its_names():
     p = Coloured(colour="red", size="large")
     assert (p.colour, p.size) == (1, 1)
     assert Coloured(bytes(p)).sprintf("%Coloured.colour% %Coloured.size%") == "red large"
+
+
+def test_an_stp_timer_reads_and_writes_in_seconds():
+    # IEEE 802.1D-2004 §9.3.1 timers count 1/256 s; scapy shows seconds.
+    from wiry import STP
+
+    s = STP(bytes(STP(hellotime=5)))
+    assert s.hellotime == 5.0 and s.age == 1.0
+    s.maxage = 10
+    assert bytes(s)[29:31] == b"\x0a\x00"
+    assert "hellotime=5.0" in repr(s)

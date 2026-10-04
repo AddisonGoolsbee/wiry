@@ -13,6 +13,7 @@ from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime
 from functools import lru_cache
+from itertools import islice
 from typing import Any, Callable, Iterable, Iterator, Sequence
 
 from . import FlagValue, PacketList, _LayerView, _b, _enum_table, _flag_names
@@ -370,7 +371,11 @@ class Sessions(Mapping):
         return view
 
     def __repr__(self) -> str:
-        return f"<Sessions: {len(self._index)} flows>"
+        from .columnar import _head
+        return f"<Sessions: {len(self._index)} flows {_head(list(islice(self._index, 6)))}>"
+
+    def _repr_pretty_(self, p: Any, cycle: bool) -> None:
+        p.text(repr(self))
 
 
 def sessions(pl: Any, session_extractor: Callable[[Any], Any] | None = None) -> Sessions:

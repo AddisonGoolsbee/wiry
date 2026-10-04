@@ -6,6 +6,7 @@
 //
 // Changed by the wiry authors:
 //   2026-09-18 — RTP's sync FieldListField transcribed as a count-driven repeating group, and payload renamed payload_type to match; checked against RFC 3550 §5.1
+//   2026-10-03 — enumerated names of payload_type transcribed
 
 //! RFC 3550 §5.1: a two-bit version, a padding bit, an extension bit, a four-bit
 //! CSRC count, a marker bit, a seven-bit payload type, a 16-bit sequence number, a
@@ -44,7 +45,32 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("extension", 3, 1, 0),
     FieldDesc::uint("numsync", 4, 4, 0),
     FieldDesc::uint("marker", 8, 1, 0),
-    FieldDesc::uint("payload_type", 9, 7, 0),
+    FieldDesc::uint("payload_type", 9, 7, 0).named(&[
+        (0, "G.711 PCMU"),
+        (3, "GSM"),
+        (4, "G723"),
+        (5, "DVI4"),
+        (6, "DVI4"),
+        (7, "LPC"),
+        (8, "PCMA"),
+        (9, "G722"),
+        (10, "L16"),
+        (11, "L16"),
+        (12, "QCELP"),
+        (13, "CN"),
+        (14, "MPA"),
+        (15, "G728"),
+        (16, "DVI4"),
+        (17, "DVI4"),
+        (18, "G729"),
+        (25, "CelB"),
+        (26, "JPEG"),
+        (28, "nv"),
+        (31, "H261"),
+        (32, "MPV"),
+        (33, "MP2T"),
+        (34, "H263"),
+    ]),
     FieldDesc::uint("sequence", 16, 16, 0),
     FieldDesc::uint("timestamp", 32, 32, 0),
     FieldDesc::uint("sourcesync", 64, 32, 0),

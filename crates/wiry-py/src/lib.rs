@@ -14,7 +14,7 @@ mod writer;
 
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PySequence};
+use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PySequence, PyTuple};
 use std::collections::HashMap;
 use std::sync::Arc;
 use wiry_capture::Flow;
@@ -25,6 +25,7 @@ use wiry_core::options::{Item, OptArg};
 use wiry_core::packet::{self, dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use wiry_core::pcap;
 use wiry_core::proto::{self, ProtoId};
+use wiry_core::render;
 use wiry_core::repeat;
 use wiry_core::show;
 use wiry_core::stream;
@@ -208,6 +209,8 @@ fn options_to_py(py: Python<'_>, items: &[Item]) -> PyResult<Py<PyList>> {
     let out = PyList::empty_bound(py);
     for it in items {
         let v: PyObject = match &it.value {
+            // scapy keeps SAckOK's empty value as an empty string.
+            ItemValue::Flag if it.name.as_ref() == "SAckOK" => PyBytes::new_bound(py, b"").into(),
             ItemValue::Flag => py.None(),
             ItemValue::Uint(n) => n.into_py(py),
             ItemValue::Pair(a, b) => (*a, *b).into_py(py),
@@ -218,7 +221,11 @@ fn options_to_py(py: Python<'_>, items: &[Item]) -> PyResult<Py<PyList>> {
                 .map(|a| format!("{}.{}.{}.{}", a[0], a[1], a[2], a[3]))
                 .collect::<Vec<_>>()
                 .into_py(py),
-            ItemValue::Pairs(l) => PyList::new_bound(py, l).into(),
+            // A SACK block list is one flat tuple of edges in scapy.
+            ItemValue::Pairs(l) => {
+                let edges: Vec<u64> = l.iter().flat_map(|(a, b)| [*a, *b]).collect();
+                PyTuple::new_bound(py, edges).into()
+            }
             ItemValue::Items(v) => options_to_py(py, v)?.into_py(py),
         };
         out.append((it.name.as_ref(), v))?;
@@ -675,8 +682,13 @@ impl PyPkt {
         Ok(PyBytes::new_bound(py, self.inner.to_bytes()))
     }
 
-    fn show(&self) -> String {
-        show::show(&self.inner)
+    /// `given` is, for a packet still being built, the fields each layer was
+    /// assigned; the rest of what is computed at build time shows as `None`.
+    /// `start` renders from that layer on, as a layer of a packet prints.
+    #[pyo3(signature = (given = None, start = 0))]
+    fn show(&self, given: Option<Vec<Vec<String>>>, start: usize) -> String {
+        let g = given.as_deref().map(render::Given);
+        render::show_of(self.inner.raw_bytes(), self.inner.layers(), g, start)
     }
 
     /// Rebuilding from a field spec would lose variable-length header content.
@@ -688,8 +700,35 @@ impl PyPkt {
         }
     }
 
-    fn summary(&self) -> String {
-        show::summary(&self.inner)
+    #[pyo3(signature = (start = 0))]
+    fn summary(&self, start: usize) -> String {
+        render::summary_of(self.inner.raw_bytes(), self.inner.layers(), start)
+    }
+
+    /// `given` and `start` as for `show`.
+    #[pyo3(signature = (given = None, start = 0))]
+    fn repr(&self, given: Option<Vec<Vec<String>>>, start: usize) -> String {
+        let g = given.as_deref().map(render::Given);
+        render::repr_of(self.inner.raw_bytes(), self.inner.layers(), g, start)
+    }
+
+    /// The serialised octets from layer `start` on, lengths and checksums
+    /// computed: what `bytes()` of a layer of this packet is.
+    #[allow(clippy::wrong_self_convention)]
+    fn to_bytes_from<'py>(
+        &mut self,
+        py: Python<'py>,
+        start: usize,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        if let Some(e) = self.inner.oversize() {
+            return Err(PyValueError::new_err(e));
+        }
+        let off = match self.inner.layers().get(start) {
+            Some(s) => s.off as usize,
+            None => return Err(PyIndexError::new_err("layer out of range")),
+        };
+        let all = self.inner.to_bytes();
+        Ok(PyBytes::new_bound(py, all.get(off..).unwrap_or(&[])))
     }
 
     fn __len__(&self) -> usize {
@@ -898,6 +937,32 @@ impl PyPktList {
                         .any(|s| s.proto == id)
                 })
                 .count()
+        }))
+    }
+
+    /// Per name, the packets whose first match among `names` it is; the last
+    /// entry counts the packets matching none. One pass, as scapy's
+    /// `PacketList.__repr__` counts.
+    fn stats(&self, py: Python<'_>, names: Vec<String>) -> PyResult<Vec<usize>> {
+        let ids = names
+            .iter()
+            .map(|n| proto_by_name(n))
+            .collect::<PyResult<Vec<_>>>()?;
+        let buf = Arc::clone(&self.buf);
+        let idx = self.index.clone();
+        let link = self.link;
+        Ok(py.allow_threads(move || {
+            let mut out = vec![0usize; ids.len() + 1];
+            for (off, len, ..) in idx.iter() {
+                let spans =
+                    wiry_core::packet::dissect_spans(&buf[*off..*off + *len as usize], link);
+                let at = ids
+                    .iter()
+                    .position(|id| spans.iter().any(|s| s.proto == *id))
+                    .unwrap_or(ids.len());
+                out[at] += 1;
+            }
+            out
         }))
     }
 
@@ -1187,7 +1252,7 @@ impl PyPktList {
             idx.iter()
                 .map(|(off, len, ..)| {
                     let bytes = &buf[*off..*off + *len as usize];
-                    show::summary_of(&dissect_spans(bytes, link))
+                    render::summary_of(bytes, &dissect_spans(bytes, link), 0)
                 })
                 .collect()
         })
@@ -1412,8 +1477,44 @@ impl PyPktList {
         }
     }
 
+    /// The whole buffer the index points into: for a list read from a file,
+    /// the file itself, which is where pcapng keeps per-packet options.
+    fn blob<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new_bound(py, &self.buf)
+    }
+
+    /// A capture assembled from frames already in hand: `(octets, time,
+    /// wirelen)` each, one link type for all. Times are kept to the
+    /// nanosecond and clamped into what a capture record can hold.
+    #[staticmethod]
+    fn from_frames(frames: Vec<(Vec<u8>, f64, u32)>, dlt: u32) -> PyResult<PyPktList> {
+        let mut buf = Vec::with_capacity(frames.iter().map(|f| f.0.len()).sum());
+        let mut index = Vec::with_capacity(frames.len());
+        for (data, time, wirelen) in frames {
+            let len = u32::try_from(data.len())
+                .map_err(|_| PyValueError::new_err("frame longer than a capture record holds"))?;
+            let t = if time.is_finite() {
+                time.clamp(0.0, u32::MAX as f64)
+            } else {
+                0.0
+            };
+            let sec = t.floor();
+            let frac = (((t - sec) * 1e9).round() as u32).min(999_999_999);
+            index.push((buf.len(), len, sec as u32, frac, wirelen.max(len)));
+            buf.extend_from_slice(&data);
+        }
+        Ok(PyPktList::from_capture(buf, index, dlt, true))
+    }
+
     fn nums(&self) -> Vec<u32> {
         (0..self.index.len()).map(|i| self.num_at(i)).collect()
+    }
+
+    /// Every record's `(data offset, caplen, sec, frac, origlen)`, in one
+    /// crossing: what a raw reader hands out per record without minting a
+    /// packet.
+    fn index(&self) -> Vec<Record> {
+        self.index.clone()
     }
 
     fn times(&self) -> Vec<f64> {
@@ -2098,6 +2199,19 @@ fn enum_names(name: &str) -> PyResult<Vec<(&'static str, NamePairs)>> {
     Ok(out)
 }
 
+/// Fields whose value is the octets divided by a fixed scale: scapy's
+/// `BCDFloatField`, 8.8 fixed point.
+#[pyfunction]
+fn scaled_fields(name: &str) -> PyResult<Vec<(&'static str, u32)>> {
+    let id = proto_by_name(name)?;
+    Ok(proto::desc(id)
+        .fields
+        .iter()
+        .filter(|f| wiry_core::render_tables::repr_of(name, f.name) == render::Repr::Bcd)
+        .map(|f| (f.name, 256))
+        .collect())
+}
+
 #[pyfunction]
 fn known_layers() -> Vec<&'static str> {
     proto::known_layers()
@@ -2283,6 +2397,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parsed_field, m)?)?;
     m.add_function(wrap_pyfunction!(flag_names, m)?)?;
     m.add_function(wrap_pyfunction!(enum_names, m)?)?;
+    m.add_function(wrap_pyfunction!(scaled_fields, m)?)?;
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
     m.add_function(wrap_pyfunction!(register_layer, m)?)?;
     m.add_function(wrap_pyfunction!(bind_layer, m)?)?;

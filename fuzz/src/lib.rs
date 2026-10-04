@@ -5,7 +5,7 @@
 
 use wiry_core::packet::Packet;
 use wiry_core::proto::{self, ProtoId};
-use wiry_core::{parse, show};
+use wiry_core::{parse, render, show};
 
 /// Every built-in layer, derived from the registry rather than re-listed. As a
 /// hand-kept copy this list had silently fallen three layers behind.
@@ -54,8 +54,9 @@ pub fn exercise(pkt: &mut Packet) {
         }
         let _ = pkt.options(i);
     }
-    let _ = show::summary(pkt);
-    let _ = show::show(pkt);
+    let _ = render::summary(pkt);
+    let _ = render::show(pkt);
+    let _ = render::repr_packet(pkt);
     let _ = show::session_key(pkt.raw_bytes(), pkt.layers());
     let _ = pkt.to_bytes();
     check_spans(pkt);

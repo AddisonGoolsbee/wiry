@@ -28,19 +28,25 @@ TIMESTAMP = icmp(13, 0, struct.pack("!HH", 7, 9) + struct.pack("!III", 0x1000, 0
 ADDR_MASK = icmp(17, 0, struct.pack("!HH", 1, 2) + bytes([255, 255, 255, 0]))
 
 
+# scapy's `unused` exists for every type, zero octets wide where the type
+# defines its own fields; `extpad` is the RFC 4884 padding, empty in a header.
 @pytest.mark.parametrize(
     "pkt,present",
     [
-        (ECHO, ["type", "code", "chksum", "id", "seq"]),
-        (REDIRECT, ["type", "code", "chksum", "gw"]),
-        (UNREACH, ["type", "code", "chksum", "reserved", "length", "nexthopmtu"]),
-        (TIME_EXCEEDED, ["type", "code", "chksum", "reserved", "length"]),
-        (PARAM_PROBLEM, ["type", "code", "chksum", "ptr", "length"]),
+        (ECHO, ["type", "code", "chksum", "id", "seq", "unused"]),
+        (REDIRECT, ["type", "code", "chksum", "gw", "unused"]),
+        (UNREACH, ["type", "code", "chksum", "reserved", "length", "nexthopmtu",
+                   "unused", "extpad"]),
+        (TIME_EXCEEDED, ["type", "code", "chksum", "reserved", "length", "unused",
+                         "extpad"]),
+        (PARAM_PROBLEM, ["type", "code", "chksum", "ptr", "length", "unused",
+                         "extpad"]),
         (
             TIMESTAMP,
-            ["type", "code", "chksum", "id", "seq", "ts_ori", "ts_rx", "ts_tx"],
+            ["type", "code", "chksum", "id", "seq", "ts_ori", "ts_rx", "ts_tx",
+             "unused"],
         ),
-        (ADDR_MASK, ["type", "code", "chksum", "id", "seq", "addr_mask"]),
+        (ADDR_MASK, ["type", "code", "chksum", "id", "seq", "addr_mask", "unused"]),
     ],
 )
 def test_each_message_type_lists_exactly_its_own_fields(pkt, present):
@@ -50,9 +56,9 @@ def test_each_message_type_lists_exactly_its_own_fields(pkt, present):
 @pytest.mark.parametrize(
     "pkt,absent",
     [
-        (ECHO, ["gw", "ptr", "reserved", "length", "ts_ori", "addr_mask", "unused"]),
+        (ECHO, ["gw", "ptr", "reserved", "length", "ts_ori", "addr_mask"]),
         (REDIRECT, ["id", "seq", "ptr", "length", "nexthopmtu"]),
-        (UNREACH, ["id", "seq", "gw", "ptr", "unused"]),
+        (UNREACH, ["id", "seq", "gw", "ptr"]),
         (TIME_EXCEEDED, ["nexthopmtu", "id", "gw"]),
         (PARAM_PROBLEM, ["reserved", "nexthopmtu", "id", "gw"]),
         (TIMESTAMP, ["gw", "ptr", "addr_mask", "length"]),
@@ -106,12 +112,14 @@ def test_router_advertisement_names_its_four_octets_unused():
     assert pkt[ICMP].unused == 0x01020304
 
 
-def test_extension_fields_are_never_present():
-    # RFC 4884 puts them after the quoted datagram, in the payload.
+def test_the_extension_is_never_read_from_the_header():
+    # RFC 4884 puts it after the quoted datagram, in the payload.
     for pkt in (UNREACH, TIME_EXCEEDED, PARAM_PROBLEM):
-        for field in ("ext", "extpad"):
-            with pytest.raises(AttributeError):
-                getattr(pkt[ICMP], field)
+        with pytest.raises(AttributeError):
+            pkt[ICMP].ext
+        assert pkt[ICMP].extpad == b""
+    assert ECHO[ICMP].unused == b""
+    assert TIME_EXCEEDED[ICMP].unused == 0
 
 
 def test_writing_a_field_this_type_lacks_raises():
@@ -131,7 +139,7 @@ def test_constructing_with_a_field_this_type_lacks_raises():
 def test_changing_type_changes_which_fields_exist():
     pkt = ICMP(bytes(ECHO))
     pkt[ICMP].type = 5
-    assert pkt[ICMP].fields() == ["type", "code", "chksum", "gw"]
+    assert pkt[ICMP].fields() == ["type", "code", "chksum", "gw", "unused"]
     assert pkt[ICMP].gw == "18.52.0.1"
     with pytest.raises(AttributeError):
         pkt[ICMP].id

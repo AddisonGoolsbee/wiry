@@ -42,7 +42,7 @@ def test_the_knobs_scripts_read_are_all_present_and_are_booleans():
 
 
 def test_a_knob_conf_does_not_have_is_refused_rather_than_absorbed():
-    for name in ("checkIPsrc", "manufdb", "color_theme", "nonsense"):
+    for name in ("checkIPsrc", "color_theme", "nonsense"):
         with pytest.raises(AttributeError):
             setattr(P.conf, name, True)
 

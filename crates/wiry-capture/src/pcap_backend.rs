@@ -187,17 +187,47 @@ pub fn open_live(cfg: &LiveConfig) -> Result<Handle, CaptureError> {
     Ok(h)
 }
 
+/// The DLT_ value libpcap's compiler wants for a capture file's LINKTYPE_.
+/// They are the same number except where a BSD assigned a DLT before the
+/// file format reserved one (libpcap's `linktype_to_dlt`, pcap-common.c).
+fn dlt_of(linktype: u32) -> u32 {
+    match linktype {
+        100 => 11,
+        101 if cfg!(target_os = "openbsd") => 14,
+        101 => 12,
+        102 => 15,
+        103 => 16,
+        106 => 19,
+        other => other,
+    }
+}
+
 pub fn compile_filter(
     linktype: u32,
     expr: &str,
     snaplen: u32,
 ) -> Result<CompiledFilter, CaptureError> {
-    let mut dead = raw::Handle::open_dead(linktype as i32, snaplen.min(i32::MAX as u32) as i32)
-        .map_err(|e| map_err(e, "dead"))?;
+    let mut dead =
+        raw::Handle::open_dead(dlt_of(linktype) as i32, snaplen.min(i32::MAX as u32) as i32)
+            .map_err(|e| map_err(e, "dead"))?;
     let prog = dead.compile(expr, None).map_err(|e| map_err(e, "filter"))?;
     Ok(CompiledFilter { prog, _dead: dead })
 }
 
 pub fn send_l3(frames: &[Vec<u8>], count: usize, inter: f64) -> Result<usize, CaptureError> {
     crate::l3::send_l3(frames, count, inter)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dlt_of;
+
+    #[test]
+    fn a_file_link_type_is_compiled_against_its_dlt() {
+        let raw = if cfg!(target_os = "openbsd") { 14 } else { 12 };
+        assert_eq!(dlt_of(101), raw);
+        assert_eq!(dlt_of(100), 11);
+        assert_eq!(dlt_of(1), 1);
+        assert_eq!(dlt_of(228), 228);
+    }
 }

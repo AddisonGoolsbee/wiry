@@ -1,5 +1,5 @@
 use crate::field::{self, FieldValue};
-use crate::packet::{LayerSpan, Packet};
+use crate::packet::LayerSpan;
 use crate::proto::{self, ProtoId};
 
 pub fn render_value(v: &FieldValue) -> String {
@@ -110,18 +110,6 @@ pub fn render_ipv6(b: &[u8; 16]) -> String {
     )
 }
 
-pub fn summary_of(spans: &[LayerSpan]) -> String {
-    spans
-        .iter()
-        .map(|s| s.proto.name())
-        .collect::<Vec<_>>()
-        .join(" / ")
-}
-
-pub fn summary(pkt: &Packet) -> String {
-    summary_of(pkt.layers())
-}
-
 fn read(buf: &[u8], spans: &[LayerSpan], id: ProtoId, name: &str) -> Option<FieldValue> {
     let at = spans.iter().position(|s| s.proto == id)?;
     let hdr = spans[at].header(buf);
@@ -181,30 +169,6 @@ pub fn session_key(buf: &[u8], spans: &[LayerSpan]) -> String {
         Some(t) => format!("Ethernet type={t:04x}"),
         None => "Other".to_string(),
     }
-}
-
-pub fn show(pkt: &Packet) -> String {
-    let mut out = String::new();
-    for (i, s) in pkt.layers().iter().enumerate() {
-        let d = crate::proto::desc(s.proto);
-        out.push_str(&format!("###[ {} ]###\n", d.name));
-        let hdr = pkt.header(i);
-        for f in pkt.active_fields(i) {
-            let v = pkt.get_desc(i, f);
-            if let FieldValue::Bytes(ref b) = v {
-                if b.is_empty() {
-                    continue;
-                }
-            }
-            let named = match v {
-                FieldValue::Uint(n) => f.name_of(hdr, n),
-                _ => None,
-            };
-            let text = named.map_or_else(|| render_value(&v), str::to_string);
-            out.push_str(&format!("  {:<11}= {}\n", f.name, text));
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -304,13 +268,6 @@ mod tests {
             let key = key_of(full[..n.min(full.len())].to_vec());
             assert!(!key.is_empty(), "truncated to {n} produced no key");
         }
-    }
-
-    #[test]
-    fn a_summary_over_spans_matches_the_one_over_a_packet() {
-        let pkt = Packet::dissect(frame(0x0800, &ipv4(17, &[0u8; 8])), ProtoId::Ether);
-        assert_eq!(summary_of(pkt.layers()), summary(&pkt));
-        assert_eq!(summary(&pkt), "Ether / IP / UDP");
     }
 
     #[test]

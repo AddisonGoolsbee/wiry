@@ -558,6 +558,11 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
     // 60-octet minimum carries bytes past it.
     let mut end = buf.len();
     let mut proto = link;
+    // A raw-IP capture (LINKTYPE_RAW) holds both versions under one link
+    // type; the version nibble is what says which.
+    if proto == ProtoId::Ipv4 && buf.first().is_some_and(|b| b >> 4 == 6) {
+        proto = ProtoId::Ipv6;
+    }
     // `None`, not a sentinel protocol: the outermost layer has no enclosing pair
     // to contribute framing, which is also how `framing_at` reads it back.
     let mut parent: Option<ProtoId> = None;
