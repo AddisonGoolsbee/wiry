@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
 # Derived from scapy: scapy/layers/dhcp6.py, DomainNameListField from
-#   scapy/layers/inet6.py, DNSStrField, dns_encode, dns_get_str and _is_ptr
-#   from scapy/layers/dns.py, scapy 2.7.0; IP6ListField from
+#   scapy/layers/inet6.py, scapy 2.7.0; IP6ListField from
 #   scapy/layers/inet6.py, scapy master, upstream commit e2e35c0
 #   Copyright (C) Philippe Biondi <phil@secdev.org>
 #   Copyright (C) 2005  Guillaume Valadon <guedou@hongo.wide.ad.jp>
@@ -14,8 +13,7 @@
 #     client (RFC 8415 §7.2) and answers ADDR-REG-INFORM (RFC 9686 §4.3); VSS
 #     data excludes its type octet (RFC 6607 §3.4); a civic address element's
 #     length is one octet (RFC 4776 §3.3); dhcp6d stamps its DUID-LLT from
-#     midnight UTC (RFC 8415 §11.2). DNSStrField has no DNS message to
-#     follow a compression pointer into, as in scapy.
+#     midnight UTC (RFC 8415 §11.2).
 """DHCPv6: Dynamic Host Configuration Protocol for IPv6 (RFC 8415).
 
 The Rust DHCP6 layer finds the message on UDP 546 and 547 and is what
@@ -40,6 +38,7 @@ from .._pyfields import (
 )
 from .._pylayer import PyPacket as Packet
 from ..ansmachine import AnsweringMachine
+from .dns import DNSStrField, dns_encode, dns_get_str  # noqa: F401
 from ..data import ETHER_ANY, IANA_ENTERPRISE_NUMBERS
 from ..utils6 import in6_addrtovendor, in6_islladdr
 
@@ -184,119 +183,6 @@ class DomainNameListField(StrLenField):
             ret_string += b"\x00" * (self.padded_unit - len(ret_string) % self.padded_unit)
 
         return ret_string
-
-
-def dns_get_str(s, full=None, _ignore_compression=False):
-    """Decode a name from `s`, following compression pointers into `full`.
-
-    Returns the name and the octets after it.
-    """
-    max_length = len(s)
-    name = b""
-    after_pointer = None
-    processed_pointers = []
-    bytes_left = None
-    _fullpacket = False
-    pointer = 0
-    while True:
-        if abs(pointer) >= max_length:
-            log_runtime.info(
-                "DNS RR prematured end (ofs=%i, len=%i)", pointer, len(s)
-            )
-            break
-        cur = s[pointer]
-        pointer += 1
-        if cur & 0xc0:
-            if after_pointer is None:
-                after_pointer = pointer + 1
-            if _ignore_compression:
-                pointer += 1
-                continue
-            if pointer >= max_length:
-                log_runtime.info(
-                    "DNS incomplete jump token at (ofs=%i)", pointer
-                )
-                break
-            if not full:
-                raise Scapy_Exception("DNS message can't be compressed " +
-                                      "at this point!")
-            pointer = ((cur & ~0xc0) << 8) + s[pointer]
-            if pointer in processed_pointers:
-                warning("DNS decompression loop detected")
-                break
-            if len(processed_pointers) >= 20:
-                warning("More than 20 jumps in a single DNS decompression ! "
-                        "Dropping (evil packet)")
-                break
-            if not _fullpacket:
-                bytes_left = s[after_pointer:]
-                s = full
-                max_length = len(s)
-                _fullpacket = True
-            processed_pointers.append(pointer)
-            continue
-        elif cur > 0:
-            name += s[pointer:pointer + cur] + b"."
-            pointer += cur
-        else:
-            break
-    if after_pointer is not None:
-        pointer = after_pointer
-    if bytes_left is None:
-        bytes_left = s[pointer:]
-    return name or b".", bytes_left
-
-
-def _is_ptr(x):
-    """Whether `x` looks already encoded: it ends in a root label or a
-    compression pointer."""
-    return (
-        (x and x[-1] == 0) or
-        (len(x) >= 2 and (x[-2] & 0xc0) == 0xc0)
-    )
-
-
-def dns_encode(x, check_built=False):
-    """`x` in DNS wire form, labels over 63 octets truncated; with
-    `check_built`, a value that is already wire form is kept as it is."""
-    if not x or x == b".":
-        return b"\x00"
-
-    if check_built and _is_ptr(x):
-        return x
-
-    x = b"".join(chb(len(y)) + y for y in (k[:63] for k in x.split(b".")))
-    if x[-1:] != b"\x00":
-        x += b"\x00"
-    return x
-
-
-class DNSStrField(StrLenField):
-    def any2i(self, pkt, x):
-        if x and isinstance(x, list):
-            return [self.h2i(pkt, y) for y in x]
-        return super(DNSStrField, self).any2i(pkt, x)
-
-    def h2i(self, pkt, x):
-        if not x:
-            return b"."
-        x = bytes_encode(x)
-        if x[-1:] != b"." and not _is_ptr(x):
-            return x + b"."
-        return x
-
-    def i2m(self, pkt, x):
-        return dns_encode(x, check_built=True)
-
-    def i2len(self, pkt, x):
-        return len(self.i2m(pkt, x))
-
-    def getfield(self, pkt, s):
-        remain = b""
-        if self.length_from:
-            remain, s = super(DNSStrField, self).getfield(pkt, s)
-        decoded, left = dns_get_str(s)
-        return left + remain, decoded
 
 
 #############################################################################
