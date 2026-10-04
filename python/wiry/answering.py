@@ -11,13 +11,16 @@
 # Changed by the wiry authors:
 #   2026-10-03 — ported onto wiry's layers. Replies are built as layer stacks,
 #                so an unset source address is filled from the interface at
-#                send time (E9). NetBIOS names are encoded here per RFC 1002,
-#                since NBNS reads them but does not write them. DHCP_am answers
-#                nothing, rather than raising, once its pool is exhausted.
+#                send time (E9). DNS records and NetBIOS names are encoded
+#                here per RFC 1035 and RFC 1002, since the layers read them
+#                but do not write them (E8). mDNS's negative NSEC lists the
+#                types the name holds (RFC 6762 §6.1); DHCP_am answers nothing,
+#                rather than raising, once its pool is exhausted.
 #   2026-10-04 — the DNS machines build replies from wiry.layers.dns's
-#                records and compress them as scapy does; relay=True asks
-#                conf.nameservers. mDNS's negative NSEC lists the types the
-#                name holds (RFC 6762 §6.1), not the type asked for.
+#                records and compress them as scapy does, and relay=True asks
+#                conf.nameservers; the encoder that lived here is gone. The
+#                negative NSEC now does list the types the name holds, which
+#                the previous one claimed but did not.
 
 """scapy's ready-made answering machines, over wiry's layers.
 

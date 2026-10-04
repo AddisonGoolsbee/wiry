@@ -6,6 +6,7 @@
 //
 // Changed by the wiry authors:
 //   2026-10-03 — opcode and rcode names transcribed into the field table
+//   2026-10-04 — the layer spans the whole message, as scapy's DNS does
 
 //! RFC 1035 §4.1: the header is a field table and the record sections are
 //! decoded by [`parse_records`]. RDATA layouts: RFC 1035 §3.3, RFC 2782 (SRV),
