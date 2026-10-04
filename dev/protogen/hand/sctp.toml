@@ -1,0 +1,14 @@
+# Chunk layers chain to the next chunk as scapy's _SCTPChunkGuessPayload does;
+# `next` is in each generated file's hand region.
+
+[SCTPChunkShutdown]
+next = "hand"
+
+[SCTPChunkShutdownAck]
+next = "hand"
+
+[SCTPChunkCookieAck]
+next = "hand"
+
+[SCTPChunkShutdownComplete]
+next = "hand"

@@ -143,6 +143,23 @@ def _to_bytes(x: Any, what: str = "value") -> bytes:
     raise TypeError(f"{what} must be bytes or str, not {type(x).__name__}")
 
 
+class _LayerName(str):
+    """A layer's name that also equals its class, since scapy's `layers()`
+    lists classes and `ICMP in pkt.layers()` is how its users ask."""
+
+    __slots__ = ()
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, type):
+            return other.__dict__.get("_name") == str(self)
+        return str.__eq__(self, other)
+
+    def __ne__(self, other: Any) -> bool:
+        return not self == other
+
+    __hash__ = str.__hash__
+
+
 class GroupItem(tuple):
     """One element of a repeating group. Still the `(name, fields)` pair it
     always was, so it compares equal to one; its fields also read as
@@ -816,7 +833,12 @@ def _layer_init(name: str):
             if name in _OPAQUE:
                 kw.setdefault("load", _to_bytes(_data))
             else:
-                Packet.__init__(self, _rust=_b.dissect(_to_bytes(_data), name))
+                rust = _b.dissect(_to_bytes(_data), name)
+                Packet.__init__(self, _rust=rust)
+                # scapy's dispatch_hook: the bytes named a subclass.
+                first = rust.layer_names()[:1]
+                if first and first[0] not in (name, "Raw", "Padding"):
+                    self._adopt_class()
                 return
         Packet.__init__(self, _stack=[(name, dict(kw))])
 
@@ -1335,9 +1357,9 @@ class Packet(metaclass=_PacketMeta):
         everything above it are named by their classes, as in scapy."""
         names = self._names()
         top = self._py_top()
-        if top is None:
-            return names
-        return names[:top[0]] + [c.__name__ for c in top[1].layers()]
+        if top is not None:
+            names = names[:top[0]] + [c.__name__ for c in top[1].layers()]
+        return [_LayerName(n) for n in names]
 
     def haslayer(self, layer: Any) -> bool:
         if self._wants_py(layer):

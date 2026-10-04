@@ -160,6 +160,7 @@ per-file blocks are authoritative.
 | `python/wiry/sendrecv.py` | `scapy/sendrecv.py` | 2.7.0 / `7d69454` | 2026-10-03 |
 | `python/wiry/capture.py` | `scapy/sendrecv.py` (the socket loop of `AsyncSniffer._run`) | 2.7.0 / `7d69454` | 2026-10-03 |
 | `python/wiry/answering.py` | `scapy/layers/l2.py`, `inet.py`, `dhcp.py`, `dns.py`, `llmnr.py`, `netbios.py` (the answering machines) | 2.7.0 / `7d69454` | 2026-10-03 |
+| `crates/wiry-core/src/layers/variants.rs` | `scapy/layers/pptp.py`, `scapy/layers/ppp.py`, `scapy/layers/dot11.py` (the `dispatch_hook`s) | scapy 2.7.0 | 2026-10-04 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift
