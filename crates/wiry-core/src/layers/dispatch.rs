@@ -69,7 +69,7 @@ pub fn by_ipproto_of(p: ProtoId) -> Option<u8> {
 
 const UDP_PORT_VALUES: &[u16] = &[
     69, 80, 123, 137, 161, 162, 434, 443, 514, 520, 546, 547, 1645, 1646, 1812, 1813, 1985, 2055,
-    3784, 3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
+    2056, 3784, 3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
 ];
 
 static UDP_PORT_CLAIMED: [u64; 810] = port_bits(UDP_PORT_VALUES);
@@ -102,6 +102,7 @@ fn by_udp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
             }
             None
         }
+        2056 => Some(ProtoId::NetflowHeader),
         3784 | 3785 | 4784 => Some(ProtoId::Bfd),
         4739 => crate::layers::ipfix::looks_like(payload).then_some(ProtoId::Ipfix),
         5060 | 5061 => crate::layers::sip::looks_like(payload).then_some(ProtoId::Sip),
@@ -135,6 +136,7 @@ pub fn by_udp_port_of(p: ProtoId) -> Option<u16> {
         ProtoId::Radius => Some(1812),
         ProtoId::Rip => Some(520),
         ProtoId::MobileIP => Some(434),
+        ProtoId::NetflowHeader => Some(2056),
         ProtoId::SFlow => Some(6343),
         ProtoId::Sip => Some(5060),
         ProtoId::Snmp => Some(161),
@@ -265,9 +267,13 @@ pub fn by_icmpv6_type_of(p: ProtoId) -> Option<u8> {
 pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
     match parent {
         ProtoId::ATTHdr => by_a_t_t_hdr(hdr),
+        ProtoId::Dot11Action => by_dot11_action(hdr),
         ProtoId::HCIEventLEMeta => by_h_c_i_event_l_e_meta(hdr),
         ProtoId::HCIPHDRHdr => by_h_c_i_p_h_d_r_hdr(hdr),
         ProtoId::MobileIP => by_mobile_i_p(hdr),
+        ProtoId::NetflowRecordV1 => by_netflow_record_v1(hdr),
+        ProtoId::NetflowRecordV5 => by_netflow_record_v5(hdr),
+        ProtoId::NetflowV5 => by_netflow_v5(hdr),
         ProtoId::Ppp => by_ppp(hdr),
         ProtoId::PppoeDisc => by_pppoe_disc(hdr),
         ProtoId::SMHdr => by_s_m_hdr(hdr),
@@ -307,6 +313,18 @@ fn by_a_t_t_hdr(hdr: &[u8]) -> Option<ProtoId> {
 }
 
 #[inline(never)]
+fn by_dot11_action(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_bits(hdr, 0, 8) {
+            0 => return Some(ProtoId::Dot11SpectrumManagement),
+            10 => return Some(ProtoId::Dot11WNM),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
 fn by_h_c_i_event_l_e_meta(hdr: &[u8]) -> Option<ProtoId> {
     if hdr.len() * 8 >= 8 {
         match crate::field::read_bits(hdr, 0, 8) {
@@ -334,6 +352,21 @@ fn by_mobile_i_p(hdr: &[u8]) -> Option<ProtoId> {
         }
     }
     None
+}
+
+#[inline(never)]
+fn by_netflow_record_v1(_hdr: &[u8]) -> Option<ProtoId> {
+    Some(ProtoId::NetflowRecordV1)
+}
+
+#[inline(never)]
+fn by_netflow_record_v5(_hdr: &[u8]) -> Option<ProtoId> {
+    Some(ProtoId::NetflowRecordV5)
+}
+
+#[inline(never)]
+fn by_netflow_v5(_hdr: &[u8]) -> Option<ProtoId> {
+    Some(ProtoId::NetflowRecordV5)
 }
 
 #[inline(never)]
@@ -438,6 +471,12 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTWriteRequest {
         crate::field::write_bits(hdr, 0, 8, 18);
+    }
+    if parent == ProtoId::Dot11Action && child == ProtoId::Dot11SpectrumManagement {
+        crate::field::write_bits(hdr, 0, 8, 0);
+    }
+    if parent == ProtoId::Dot11Action && child == ProtoId::Dot11WNM {
+        crate::field::write_bits(hdr, 0, 8, 10);
     }
     if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaConnectionUpdateComplete {
         crate::field::write_bits(hdr, 0, 8, 3);
@@ -548,6 +587,11 @@ mod tests {
     fn every_parent_field_is_where_the_bindings_read_it() {
         assert_eq!(
             crate::proto::field_of(ProtoId::ATTHdr, "opcode").map(|f| (f.bit_off, f.bit_len)),
+            Some((0, 8))
+        );
+        assert_eq!(
+            crate::proto::field_of(ProtoId::Dot11Action, "category")
+                .map(|f| (f.bit_off, f.bit_len)),
             Some((0, 8))
         );
         assert_eq!(
