@@ -45,6 +45,16 @@ KINDS = {
 
 FIXED_BITS = {"ipv4": 32, "ipv6": 128, "mac": 48}
 
+# `enum = "<one of these>"` names a table scapy loads from the host rather
+# than one written out in the spec.
+HOST_ENUMS = {
+    "ETHER_TYPES": "EtherTypes",
+    "IP_PROTOS": "IpProtos",
+    "TCP_SERVICES": "TcpServices",
+    "UDP_SERVICES": "UdpServices",
+    "SCTP_SERVICES": "SctpServices",
+}
+
 PARENT_KINDS = {
     "ethertype": ("by_ethertype", "u16"),
     "ipproto": ("by_ipproto", "u8"),
@@ -100,6 +110,40 @@ def load_specs() -> list[dict]:
     return out
 
 
+def validate_enum(f: str, fd: dict) -> None:
+    """`enum` maps integers to names. TOML keys are strings, so each one must
+    read as an integer, and every value must fit the field it names."""
+    e = fd.get("enum")
+    if e is None:
+        return
+    name = fd.get("name")
+    if fd.get("kind", "uint") not in ("uint", "le_uint", "computed"):
+        raise SpecError(f"{f}: {name!r} has an enum but is not an integer field")
+    if isinstance(e, str):
+        if e not in HOST_ENUMS:
+            raise SpecError(
+                f"{f}: {name!r} names enum {e!r}; a shared table is one of "
+                f"{sorted(HOST_ENUMS)}"
+            )
+        return
+    if not isinstance(e, dict) or not e:
+        raise SpecError(f"{f}: {name!r} enum must be a table of value = \"name\"")
+    table = {}
+    for k, v in e.items():
+        try:
+            n = int(k, 0)
+        except ValueError:
+            raise SpecError(f"{f}: {name!r} enum key {k!r} is not an integer") from None
+        if not isinstance(v, str) or not v:
+            raise SpecError(f"{f}: {name!r} enum value for {k} must be a name")
+        if n < 0 or n >> fd["len"]:
+            raise SpecError(f"{f}: {name!r} enum value {n} does not fit {fd['len']} bits")
+        if n in table:
+            raise SpecError(f"{f}: {name!r} enum names {n} twice")
+        table[n] = v
+    fd["enum"] = dict(sorted(table.items()))
+
+
 def validate_group(f: str, g: dict, nested: bool) -> None:
     """A repeating group: DEVIATIONS E1's escape from the flat table. Every
     refusal here is a layout the walk would read wrongly rather than fail on."""
@@ -149,6 +193,7 @@ def validate_group(f: str, g: dict, nested: bool) -> None:
             continue
         if "len" not in fd:
             raise SpecError(f"{f}: group field {fd['name']!r} needs a bit length")
+        validate_enum(f, fd)
         if fixed is not None and fd["off"] + fd["len"] > fixed * 8:
             raise SpecError(
                 f"{f}: group field {fd['name']!r} ends past the "
@@ -201,6 +246,7 @@ def validate(s: dict) -> None:
             fd["len"] = 0
         elif "len" not in fd:
             raise SpecError(f"{f}: field {fd['name']!r} needs a bit length")
+        validate_enum(f, fd)
         if kind == "flags":
             names = fd.get("flags")
             if not names:
@@ -313,6 +359,12 @@ def render_field(fd: dict) -> str:
         expr += f".defaulting_to(&[{b}])"
     if fd.get("when"):
         expr += f".when({fd['when']})"
+    e = fd.get("enum")
+    if isinstance(e, str):
+        expr += f".host_named(crate::names::Host::{HOST_ENUMS[e]})"
+    elif e:
+        pairs = ", ".join(f"({k}, {rs_str(v)})" for k, v in e.items())
+        expr += f".named(&[{pairs}])"
     return f"    {expr},"
 
 

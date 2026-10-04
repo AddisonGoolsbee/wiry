@@ -2,6 +2,7 @@
 //! IANA "ETHER TYPES" registry.
 
 use crate::field::FieldDesc;
+use crate::names::Host;
 use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
 
 pub static FIELDS: &[FieldDesc] = &[
@@ -9,7 +10,7 @@ pub static FIELDS: &[FieldDesc] = &[
     // `src` stays zero: filling it from the host interface needs interface
     // introspection, out of scope for the offline build (DEVIATIONS.md S2).
     FieldDesc::mac("src", 48),
-    FieldDesc::uint("type", 96, 16, ethertype::LOOP as u64),
+    FieldDesc::uint("type", 96, 16, ethertype::LOOP as u64).host_named(Host::EtherTypes),
 ];
 
 fn header_len(_: &[u8]) -> usize {

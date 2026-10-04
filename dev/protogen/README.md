@@ -70,6 +70,13 @@ kind = "uint"             # uint le_uint computed ipv4 ipv6 mac flags bytes
 default = 3
 when = "is_v2"            # optional: a hand-written fn(&[u8]) -> bool
 flags = ["M", "D"]        # required when kind = "flags"; least significant first
+enum = { 0 = "echo-reply", 8 = "echo-request" }
+                          # optional, integer kinds only: the names scapy's
+                          # *EnumField gives the values. Rendering prints the
+                          # name, assignment accepts it, reading still gives the
+                          # integer. Or a string naming a table scapy loads from
+                          # the host: "ETHER_TYPES", "IP_PROTOS", "TCP_SERVICES",
+                          # "UDP_SERVICES", "SCTP_SERVICES"
 default_bytes = [255, 255]
 overlaps = true           # only where two fields deliberately share octets
 
@@ -168,6 +175,9 @@ raise:
   variable-length record field that is not last, or that sits in a group of
   fixed `elem_len`, where it would have nothing to cover
 - a `[provenance]` table missing `source`, `version` or `changed`
+- an `enum` on a field that is not an integer, with a key that does not read as
+  an integer, a value that does not fit the field, a value named twice, or a
+  string naming no shared table
 
 ## The escape hatch
 

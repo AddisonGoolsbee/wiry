@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/dhcp.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — op names transcribed into the field table
+
 //! BOOTP header layout from RFC 951 §3, with the field interpretation of
 //! RFC 2131 §2 and figure 1: the 16-bit field at offset 10, unused in RFC 951,
 //! carries the BROADCAST flag. Hardware types from the IANA "Hardware Types"
@@ -5,8 +14,12 @@
 //! them is RFC 2131 §3 and RFC 1497.
 
 use crate::field::FieldDesc;
+use crate::names::Table;
 use crate::options::{Item, LenRule, OptDesc, OptTable, Shape};
 use crate::proto::{Next, ProtoDesc, ProtoId};
+
+/// scapy 2.7.0 `BOOTP.op`.
+static OPS: Table = &[(1, "BOOTREQUEST"), (2, "BOOTREPLY")];
 
 /// RFC 951 §3: `file` ends at 108 + 128.
 const BOOTP_LEN: usize = 236;
@@ -27,8 +40,8 @@ pub static FLAG_NAMES: &[&str] = &[
 ];
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("op", 0, 8, 1),
-    FieldDesc::uint("htype", 8, 8, 1),
+    FieldDesc::uint("op", 0, 8, 1).named(OPS),
+    FieldDesc::uint("htype", 8, 8, 1).named(crate::layers::arp::HWTYPES),
     FieldDesc::uint("hlen", 16, 8, 6),
     FieldDesc::uint("hops", 24, 8, 0),
     FieldDesc::uint("xid", 32, 32, 0),

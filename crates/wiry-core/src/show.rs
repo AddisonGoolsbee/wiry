@@ -188,6 +188,7 @@ pub fn show(pkt: &Packet) -> String {
     for (i, s) in pkt.layers().iter().enumerate() {
         let d = crate::proto::desc(s.proto);
         out.push_str(&format!("###[ {} ]###\n", d.name));
+        let hdr = pkt.header(i);
         for f in pkt.active_fields(i) {
             let v = pkt.get_desc(i, f);
             if let FieldValue::Bytes(ref b) = v {
@@ -195,7 +196,12 @@ pub fn show(pkt: &Packet) -> String {
                     continue;
                 }
             }
-            out.push_str(&format!("  {:<11}= {}\n", f.name, render_value(&v)));
+            let named = match v {
+                FieldValue::Uint(n) => f.name_of(hdr, n),
+                _ => None,
+            };
+            let text = named.map_or_else(|| render_value(&v), str::to_string);
+            out.push_str(&format!("  {:<11}= {}\n", f.name, text));
         }
     }
     out

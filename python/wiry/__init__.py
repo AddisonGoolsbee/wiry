@@ -471,6 +471,38 @@ def _field_kind(layer: str, field: str) -> str:
     return kinds.get(field, "")
 
 
+_ENUMS: dict[str, dict[str, dict[int, str]]] = {}
+_S2I: dict[tuple[str, str], dict[str, int]] = {}
+
+
+def _enum_table(layer: str) -> dict[str, dict[int, str]]:
+    """Each enumerated field's names, cached per layer. A field whose names
+    another field selects maps to an empty table."""
+    table = _ENUMS.get(layer)
+    if table is None:
+        try:
+            table = {f: dict(pairs) for f, pairs in _b.enum_names(layer)}
+        except ValueError:
+            table = {}
+        _ENUMS[layer] = table
+    return table
+
+
+def _named(layer: str, field: str, value: Any) -> Any:
+    """A name resolved to its value, so it is written in the same pass as the
+    integers it may decide the layout for. A name this table does not know is
+    left for the engine, which reports it."""
+    s2i = _S2I.get((layer, field))
+    if s2i is None:
+        s2i = {n: v for v, n in _enum_table(layer).get(field, {}).items()}
+        _S2I[(layer, field)] = s2i
+    if isinstance(value, str):
+        return s2i.get(value, value)
+    if isinstance(value, list) and s2i:
+        return [s2i.get(x, x) if isinstance(x, str) else x for x in value]
+    return value
+
+
 def _chunks(tmpl: Any, frames: bool) -> Iterator[list]:
     fetch = tmpl.frames if frames else tmpl.packets
     total, at = tmpl.count, 0
@@ -673,6 +705,7 @@ class Packet(metaclass=_PacketMeta):
             for k, v in fields.items():
                 if not _is_plain_field(lname, k, v):
                     continue
+                v = _named(lname, k, v)
                 spec = gen_spec(v, _field_kind(lname, k))
                 if spec is not None:
                     gens.append((i, k, spec))

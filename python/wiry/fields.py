@@ -1,3 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Derived from scapy: scapy/fields.py
+#   scapy 2.7.0
+#   Copyright (C) Philippe Biondi and the scapy contributors
+#
+# Changed by the wiry authors:
+#   2026-10-03 — enumerated fields: a dict or list of names, a default given by name
+
 """Field classes for declaring your own layer.
 
 A field carries a name, a width in bits, a kind and a default. Subclassing
@@ -16,7 +25,9 @@ __all__ = [
     "Field", "ByteField", "XByteField", "ShortField", "XShortField",
     "LEShortField", "IntField", "XIntField", "LEIntField", "LongField",
     "XLongField", "LELongField", "BitField", "IPField", "IP6Field", "MACField",
-    "StrFixedLenField", "StrField", "FlagsField",
+    "StrFixedLenField", "StrField", "FlagsField", "ByteEnumField",
+    "XByteEnumField", "ShortEnumField", "XShortEnumField", "IntEnumField",
+    "XIntEnumField", "LEShortEnumField", "LEIntEnumField", "BitEnumField",
 ]
 
 
@@ -25,12 +36,13 @@ class Field:
 
     kind = "uint"
 
-    __slots__ = ("name", "default", "size")
+    __slots__ = ("name", "default", "size", "i2s")
 
     def __init__(self, name: str, default: Any = 0, size: int = 8):
         self.name = name
         self.default = default
         self.size = size
+        self.i2s: dict[int, str] = {}
 
     def spec(self) -> tuple:
         """What Rust needs: name, bits, kind, default, wide default, flags."""
@@ -195,6 +207,69 @@ class FlagsField(Field):
         return (self.name, self.size, self.kind, int(v or 0), None, list(self.names))
 
 
+class _EnumField(Field):
+    """An integer whose values have names: a dict of value to name, or a list
+    naming 0, 1, 2 and so on. Reading gives the integer, rendering the name,
+    and assigning accepts either."""
+
+    def __init__(self, name: str, default: Any, size: int, enum: Any):
+        super().__init__(name, default, size)
+        if isinstance(enum, (list, tuple)):
+            enum = dict(enumerate(enum))
+        self.i2s = {int(k): str(v) for k, v in dict(enum).items()}
+        if isinstance(default, str):
+            s2i = {v: k for k, v in self.i2s.items()}
+            if default not in s2i:
+                raise ValueError(f"{name}: default {default!r} is not one of its names")
+            self.default = s2i[default]
+
+
+def _sized(size: int, kind: str = "uint"):
+    def __init__(self, name: str, default: Any, enum: Any):
+        _EnumField.__init__(self, name, default, size, enum)
+
+    return type("", (_EnumField,), {"__init__": __init__, "kind": kind, "__slots__": ()})
+
+
+class ByteEnumField(_sized(8)):
+    __slots__ = ()
+
+
+class XByteEnumField(ByteEnumField):
+    __slots__ = ()
+
+
+class ShortEnumField(_sized(16)):
+    __slots__ = ()
+
+
+class XShortEnumField(ShortEnumField):
+    __slots__ = ()
+
+
+class IntEnumField(_sized(32)):
+    __slots__ = ()
+
+
+class XIntEnumField(IntEnumField):
+    __slots__ = ()
+
+
+class LEShortEnumField(_sized(16, "le_uint")):
+    __slots__ = ()
+
+
+class LEIntEnumField(_sized(32, "le_uint")):
+    __slots__ = ()
+
+
+class BitEnumField(_EnumField):
+    __slots__ = ()
+
+    def __init__(self, name: str, default: Any, size: int, enum: Any):
+        super().__init__(name, default, size, enum)
+
+
 def specs(fields_desc: Sequence[Any]) -> list[tuple]:
     """The wire description of a whole ``fields_desc``."""
-    return [f.spec() for f in fields_desc]
+    return [(*f.spec(), sorted(f.i2s.items())) for f in fields_desc]

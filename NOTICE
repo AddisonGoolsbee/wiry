@@ -99,6 +99,16 @@ per-file blocks are authoritative.
 | `python/wiry/route.py` | `scapy/route.py`, `scapy/route6.py`, `scapy/arch/unix.py`, `scapy/arch/linux/rtnetlink.py`, `scapy/utils6.py` | 2.7.0 / `7d69454` | 2026-09-18 |
 | `python/wiry/stream.py` | `scapy/sessions.py` (the session protocol only) | 2.7.0 / `7d69454` | 2026-09-18 |
 | `python/wiry/volatile.py` | `scapy/utils.py` — `corrupt_bytes`, `corrupt_bits` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/names.rs` | `scapy/data.py`, `scapy/dadict.py`, `scapy/libs/ethertypes.py`, `scapy/layers/l2.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/arp.rs` | `scapy/layers/l2.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/ipv6.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/icmp.rs` | `scapy/layers/inet.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/dns.rs` | `scapy/layers/dns.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/bootp.rs` | `scapy/layers/dhcp.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/null.rs` | `scapy/layers/l2.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/linux_sll.rs` | `scapy/layers/l2.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/pppoe.rs` | `scapy/layers/ppp.py` | scapy 2.7.0 | 2026-10-03 |
+| `python/wiry/fields.py` | `scapy/fields.py` | scapy 2.7.0 | 2026-10-03 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift
