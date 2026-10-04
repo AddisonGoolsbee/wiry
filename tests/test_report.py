@@ -199,8 +199,9 @@ def test_bulk_sprintf_crosses_once(capture, monkeypatch):
 def test_show2_fills_in_what_building_computes():
     p = IP(src="1.2.3.4", dst="5.6.7.8") / TCP()
     built = p.show2_str()
-    assert "len        = 40" in built
-    assert "chksum     = 0" not in built
+    assert "len       = 40" in built
+    assert "chksum    = 0x0" not in built
+    assert "chksum    = None" in p.show_str()
 
 
 def test_show2_of_a_dissected_packet_is_its_show(capture):

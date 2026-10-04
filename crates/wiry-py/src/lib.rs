@@ -25,6 +25,7 @@ use wiry_core::options::{Item, OptArg};
 use wiry_core::packet::{self, dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use wiry_core::pcap;
 use wiry_core::proto::{self, ProtoId};
+use wiry_core::render;
 use wiry_core::repeat;
 use wiry_core::show;
 use wiry_core::stream;
@@ -671,8 +672,12 @@ impl PyPkt {
         Ok(PyBytes::new_bound(py, self.inner.to_bytes()))
     }
 
-    fn show(&self) -> String {
-        show::show(&self.inner)
+    /// `given` is, for a packet still being built, the fields each layer was
+    /// assigned; the rest of what is computed at build time shows as `None`.
+    #[pyo3(signature = (given = None))]
+    fn show(&self, given: Option<Vec<Vec<String>>>) -> String {
+        let g = given.as_deref().map(render::Given);
+        render::show_of(self.inner.raw_bytes(), self.inner.layers(), g)
     }
 
     /// Rebuilding from a field spec would lose variable-length header content.
@@ -685,7 +690,14 @@ impl PyPkt {
     }
 
     fn summary(&self) -> String {
-        show::summary(&self.inner)
+        render::summary(&self.inner)
+    }
+
+    /// `given` as for `show`: a layer being built shows only what it was given.
+    #[pyo3(signature = (given = None))]
+    fn repr(&self, given: Option<Vec<Vec<String>>>) -> String {
+        let g = given.as_deref().map(render::Given);
+        render::repr_of(self.inner.raw_bytes(), self.inner.layers(), g)
     }
 
     fn __len__(&self) -> usize {
@@ -1183,7 +1195,7 @@ impl PyPktList {
             idx.iter()
                 .map(|(off, len, ..)| {
                     let bytes = &buf[*off..*off + *len as usize];
-                    show::summary_of(&dissect_spans(bytes, link))
+                    render::summary_of(bytes, &dissect_spans(bytes, link))
                 })
                 .collect()
         })

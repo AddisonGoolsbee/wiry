@@ -1105,8 +1105,15 @@ class Packet(metaclass=_PacketMeta):
     def show(self) -> None:
         print(self.show_str(), end="")
 
+    def _given(self) -> list[list[str]] | None:
+        """What each layer of a packet still being built was assigned, which
+        is all its `repr()` shows; `None` once the octets are the truth."""
+        if not self._spec_live:
+            return None
+        return [list(fields) for _, fields in self._stack]
+
     def show_str(self) -> str:
-        return self._materialize().show()
+        return self._materialize().show(self._given())
 
     def show2(self) -> None:
         print(self.show2_str(), end="")
@@ -1122,8 +1129,6 @@ class Packet(metaclass=_PacketMeta):
         return sprintf(self, fmt)
 
     def summary(self) -> str:
-        if self._rust is None and self._stack:
-            return " / ".join(n for n, _ in self._stack)
         return self._materialize().summary()
 
     def command(self) -> str:
@@ -1141,7 +1146,10 @@ class Packet(metaclass=_PacketMeta):
         return fragment(self, FRAGSIZE if fragsize is None else fragsize)
 
     def __repr__(self) -> str:
-        return f"<{self.summary()}>"
+        return self._materialize().repr(self._given())
+
+    def __str__(self) -> str:
+        return self.summary()
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Packet):

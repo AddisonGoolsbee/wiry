@@ -352,8 +352,9 @@ def test_filtering_on_an_inner_layer_selects_in_the_engine(tmp_path):
     got = cap.filter([("VXLAN", "vni", 1)])
     assert len(got) == 1
     assert got[0].haslayer(VXLAN)
+    # The TCP summary names the IP layer directly under it, not the outer one.
     assert [p.summary() for p in cap.filter([("GRE", "proto", 0x0800)])] == [
-        "Ether / IP / GRE / IP / TCP"
+        "Ether / IP / GRE / IP / TCP 127.0.0.1:ftp_data > 192.168.0.2:https S"
     ]
 
 

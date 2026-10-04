@@ -238,15 +238,23 @@ def test_getlayer_returns_the_outermost_match():
     assert Ether(bytes(pkt)).getlayer(Dot1Q).vlan == 10
 
 
-def test_summary_joins_the_layer_names(pkt):
-    assert pkt.summary() == "Ether / IP / TCP"
-    assert Ether(bytes(pkt)).summary() == "Ether / IP / TCP"
-    assert repr(pkt) == "<Ether / IP / TCP>"
+def test_summary_and_repr_read_as_scapys(pkt):
+    # Port 1234 is named from the host's /etc/services, so only 80 is pinned.
+    line = pkt.summary()
+    assert line.startswith("Ether / IP / TCP 10.0.0.1:") and line.endswith(" > 10.0.0.2:http SA")
+    assert Ether(bytes(pkt)).summary() == line
+    assert str(pkt) == line
+    r = repr(pkt)
+    assert r.startswith(
+        "<Ether  dst=00:11:22:33:44:55 src=66:77:88:99:aa:bb type=IPv4 "
+        "|<IP  frag=0 ttl=33 proto=tcp src=10.0.0.1 dst=10.0.0.2 |<TCP  sport="
+    )
+    assert r.endswith(" dport=http flags=SA |>>>")
 
 
 def test_show_str_lists_every_header_and_field(pkt):
     text = pkt.show_str()
-    for header in ("###[ Ether ]###", "###[ IP ]###", "###[ TCP ]###"):
+    for header in ("###[ Ethernet ]###", "###[ IP ]###", "###[ TCP ]###"):
         assert header in text
     for field in ("dst", "src", "ttl", "proto", "chksum", "sport", "dport", "window"):
         assert field in text

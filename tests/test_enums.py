@@ -33,7 +33,7 @@ def test_a_name_assigns_through_a_built_packet():
 def test_rendering_uses_the_name_and_an_unknown_value_its_number():
     p = IP() / ICMP(type=8)
     assert p.sprintf("%ICMP.type% %r,ICMP.type%") == "echo-request 8"
-    assert "type       = echo-request" in p.show_str()
+    assert "type      = echo-request" in p.show_str()
     assert (IP() / ICMP(type=200)).sprintf("%ICMP.type%") == "200"
 
 
