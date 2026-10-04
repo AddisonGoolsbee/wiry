@@ -1154,6 +1154,13 @@ class Packet(metaclass=_PacketMeta):
         names = other.layers() if isinstance(other, Packet) else []
         if not names:
             return False
+        for pkt in (self, other):
+            top = [n for n in pkt.layers() if n not in _OPAQUE][-1:]
+            if top and top[0] not in _REPLY_RULES:
+                raise NotImplementedError(
+                    f"wiry has no reply rule for {top[0]}: answers() knows "
+                    "echo, ICMP errors, TCP, UDP, DNS and ARP (E14)"
+                )
         from .capture import conf
 
         pairs, _ = _b.pair_replies([bytes(other)], [bytes(self)], names[0],
@@ -1228,6 +1235,13 @@ def _with_meta(pkt: Packet, meta: dict) -> Packet:
     for k, v in meta.items():
         setattr(pkt, k, v)
     return pkt
+
+
+# The layers answers.rs can pair a reply on, as the innermost of a packet.
+_REPLY_RULES = frozenset({
+    "Ether", "Dot1Q", "Loopback", "CookedLinux", "CookedLinuxV2", "IP", "IPv6",
+    "ICMP", "ICMPv6", "TCP", "UDP", "DNS", "ARP",
+})
 
 
 def _first_address(value: Any) -> Any:

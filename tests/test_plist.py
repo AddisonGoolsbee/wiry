@@ -214,3 +214,10 @@ def test_a_bad_filter_is_scapys_exception():
         pytest.skip("compiling BPF is libpcap's job")
     with pytest.raises(wiry.Scapy_Exception):
         wiry.sniff(offline=IP() / UDP(), filter="not arpand not")
+
+
+def test_answers_refuses_a_layer_it_has_no_rule_for():
+    from wiry import BOOTP
+
+    with pytest.raises(NotImplementedError, match="BOOTP"):
+        (IP() / UDP() / BOOTP()).answers(IP() / UDP() / BOOTP())
