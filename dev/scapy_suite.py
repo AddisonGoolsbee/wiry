@@ -15,16 +15,12 @@ Outcomes are three-way and the distinction matters for honest reporting:
   FAIL  it used only things we claim to support, and we got it wrong
 
 Only FAIL is a defect. A SKIP is a scope boundary.
-
-`--utscapy` runs a file the way UTscapy does: one namespace shared by every
-test in it, so a helper or capture defined by one test is there for the next,
-and `scapy.<module>` resolves to wiry's counterpart while any other scapy
-import fails. The default gives each test a fresh namespace and leaves real
-scapy importable, which is what the published baselines were measured with.
 """
 
+import ast
 import importlib
 import importlib.abc
+import importlib.util
 import re
 import sys
 import traceback
@@ -37,9 +33,53 @@ import wiry
 # psdump and pdfdump draw each packet through Packet.canvas_dump, which wiry
 # does not have.
 OUT_OF_SCOPE = {
-    "BER_Exception", "load_contrib", "load_layer",
-    "pdfdump", "psdump", "voip_play",
+    "load_contrib", "load_layer", "pdfdump", "psdump", "voip_play",
 }
+
+
+class _ScapyAsWiry(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Answer `import scapy.x.y` with `wiry.x.y`, or with a view of `wiry`
+    itself where wiry has no such module.
+
+    scapy is installed beside wiry for the parity oracle, so without this a
+    test's `from scapy.layers.x509 import X509_Cert` runs scapy and scores
+    scapy's answer as wiry's. A name wiry lacks then fails as an ImportError,
+    which is a skip.
+    """
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != "scapy" and not fullname.startswith("scapy."):
+            return None
+        # `from scapy.utils import missing` retries `missing` as a submodule;
+        # answering that with another view would hide the ImportError.
+        parent = sys.modules.get(fullname.rpartition(".")[0])
+        if getattr(parent, "__wiry_view__", False):
+            return None
+        return importlib.util.spec_from_loader(fullname, self)
+
+    def create_module(self, spec):
+        rest = spec.name[len("scapy"):]
+        try:
+            return importlib.import_module("wiry" + rest)
+        except ImportError:
+            pass
+        # A fresh module per name: the import system binds each child onto
+        # its parent, and binding `layers` onto `wiry` itself would shadow
+        # wiry's lazy attributes.
+        proxy = types.ModuleType(spec.name)
+        proxy.__getattr__ = lambda name: getattr(wiry, name)
+        proxy.__path__ = []
+        proxy.__all__ = [n for n in dir(wiry) if not n.startswith("_")]
+        proxy.__wiry_view__ = True
+        return proxy
+
+    def exec_module(self, module):
+        pass
+
+
+for _name in [m for m in sys.modules if m == "scapy" or m.startswith("scapy.")]:
+    del sys.modules[_name]
+sys.meta_path.insert(0, _ScapyAsWiry())
 
 
 def parse_uts(path):
@@ -71,40 +111,65 @@ def parse_uts(path):
         yield campaign, name, kw, "\n".join(buf)
 
 
-# Standard-library modules and names `from scapy.all import *` happens to
-# re-export, which the suite uses without importing them itself. They are not
-# scapy's API, so they come from the standard library, never from wiry.
-_STDLIB_MODULES = (
-    "abc argparse atexit builtins calendar code collections copy ctypes "
-    "dataclasses decimal difflib enum errno functools getopt gzip hashlib hmac "
-    "html importlib inspect io itertools json locale logging math operator os "
-    "pathlib pickle queue random re select shutil socket ssl string struct "
-    "subprocess sys tempfile threading time traceback types uuid warnings"
-).split()
-_STDLIB_NAMES = {
-    "collections": ("Counter", "UserDict", "defaultdict", "deque"),
-    "decimal": ("Decimal",), "enum": ("Enum", "IntEnum", "IntFlag"),
-    "queue": ("Empty", "Queue"), "threading": ("Event", "Lock", "Thread"),
-    "logging": ("LogRecord",), "io": ("StringIO",), "uuid": ("UUID",),
-    "array": ("array",), "functools": ("partial",),
-    "datetime": ("datetime", "timedelta", "timezone", "tzinfo"),
-    "itertools": ("zip_longest",),
-}
-
-
-def _stdlib():
-    ns = {m: importlib.import_module(m) for m in _STDLIB_MODULES}
-    for mod, names in _STDLIB_NAMES.items():
-        m = importlib.import_module(mod)
-        ns.update({n: getattr(m, n) for n in names})
-    return ns
+# Standard-library names `from scapy.all import *` leaks into a UTscapy
+# session, which scapy's tests use without importing. They are not wiry's API.
+_SCAPY_ALL_STDLIB = (
+    "abc", "argparse", "atexit", "builtins", "calendar", "code", "collections",
+    "copy", "ctypes", "dataclasses", "decimal", "difflib", "enum", "errno",
+    "functools", "getopt", "gzip", "hashlib", "hmac", "html", "importlib",
+    "inspect", "io", "itertools", "json", "locale", "logging", "math",
+    "operator", "os", "pathlib", "pickle", "queue", "random", "re", "select",
+    "shutil", "socket", "ssl", "string", "struct", "subprocess", "sys",
+    "tempfile", "threading", "time", "traceback", "types", "uuid", "warnings",
+    "zlib",
+)
 
 
 def namespace():
-    ns = _stdlib()
+    import datetime as dt
+
+    ns = {m: importlib.import_module(m) for m in _SCAPY_ALL_STDLIB}
+    ns.update(datetime=dt.datetime, timedelta=dt.timedelta,
+              timezone=dt.timezone, tzinfo=dt.tzinfo)
     ns.update({k: getattr(wiry, k) for k in dir(wiry) if not k.startswith("_")})
     ns["__name__"] = "scapy_suite"
     return ns
+
+
+def utscapy_tools(root):
+    """The helpers UTscapy puts in every session (`import_UTscapy_tools`):
+    test scaffolding, not scapy's API. `scapy_path` resolves against the
+    checkout the campaign came from, where its pcaps live."""
+
+    class Bunch:
+        def __init__(self, **kw):
+            self.__dict__ = kw
+
+    def retry_test(func):
+        error = None
+        for _ in range(3):
+            try:
+                return func()
+            except Exception as exc:  # noqa: BLE001
+                error = exc
+        raise error
+
+    def scapy_path(fname):
+        return str(root / fname.lstrip("/"))
+
+    class no_debug_dissector:
+        def __init__(self, reverse=False):
+            self.new_value = reverse
+
+        def __enter__(self):
+            self.old = wiry.conf.debug_dissector
+            wiry.conf.debug_dissector = self.new_value
+
+        def __exit__(self, *exc):
+            wiry.conf.debug_dissector = self.old
+
+    return {"Bunch": Bunch, "retry_test": retry_test,
+            "scapy_path": scapy_path, "no_debug_dissector": no_debug_dissector}
 
 
 # A name after a dot is an attribute, not a global: `a.restart()` must not read
@@ -162,84 +227,49 @@ def classify_error(exc, supported):
     if isinstance(exc, AttributeError):
         m = re.search(r"'([A-Za-z0-9_.]+)'", str(exc))
         return "skip", f"needs attribute {m.group(1) if m else '?'}"
+    # A patch an earlier test started and then skipped out of before it could
+    # stop it: that test's skip, surfacing again in the shared session.
+    if isinstance(exc, RuntimeError) and str(exc) == "Patch is already started":
+        return "skip", "a mock.patch an earlier skip left started"
     return "fail", text
 
 
-# scapy module -> the wiry module standing in for it under --utscapy.
-SCAPY_ALIASES = {
-    "scapy.all": "wiry",
-    "scapy.ansmachine": "wiry.ansmachine",
-    "scapy.automaton": "wiry.automaton",
-    "scapy.supersocket": "wiry.supersocket",
-    "scapy.sendrecv": "wiry.sendrecv",
-    "scapy.utils": "wiry.utils",
-    "scapy.utils6": "wiry.utils6",
-    "scapy.data": "wiry.data",
-    "scapy.plist": "wiry.plist",
-    "scapy.config": "wiry.config",
-    "scapy.compat": "wiry.compat",
-    "scapy.error": "wiry.error",
-    "scapy.consts": "wiry.consts",
-    "scapy.pton_ntop": "wiry.compat",
-    "scapy.volatile": "wiry.volatile",
-    "scapy.route": "wiry.route",
-}
+class _Display(ast.NodeTransformer):
+    """Route every expression statement through `__display__`, as an
+    interactive session's display hook sees it; function and class bodies are
+    not displayed, so they are left alone."""
+
+    def visit_Expr(self, node):
+        call = ast.Call(ast.Name("__display__", ast.Load()), [node.value], [])
+        return ast.copy_location(ast.Expr(call), node)
+
+    def _skip(self, node):
+        return node
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _skip
+    visit_Lambda = _skip
 
 
-class _NoScapy(importlib.abc.MetaPathFinder):
-    """Refuse every scapy module wiry does not stand in for, so a test cannot
-    pass by quietly running scapy itself."""
-
-    def find_spec(self, name, path=None, target=None):
-        if name == "scapy" or name.startswith("scapy."):
-            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
-        return None
+def compile_test(code, name):
+    """UTscapy runs a test as an interactive session and judges it by the
+    last value that session displayed: `"invalid" in repr(x)` on a line of its
+    own fails the test when it is False. A plain `exec` would pass it."""
+    tree = _Display().visit(ast.parse(code, f"<{name}>"))
+    return compile(ast.fix_missing_locations(tree), f"<{name}>", "exec")
 
 
-def _install_aliases():
-    saved = {k: v for k, v in sys.modules.items()
-             if k == "scapy" or k.startswith("scapy.")}
-    for k in saved:
-        del sys.modules[k]
-    pkg = types.ModuleType("scapy")
-    pkg.__path__ = []
-    pkg.VERSION = pkg.__version__ = wiry.__version__
-    sys.modules["scapy"] = pkg
-    for alias, real in SCAPY_ALIASES.items():
-        try:
-            mod = importlib.import_module(real)
-        except ImportError:
-            continue
-        sys.modules[alias] = mod
-        setattr(pkg, alias.split(".", 1)[1], mod)
-    finder = _NoScapy()
-    sys.meta_path.insert(0, finder)
-
-    def restore():
-        sys.meta_path.remove(finder)
-        for k in [k for k in sys.modules if k == "scapy" or k.startswith("scapy.")]:
-            del sys.modules[k]
-        sys.modules.update(saved)
-
-    return restore
-
-
-def run(path, verbose=False, limit=None, utscapy=False):
+def run(path, verbose=False, limit=None):
     supported = set(dir(wiry))
     results = {"pass": 0, "skip": 0, "fail": 0}
     failures = []
     skips = {}
-    shared = namespace() if utscapy else None
-    restore = _install_aliases() if utscapy else None
-    try:
-        _run(path, verbose, limit, supported, results, failures, skips, shared)
-    finally:
-        if restore is not None:
-            restore()
-    return results, failures, skips
+    # One namespace per file: UTscapy runs a campaign as one session, and
+    # later tests read what earlier ones defined.
+    ns = namespace()
+    ns.update(utscapy_tools(Path(path).resolve().parents[3]))
+    shown = []
+    ns["__display__"] = lambda v: shown.append(v) if v is not None else None
 
-
-def _run(path, verbose, limit, supported, results, failures, skips, shared):
     for i, (campaign, name, kw, code) in enumerate(parse_uts(path)):
         if limit and i >= limit:
             break
@@ -260,9 +290,15 @@ def _run(path, verbose, limit, supported, results, failures, skips, shared):
                 f"uses {sorted(blocked)[0]}", 0) + 1
             continue
 
-        ns = namespace() if shared is None else shared
+        shown.clear()
         try:
-            exec(compile(code, f"<{name}>", "exec"), ns)
+            try:
+                compiled = compile_test(code, name)
+            except SyntaxError:
+                compiled = compile(code, f"<{name}>", "exec")
+            exec(compiled, ns)
+            if shown and not shown[-1]:
+                raise AssertionError(f"last value displayed was {shown[-1]!r}")
             results["pass"] += 1
             if verbose:
                 print(f"  PASS  {name}")
@@ -270,9 +306,9 @@ def _run(path, verbose, limit, supported, results, failures, skips, shared):
             results["fail"] += 1
             line = ""
             tb = traceback.extract_tb(sys.exc_info()[2])
-            if tb:
+            if tb and tb[-1].filename.startswith("<"):
                 line = (tb[-1].line or "").strip()
-            failures.append((campaign, name, f"assertion failed: {line}"))
+            failures.append((campaign, name, f"assertion failed: {line or exc}"))
         except Exception as exc:  # noqa: BLE001
             kind, why = classify_error(exc, supported)
             results[kind] += 1
@@ -281,14 +317,46 @@ def _run(path, verbose, limit, supported, results, failures, skips, shared):
             else:
                 skips[why] = skips.get(why, 0) + 1
 
+    return results, failures, skips
+
+
+def run_isolated(path, verbose=False):
+    """`run` in a fresh interpreter. A campaign that sets `conf` and fails
+    before restoring it would otherwise change every file after it."""
+    import json
+    import subprocess
+
+    out = subprocess.run(
+        [sys.executable, __file__, path, "--json"] + (["-v"] if verbose else []),
+        capture_output=True, text=True,
+    )
+    lines = out.stdout.splitlines()
+    for line in lines[:-1]:
+        print(line)
+    if out.returncode not in (0, 1) or not lines:
+        return ({"pass": 0, "skip": 0, "fail": 1},
+                [("", Path(path).name, f"crashed: {out.stderr[-200:]}")], {})
+    r, fails, skips = json.loads(lines[-1])
+    return r, [tuple(f) for f in fails], skips
+
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if not a.startswith("-")]
-    if not args:
+    if len(sys.argv) < 2:
         sys.exit(__doc__)
-    target = args[0]
+    target = sys.argv[1]
     verbose = "-v" in sys.argv
-    utscapy = "--utscapy" in sys.argv
+
+    if "--json" in sys.argv:
+        import contextlib
+        import io
+        import json
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = run(target, verbose)
+        print(buf.getvalue(), end="")
+        print(json.dumps(result))
+        sys.exit(0)
 
     files = [target]
     if Path(target).is_dir():
@@ -299,7 +367,7 @@ if __name__ == "__main__":
     all_skips = {}
 
     for f in files:
-        r, fails, skips = run(f, verbose, utscapy=utscapy)
+        r, fails, skips = run_isolated(f, verbose) if len(files) > 1 else run(f, verbose)
         print(f"{Path(f).name:28} pass {r['pass']:4}  skip {r['skip']:4}  "
               f"fail {r['fail']:4}")
         for k in total:
