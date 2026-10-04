@@ -68,9 +68,9 @@ impl Packet {
         Self::build_with(&owned)
     }
 
-    /// Only a layer with a header-length field pads its extra bytes to a 4-byte
-    /// boundary; DHCP (RFC 2132) and `Raw` take theirs verbatim, and padding
-    /// them would corrupt the option walk or the payload.
+    /// Only an option region counted in words is padded to a 4-byte boundary;
+    /// DHCP (RFC 2132), `Raw` and an octet-counted region take theirs verbatim,
+    /// and padding them would corrupt the walk, the payload or the length.
     pub fn build_with(stack: &[(ProtoId, Option<Vec<u8>>)]) -> Self {
         let mut buf = Vec::new();
         let mut spans = Spans::new();
@@ -98,7 +98,7 @@ impl Packet {
                 if !o.is_empty() {
                     buf.extend_from_slice(o);
                     hlen = pre + d.build_len + o.len();
-                    if d.set_hlen.is_some() {
+                    if pads_options(d) {
                         let pad = (4 - (o.len() % 4)) % 4;
                         buf.extend(std::iter::repeat(0u8).take(pad));
                         hlen += pad;
@@ -126,6 +126,7 @@ impl Packet {
                 if let Some(bind) = desc(prev.proto).bind_next {
                     bind(&mut buf[a..b], p);
                 }
+                crate::layers::dispatch::bind_layer(&mut buf[a..b], prev.proto, p);
                 crate::proto::apply_bind(&mut buf[a..b], prev.proto, p);
             }
             if let Some(setter) = d.set_hlen {
@@ -360,7 +361,7 @@ impl Packet {
         let at = at.min(end);
         // A header length counted in 32-bit words can only describe a padded
         // region, so construction's padding rule applies to a rewrite too.
-        let pad = if d.set_hlen.is_some() {
+        let pad = if pads_options(d) {
             (4 - (val.len() % 4)) % 4
         } else {
             0
@@ -497,6 +498,12 @@ impl Packet {
     }
 }
 
+/// RFC 791 §3.1 and RFC 9293 §3.1 count an option region in 32-bit words, so
+/// it is padded to one. A header whose length field counts octets is not.
+fn pads_options(d: &crate::proto::ProtoDesc) -> bool {
+    d.set_hlen.is_some() && d.opt_table.is_some()
+}
+
 pub fn dissect_spans(buf: &[u8], link: ProtoId) -> Spans {
     spans_of(buf, link, true)
 }
@@ -593,10 +600,15 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
         }
 
         // A declared binding outranks the layer's own guess: it is the only way
-        // a user layer can be reached.
+        // a user layer can be reached. A generated child under the layer's own
+        // field comes after the guess, so a hand-written parent keeps its arms.
         let next = match crate::proto::bound_next(proto, hdr) {
             Some(p) => Next::Proto(p),
-            None => (d.next)(hdr),
+            None => match (d.next)(hdr) {
+                Next::Raw => crate::layers::dispatch::by_layer(proto, hdr)
+                    .map_or(Next::Raw, Next::Proto),
+                n => n,
+            },
         };
         off += hlen;
         parent = Some(proto);

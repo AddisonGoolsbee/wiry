@@ -169,7 +169,11 @@ pub struct ProtoDesc {
     pub content_len: Option<fn(&[u8]) -> usize>,
 }
 
-pub const BUILTIN_COUNT: u16 = 112;
+/// Room for every scapy layer class converted by `dev/protogen/scapy2spec.py`,
+/// with the registry's ids above it still inside a `u16`.
+pub const BUILTIN_COUNT: u16 = 4096;
+
+const _: () = assert!(BUILTIN_COUNT as usize + MAX_REGISTERED <= u16::MAX as usize + 1);
 
 const BUILTINS: &[ProtoId] = &[
     ProtoId::Ether,
@@ -401,9 +405,21 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t
 };
 
+/// Sorted once, so a lookup over thousands of built-in layers is a binary
+/// search rather than a scan; constructing a packet asks once per layer.
+fn builtin_names() -> &'static [(&'static str, ProtoId)] {
+    static INDEX: OnceLock<Vec<(&'static str, ProtoId)>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut v: Vec<_> = BUILTINS.iter().map(|p| (desc(*p).name, *p)).collect();
+        v.sort_by(|a, b| a.0.cmp(b.0));
+        v
+    })
+}
+
 pub fn by_name(name: &str) -> Option<ProtoId> {
-    if let Some(p) = BUILTINS.iter().copied().find(|p| desc(*p).name == name) {
-        return Some(p);
+    let idx = builtin_names();
+    if let Ok(i) = idx.binary_search_by(|(n, _)| (*n).cmp(name)) {
+        return Some(idx[i].1);
     }
     // Newest first, so redefining a layer shadows the earlier one.
     registered().rev().find(|d| d.name == name).map(|d| d.id)

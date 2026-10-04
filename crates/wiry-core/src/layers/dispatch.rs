@@ -257,8 +257,19 @@ pub fn by_icmpv6_type_of(p: ProtoId) -> Option<u8> {
     }
 }
 
+#[inline]
+pub fn by_layer(_parent: ProtoId, _hdr: &[u8]) -> Option<ProtoId> {
+    None
+}
+
+#[inline]
+pub fn bind_layer(_hdr: &mut [u8], _parent: ProtoId, _child: ProtoId) {}
+
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use crate::proto::ProtoId;
+
     /// A guard that rejects every probe would hide a dropped bitmap bit,
     /// so the probes have to reach as many arms as they can.
     const PROBES: &[&[u8]] = &[
