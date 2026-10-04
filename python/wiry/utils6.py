@@ -20,7 +20,6 @@ says it takes or returns the 16-octet network form."""
 
 from __future__ import annotations
 
-import hashlib
 import os
 import socket
 import struct
@@ -283,6 +282,7 @@ def in6_getLocalUniquePrefix() -> str:
     """A random ULA /48 by RFC 4193 §3.2.2: the low 40 bits of SHA-1 over an
     NTP timestamp and an EUI-64. The EUI-64 comes from a random MAC, since
     the point is a prefix unlikely to collide, not one tied to this host."""
+    import hashlib
     tod = time.time() + _NTP_OFFSET
     seconds = int(tod)
     btod = struct.pack("!II", seconds & 0xFFFFFFFF, int((tod - seconds) * 2**32))
@@ -296,6 +296,7 @@ def in6_getRandomizedIfaceId(ifaceid: str,
                              previous: Optional[str] = None) -> Tuple[str, str]:
     """A temporary interface identifier by RFC 4941 §3.2.1 and the history
     value to pass back in next time, both in printable form."""
+    import hashlib
     if previous is None:
         b_previous = os.urandom(8)
     else:

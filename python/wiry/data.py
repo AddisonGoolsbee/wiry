@@ -20,7 +20,6 @@ list to do it.
 
 from __future__ import annotations
 
-import calendar
 import os
 import sys
 import warnings
@@ -370,7 +369,7 @@ PPI_TYPES = {
 }
 
 # Windows counts from 1970-01-02.
-EPOCH = calendar.timegm((1970, 1, 2, 0, 0, 0, 3, 1, 0)) - 86400
+EPOCH = 0
 
 MTU = 0xFFFF
 

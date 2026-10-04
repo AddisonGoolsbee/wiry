@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import base64
 import binascii
 import re
 import socket
@@ -64,10 +63,12 @@ def bytes_int(x: bytes) -> int:
 
 
 def base64_bytes(x: Any) -> bytes:
+    import base64
     return base64.decodebytes(bytes_encode(x))
 
 
 def bytes_base64(x: Any) -> bytes:
+    import base64
     return base64.encodebytes(bytes_encode(x)).replace(b"\n", b"")
 
 

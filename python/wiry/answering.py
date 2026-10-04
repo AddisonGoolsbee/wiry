@@ -91,7 +91,6 @@ def _link_reply(req: Any) -> Any:
     return Ether(**kw)
 
 
-# --------------------------------------------------------------------- ARP
 
 
 class ARP_am(AnsweringMachine):
@@ -145,7 +144,6 @@ class ARP_am(AnsweringMachine):
         print("%s ==> %s on %s" % (req.summary(), reply.summary(), self.iff))
 
 
-# -------------------------------------------------------------------- ICMP
 
 
 class ICMPEcho_am(AnsweringMachine):
@@ -173,7 +171,6 @@ class ICMPEcho_am(AnsweringMachine):
         return _link_reply(req) / reply if Ether in req else reply
 
 
-# ------------------------------------------------------------- BOOTP, DHCP
 
 
 class BOOTP_am(AnsweringMachine):
@@ -283,7 +280,6 @@ class DHCP_am(BOOTP_am):
         return resp / DHCP(options=opts)
 
 
-# --------------------------------------------------------------- DNS, mDNS
 
 
 def _labels(name: Any) -> List[bytes]:
@@ -606,7 +602,6 @@ class LLMNR_am(DNS_am):
     dport = 5355
 
 
-# ------------------------------------------------------------------- NBNS
 
 
 def _nb_encode(name: bytes) -> bytes:

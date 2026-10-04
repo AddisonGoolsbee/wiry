@@ -21,10 +21,7 @@ called, and a missing one is reported by name with the way to fix it.
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 from typing import Any, List, Optional
 
 from .error import log_runtime
@@ -47,6 +44,7 @@ DLT_NAMES = {
 
 
 def _which(name: str) -> str:
+    import shutil
     return shutil.which(name) or name
 
 
@@ -115,6 +113,7 @@ def _conf() -> Any:
 def _temp_file(suffix: str = ".pcap") -> str:
     """A temporary path, in ``conf.temp_files`` where that register exists so
     it is removed at exit."""
+    import tempfile
     fd, path = tempfile.mkstemp(suffix=suffix, prefix="wiry")
     os.close(fd)
     register = getattr(_conf(), "temp_files", None)
@@ -169,6 +168,7 @@ def tcpdump(pktlist: Any = None, dump: bool = False, getfd: bool = False,
     read stdin, so there a temporary file is used unless ``use_tempfile``
     says otherwise.
     """
+    import subprocess
     conf = _conf()
     getfd = getfd or getproc
     if prog is None:
@@ -270,6 +270,7 @@ def tdecode(pktlist: Any, args: Optional[List[str]] = None,
 
 def hexedit(pktlist: Any) -> Any:
     """Edit packets in a hex editor, and read back what was saved."""
+    import subprocess
     from . import rdpcap
 
     conf = _conf()

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 import time
-import traceback
 from typing import Any, Dict, Tuple
 
 __all__ = [
@@ -46,6 +45,7 @@ class ScapyFreqFilter(logging.Filter):
         self.warning_table: Dict[int, Tuple[float, int]] = {}
 
     def filter(self, record: logging.LogRecord) -> bool:
+        import traceback
         from .capture import conf
 
         if record.levelno <= logging.INFO:

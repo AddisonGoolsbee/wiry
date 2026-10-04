@@ -16,26 +16,14 @@ arithmetic, tables, temporary files."""
 
 from __future__ import annotations
 
-import argparse
-import array
 import decimal
-import difflib
 import enum
-import inspect
-import locale
-import math
 import os
-import random
 import re
-import shutil
 import socket
 import struct
-import subprocess
 import sys
-import tempfile
 import threading
-import time
-import traceback
 from decimal import Decimal
 from io import StringIO
 from itertools import zip_longest
@@ -134,6 +122,7 @@ def _conf() -> Any:
 def get_temp_file(keep: bool = False, autoext: str = "", fd: bool = False) -> Any:
     """A temporary file's path, or the open file with ``fd=True``. Unless
     ``keep``, it is removed by ``scapy_delete_temp_files()`` and at exit."""
+    import tempfile
     f = tempfile.NamedTemporaryFile(prefix="wiry", suffix=autoext, delete=False)
     if not keep:
         _conf().temp_files.append(f.name)
@@ -144,6 +133,7 @@ def get_temp_file(keep: bool = False, autoext: str = "", fd: bool = False) -> An
 
 
 def get_temp_dir(keep: bool = False) -> str:
+    import tempfile
     dname = tempfile.mkdtemp(prefix="wiry")
     if not keep:
         _conf().temp_files.append(dname)
@@ -158,6 +148,7 @@ def sane(x: Any, color: bool = False) -> str:
 
 def restart() -> None:
     """Re-execute the running console."""
+    import subprocess
     if not _conf().interactive or not os.path.isfile(sys.argv[0]):
         raise OSError("wiry was not started from its console")
     if WINDOWS:
@@ -240,6 +231,7 @@ def repr_hex(s: bytes) -> str:
 
 
 def _backtrack(xb: bytes, yb: bytes, algo: Optional[str], autojunk: bool) -> Tuple[list, list]:
+    import difflib
     if algo is None:
         complexity = len(xb) * len(yb)
         if complexity < 1e7:
@@ -405,6 +397,7 @@ else:
 
 def checksum(pkt: bytes) -> int:
     """RFC 1071's internet checksum."""
+    import array
     if len(pkt) % 2 == 1:
         pkt += b"\0"
     s = sum(array.array("H", pkt))
@@ -462,10 +455,12 @@ def str2mac(s: Any) -> str:
 
 
 def randstring(length: int) -> bytes:
+    import random
     return bytes(random.randint(0, 255) for _ in range(length))
 
 
 def zerofree_randstring(length: int) -> bytes:
+    import random
     return bytes(random.randint(1, 255) for _ in range(length))
 
 
@@ -594,6 +589,7 @@ def in4_getnsmac(a: bytes) -> str:
 
 
 def decode_locale_str(x: bytes) -> str:
+    import locale
     return x.decode(encoding=locale.getlocale()[1] or "utf-8", errors="replace")
 
 
@@ -635,6 +631,8 @@ def do_graph(graph: str, prog: Optional[str] = None, format: Optional[str] = Non
     result, and graphviz and ImageMagick stay optional (E24). A ``target`` is
     a path, ``"|command"``, ``">path"`` or a binary file object.
     """
+    import shutil
+    import subprocess
     if string or (string is None and target is None and format is None
                   and type is None):
         return graph
@@ -815,6 +813,7 @@ def import_hexcap(input_string: Optional[str] = None) -> bytes:
 
 
 def get_terminal_width() -> Optional[int]:
+    import shutil
     sizex = shutil.get_terminal_size(fallback=(0, 0))[0]
     if sizex:
         return sizex
@@ -874,6 +873,7 @@ def pretty_list(rtlst: list, header: list, sortBy: Optional[int] = 0,
 
 
 def human_size(x: int, fmt: str = ".1f") -> str:
+    import math
     units = ["K", "M", "G", "T", "P", "E"]
     if not x:
         return "0B"
@@ -1045,6 +1045,7 @@ class CLIUtil(metaclass=_CLIUtilMetaclass):
 
     @staticmethod
     def _inspectkwargs(func: Any) -> None:
+        import inspect
         func._flagnames = [
             x.name for x in inspect.signature(func).parameters.values()
             if x.kind == inspect.Parameter.KEYWORD_ONLY
@@ -1110,6 +1111,7 @@ class CLIUtil(metaclass=_CLIUtilMetaclass):
         print("Exited")
 
     def help(self, cmd: Optional[str] = None) -> None:
+        import inspect
         def _args(func: Any) -> str:
             flags = func._flags.copy()
             if func.__name__ in self.commands_output:
@@ -1165,6 +1167,7 @@ class CLIUtil(metaclass=_CLIUtilMetaclass):
         return CLICompleter()
 
     def loop(self, debug: int = 0) -> None:
+        import traceback
         from prompt_toolkit import PromptSession
 
         session = PromptSession(completer=self._completer())
@@ -1224,6 +1227,8 @@ class CLIUtil(metaclass=_CLIUtilMetaclass):
 def AutoArgparse(func: Any, _parseonly: bool = False) -> Optional[Tuple[List[str], List[str]]]:
     """Build an argparse command line from a typed function and its Sphinx
     docstring, then call the function with what was parsed."""
+    import argparse
+    import inspect
     argsdoc = {}
     desc = ""
     if func.__doc__:
