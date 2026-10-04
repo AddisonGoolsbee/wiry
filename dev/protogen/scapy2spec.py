@@ -1971,7 +1971,10 @@ def convert_module(modname: str, id_base: int | None, existing: set[str],
     classes = classes_of(mod)
     results: dict[str, dict] = {}
     short = modname.split(".", 2)[2].replace(".", "_")
-    used_ids = set(WIRY_IDS.values())
+    import tomllib
+
+    regenerated = {tomllib.loads(p.read_text())["id"] for p in (OUT / short).glob("*.toml")}
+    used_ids = set(WIRY_IDS.values()) - regenerated
     for i, cls in enumerate(classes):
         r = convert_class(cls, existing)
         r["module_index"] = i
