@@ -173,7 +173,7 @@ class _PktSource:
 
     def __init__(self, pkt: Any):
         self.pkt = pkt
-        self.names = pkt.layers()
+        self.names = pkt._names()
 
     def time(self) -> Any:
         return self.pkt.time

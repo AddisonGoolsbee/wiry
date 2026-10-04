@@ -319,7 +319,11 @@ def test_known_layers_matches_the_exported_classes():
         assert name in names
         assert cls._name == name
     for name in set(wiry.__all__) & set(names):
-        assert getattr(wiry, name)._name == name
+        if name in wiry._PY_MODELLED:
+            # scapy's class, whose display name is its own.
+            assert getattr(wiry, name).__name__ == name
+        else:
+            assert getattr(wiry, name)._name == name
 
 
 def _printed(fn, *a, **kw):
