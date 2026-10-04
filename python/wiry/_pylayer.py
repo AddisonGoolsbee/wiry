@@ -12,6 +12,8 @@
 #   2026-10-04 — dissection, building and generator expansion follow scapy's
 #     field contract in full (conditional, may-end, mutable, RawVal); SetGen
 #     and RawVal came along.
+#   2026-10-04 — overload_fields keyed by a Rust layer write that layer's
+#     fields when the class is stacked on it.
 """Layers modelled in Python, the way scapy models every layer.
 
 A wiry packet is octets in Rust plus a table of spans. That is the wrong shape
@@ -201,6 +203,10 @@ class PyPacketMeta(_PacketMeta):
         for f in cls.fields_desc:
             if hasattr(f, "register_owner"):
                 f.register_owner(cls)
+        for lower, fval in cls._overload_fields.items():
+            if not isinstance(lower, PyPacketMeta):
+                from . import _PY_OVERLOAD, _layer_name
+                _PY_OVERLOAD[cls] = (_layer_name(lower), dict(fval))
         return cls
 
     def __getattr__(cls, attr):

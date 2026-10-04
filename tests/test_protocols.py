@@ -262,7 +262,8 @@ def test_dhcpv6_options_decode_from_their_16_bit_codes():
     """RFC 8415 §21.1."""
     msg = bytes([0x01, 0x0A, 0x0B, 0x0C, 0x00, 0x08, 0x00, 0x02, 0x00, 0x00])
     pkt = Ether(udp_frame(msg, sport=546, dport=547))
-    assert pkt.layers()[:4] == ["Ether", "IP", "UDP", "DHCP6"]
+    assert pkt.layers()[:5] == ["Ether", "IP", "UDP", "DHCP6_Solicit",
+                                "DHCP6OptElapsedTime"]
     assert pkt["DHCP6"].msgtype == 1
     assert pkt["DHCP6"].trid == 0x0A0B0C
     assert [n for n, _ in pkt["DHCP6"].options] == ["elapsedtime"]

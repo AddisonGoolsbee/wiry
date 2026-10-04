@@ -110,6 +110,7 @@ per-file blocks are authoritative.
 | `python/wiry/layers/snmp.py` | `scapy/layers/snmp.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/x509.py` | `scapy/layers/x509.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/ldap.py` | `scapy/layers/ldap.py` | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/layers/dhcp6.py` | `scapy/layers/dhcp6.py`, `scapy/layers/inet6.py` (`IP6ListField`, `DomainNameListField`), `scapy/layers/dns.py` (`DNSStrField`, `dns_encode`, `dns_get_str`) | scapy 2.7.0; `IP6ListField` master / `e2e35c0` | 2026-10-04 |
 | `python/wiry/_pyvolatile.py` | `scapy/volatile.py` | master / `e2e35c0` | 2026-10-04 |
 | `python/wiry/_pyfields.py` | `scapy/fields.py`, `scapy/utils.py` (`EDecimal`, `lhex`, `mac2str`, `str2mac`, `strxor`), `scapy/base_classes.py` (`ScopedIP`, `Field_metaclass`), `scapy/utils6.py` (6to4 and Teredo helpers) | master / `e2e35c0` | 2026-10-03 |
 | `crates/wiry-core/src/names.rs` | `scapy/data.py`, `scapy/dadict.py`, `scapy/libs/ethertypes.py`, `scapy/layers/l2.py` | scapy 2.7.0 | 2026-10-03 |
