@@ -358,6 +358,15 @@ impl ProtoId {
     pub const TPMLPCRSELECTION: ProtoId = ProtoId(6330);
     pub const TPMSCLOCKINFO: ProtoId = ProtoId(6333);
     pub const TPM2BPUBLICKEYRSA: ProtoId = ProtoId(6338);
+    pub const LinkStatusEntry: ProtoId = ProtoId(6351);
+    pub const ZDPActiveEPReq: ProtoId = ProtoId(6359);
+    pub const ZCLGeneralReadAttributes: ProtoId = ProtoId(6368);
+    pub const ZCLGeneralDefaultResponse: ProtoId = ProtoId(6375);
+    pub const ZCLIASZoneZoneEnrollResponse: ProtoId = ProtoId(6376);
+    pub const ZCLIASZoneZoneStatusChangeNotification: ProtoId = ProtoId(6377);
+    pub const ZCLMeteringGetProfile: ProtoId = ProtoId(6379);
+    pub const ZCLPriceGetCurrentPrice: ProtoId = ProtoId(6380);
+    pub const ZCLPriceGetScheduledPrices: ProtoId = ProtoId(6381);
     pub const NRTPEndHeader: ProtoId = ProtoId(6392);
     pub const NRTPStatusCodeHeader: ProtoId = ProtoId(6394);
     pub const NRTPCloseConnectionHeader: ProtoId = ProtoId(6397);
@@ -803,6 +812,15 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::TPMLPCRSELECTION,
     ProtoId::TPMSCLOCKINFO,
     ProtoId::TPM2BPUBLICKEYRSA,
+    ProtoId::LinkStatusEntry,
+    ProtoId::ZDPActiveEPReq,
+    ProtoId::ZCLGeneralReadAttributes,
+    ProtoId::ZCLGeneralDefaultResponse,
+    ProtoId::ZCLIASZoneZoneEnrollResponse,
+    ProtoId::ZCLIASZoneZoneStatusChangeNotification,
+    ProtoId::ZCLMeteringGetProfile,
+    ProtoId::ZCLPriceGetCurrentPrice,
+    ProtoId::ZCLPriceGetScheduledPrices,
     ProtoId::NRTPEndHeader,
     ProtoId::NRTPStatusCodeHeader,
     ProtoId::NRTPCloseConnectionHeader,
@@ -1271,6 +1289,17 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::TPMLPCRSELECTION.0 as usize] = &tpm_tpml_pcr_selection::DESC;
     t[ProtoId::TPMSCLOCKINFO.0 as usize] = &tpm_tpms_clock_info::DESC;
     t[ProtoId::TPM2BPUBLICKEYRSA.0 as usize] = &tpm_tpm2b_public_key_rsa::DESC;
+    t[ProtoId::LinkStatusEntry.0 as usize] = &zigbee_linkstatusentry::DESC;
+    t[ProtoId::ZDPActiveEPReq.0 as usize] = &zigbee_zdpactiveepreq::DESC;
+    t[ProtoId::ZCLGeneralReadAttributes.0 as usize] = &zigbee_zclgeneralreadattributes::DESC;
+    t[ProtoId::ZCLGeneralDefaultResponse.0 as usize] = &zigbee_zclgeneraldefaultresponse::DESC;
+    t[ProtoId::ZCLIASZoneZoneEnrollResponse.0 as usize] =
+        &zigbee_zcliaszonezoneenrollresponse::DESC;
+    t[ProtoId::ZCLIASZoneZoneStatusChangeNotification.0 as usize] =
+        &zigbee_zcliaszonezonestatuschangenotification::DESC;
+    t[ProtoId::ZCLMeteringGetProfile.0 as usize] = &zigbee_zclmeteringgetprofile::DESC;
+    t[ProtoId::ZCLPriceGetCurrentPrice.0 as usize] = &zigbee_zclpricegetcurrentprice::DESC;
+    t[ProtoId::ZCLPriceGetScheduledPrices.0 as usize] = &zigbee_zclpricegetscheduledprices::DESC;
     t[ProtoId::NRTPEndHeader.0 as usize] = &ms_nrtp_nrtpendheader::DESC;
     t[ProtoId::NRTPStatusCodeHeader.0 as usize] = &ms_nrtp_nrtpstatuscodeheader::DESC;
     t[ProtoId::NRTPCloseConnectionHeader.0 as usize] = &ms_nrtp_nrtpcloseconnectionheader::DESC;
@@ -1461,6 +1490,9 @@ pub fn group_of(id: ProtoId) -> Option<&'static crate::repeat::GroupDesc> {
         ProtoId::LLTDEmit => Some(&crate::layers::lltd_lltdemit::GROUP),
         ProtoId::SubelemTLV => Some(&crate::layers::dot11_subelemtlv::GROUP),
         ProtoId::TPMLPCRSELECTION => Some(&crate::layers::tpm_tpml_pcr_selection::GROUP),
+        ProtoId::ZCLGeneralReadAttributes => {
+            Some(&crate::layers::zigbee_zclgeneralreadattributes::GROUP)
+        }
         // protogen:groups end
         _ => None,
     }
@@ -1533,6 +1565,7 @@ pub fn parsed_field_name(id: ProtoId) -> &'static str {
         ProtoId::LLTDEmit => "descs_list",
         ProtoId::SubelemTLV => "value",
         ProtoId::TPMLPCRSELECTION => "pcrSelections",
+        ProtoId::ZCLGeneralReadAttributes => "attribute_identifiers",
         // protogen:parsed end
         _ => "options",
     }

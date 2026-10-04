@@ -378,4 +378,13 @@ pub mod tpm_tpms_pcr_selection;
 pub mod tpm_tpms_scheme_sighash;
 pub mod vrrp;
 pub mod wireguard;
+pub mod zigbee_linkstatusentry;
+pub mod zigbee_zclgeneraldefaultresponse;
+pub mod zigbee_zclgeneralreadattributes;
+pub mod zigbee_zcliaszonezoneenrollresponse;
+pub mod zigbee_zcliaszonezonestatuschangenotification;
+pub mod zigbee_zclmeteringgetprofile;
+pub mod zigbee_zclpricegetcurrentprice;
+pub mod zigbee_zclpricegetscheduledprices;
+pub mod zigbee_zdpactiveepreq;
 // protogen:mods end
