@@ -773,7 +773,8 @@ def _bound_py(rust: Any, i: int, lower: str) -> Any:
 def _held(obj: Any) -> "Packet":
     """A one-layer packet carrying a Python-modelled layer: under the Rust
     layer it models, which keeps that layer's binding (UDP port 161 for
-    SNMP), or as Raw octets where it models none."""
+    SNMP), or as Raw octets where it models none or shares it with other
+    classes (`PY_DECODER`)."""
     wire = type(obj).__name__
     if wire not in _PY_MODELLED or wire in _PY_DECODER:
         wire = getattr(type(obj), "_name", None)
