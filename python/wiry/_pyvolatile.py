@@ -41,7 +41,7 @@ class PyVolatile(_v.VolatileValue):
     __slots__ = ()
 
     def __init__(self) -> None:
-        super().__init__(("python",))
+        _v.VolatileValue.__init__(self, ("python",))
 
     def _draw(self) -> Any:
         return self._fix()

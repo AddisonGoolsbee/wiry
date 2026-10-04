@@ -26,11 +26,9 @@ from .asn1.asn1 import (
     ASN1_OID,
     ASN1_Object,
     ASN1_STRING,
-    GeneralizedTime,
-    PyRandChoice as RandChoice,
-    PyRandNum as RandNum,
-    PyRandString as RandString,
-    RandOID,
+)
+from ._pyvolatile import (
+    GeneralizedTime, RandChoice, RandNum, RandOID, RandString,
 )
 from .asn1.ber import (
     BER_Decoding_Error,

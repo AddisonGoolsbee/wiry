@@ -110,6 +110,7 @@ per-file blocks are authoritative.
 | `python/wiry/layers/snmp.py` | `scapy/layers/snmp.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/x509.py` | `scapy/layers/x509.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/ldap.py` | `scapy/layers/ldap.py` | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/_pyvolatile.py` | `scapy/volatile.py` | master / `e2e35c0` | 2026-10-04 |
 | `python/wiry/_pyfields.py` | `scapy/fields.py` (`MultipleTypeField`, `PacketField`, `Field`, `FieldLenField`, `StrLenField`) | master / `e2e35c0` | 2026-10-03 |
 
 A generated layer's block comes from the `[provenance]` table in its

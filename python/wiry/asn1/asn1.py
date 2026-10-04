@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
 # Derived from scapy: scapy/asn1/asn1.py; Enum_metaclass and EnumElement from
-#   scapy/utils.py; GeneralizedTime, IntAutoTime, ZuluTime and RandOID from
-#   scapy/volatile.py
+#   scapy/utils.py
 #   scapy master, upstream commit e2e35c0
 #   Copyright (C) Philippe Biondi <phil@secdev.org>
 #   Acknowledgment: Maxence Tury <maxence.tury@ssi.gouv.fr>
@@ -10,15 +9,18 @@
 # Changed by the wiry authors:
 #   2026-10-03 — transcribed; the volatile values draw in Python, and the
 #     Python 2 timezone fallback is gone.
+#   2026-10-04 — the volatile values moved to _pyvolatile.py.
 """ASN.1 classes, tags and value objects (ITU-T X.680)."""
 
 import random
-import time
 
 from datetime import datetime, timedelta, timezone
 
 from ..capture import conf
-from ..volatile import VolatileValue, RandIP, RandNum, RandChoice, RandString
+from .._pyvolatile import (
+    PyVolatile as _PyVolatile, GeneralizedTime, IntAutoTime, RandIP, RandOID,
+    ZuluTime,
+)
 
 from typing import (
     Any,
@@ -119,106 +121,6 @@ class Enum_metaclass(type):
 
     def __contains__(self, val):
         return val in self.__rdict__
-
-
-class _PyVolatile(VolatileValue):
-    """A volatile value drawn in Python rather than from a Rust spec."""
-
-    __slots__ = ()
-
-    def __init__(self) -> None:
-        super().__init__(("python",))
-
-    def _draw(self) -> Any:
-        return self._fix()
-
-    def __repr__(self) -> str:
-        return "<%s>" % type(self).__name__
-
-
-class PyRandNum(RandNum):
-    """`RandNum` drawn from Python's `random` the way scapy draws it, over
-    any range: ASN.1 integers run past the 64 bits the Rust draw holds."""
-
-    __slots__ = ()
-
-    def _draw(self) -> int:
-        _, lo, hi = self._spec
-        return random.randrange(lo, hi + 1)
-
-    _fix = _draw
-
-
-class PyRandChoice(RandChoice):
-    """`RandChoice` over Python objects, packets included."""
-
-    __slots__ = ()
-
-    def _draw(self) -> Any:
-        return random.choice(self._spec[1])
-
-    _fix = _draw
-
-
-class PyRandString(RandString):
-    """scapy's RandString, whose length is drawn afresh on every draw."""
-
-    __slots__ = ("size",)
-
-    def __init__(self, size: Any) -> None:
-        super().__init__(0)
-        self.size = size
-
-    def _draw(self) -> bytes:
-        chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-        return bytes(random.choice(chars) for _ in range(self.size))
-
-    _fix = _draw
-
-
-class IntAutoTime(_PyVolatile):
-    __slots__ = ("diff",)
-
-    def __init__(self, base: Optional[float] = None, diff: Optional[float] = None):
-        super().__init__()
-        self.diff = diff if diff is not None else (
-            0 if base is None else time.time() - base)
-
-    def _fix(self) -> int:
-        return int(time.time() - self.diff)
-
-
-class GeneralizedTime(_PyVolatile):
-    __slots__ = ("diff",)
-
-    def __init__(self, diff: float = 0):
-        super().__init__()
-        self.diff = diff
-
-    def _fix(self) -> str:
-        return time.strftime("%Y%m%d%H%M%SZ", time.gmtime(time.time() + self.diff))
-
-
-class ZuluTime(_PyVolatile):
-    __slots__ = ("diff",)
-
-    def __init__(self, diff: float = 0):
-        super().__init__()
-        self.diff = diff
-
-    def _fix(self) -> str:
-        return time.strftime("%y%m%d%H%M%SZ", time.gmtime(time.time() + self.diff))
-
-
-class RandOID(_PyVolatile):
-    """Arcs and depth drawn from exponential distributions, as scapy's are."""
-
-    __slots__ = ()
-
-    def _fix(self) -> str:
-        depth = int(round(random.expovariate(0.1)))
-        return ".".join(
-            str(int(round(random.expovariate(0.01)))) for _ in range(1 + depth))
 
 
 class RandASN1Object(_PyVolatile):
