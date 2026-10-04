@@ -33,7 +33,6 @@ from __future__ import annotations
 import atexit
 import math
 import os
-import tempfile
 import threading
 import time
 import warnings
@@ -126,7 +125,7 @@ def _offline_source(offline: Any) -> Any:
             pkts.append(sock.recv())
         except EOFError:
             break
-    return _packet_list(pkts)._list
+    return _capture_of(pkts)
 
 
 # Layer name -> the link type a capture of it declares; the rest are written
@@ -147,9 +146,9 @@ def _link_of(pkt: Any) -> int:
     return _RAW_LINK
 
 
-def _packet_list(pkts: list) -> PacketList:
-    """Python packets as a ``PacketList``, which is a view over a capture
-    buffer: they are written into one in memory and indexed back.
+def _capture_of(pkts: list) -> Any:
+    """Python packets as a capture buffer, so the one Rust machine and BPF
+    read them as they read a file.
 
     A capture declares one link type. Packets that disagree on theirs are all
     kept as ``Raw`` rather than misread, with a warning.
@@ -161,24 +160,11 @@ def _packet_list(pkts: list) -> PacketList:
             "cannot hold; they are kept as Raw", RuntimeWarning, stacklevel=3,
         )
     link = links.pop() if len(links) == 1 else (_RAW_LINK if links else 1)
-    writer = _b.CaptureWriter(None, False, link, 262144, True, False, False,
-                              None)
-    writer.write_records([
+    return _b.PktList.from_frames([
         (_octets(p), float(getattr(p, "time", 0.0) or 0.0),
          int(getattr(p, "wirelen", 0) or 0))
         for p in pkts
-    ])
-    data = writer.close()
-    fd, path = tempfile.mkstemp(suffix=".pcap", prefix="wiry")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-        return PacketList(_b.read_pcap(path))
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+    ], link)
 
 
 def _socket_map(opened_socket: Any) -> dict:
@@ -286,7 +272,7 @@ def _sniff_sockets(
                 break
     except KeyboardInterrupt:
         pass
-    return _packet_list(out)
+    return PacketList(out)
 
 
 # How often a sniff that can be stopped from outside looks at its stop flag.
@@ -862,15 +848,32 @@ def _passes(count: Optional[int]) -> int:
     return 1 if count is None else int(count)
 
 
-def _refuse_unsupported(realtime: Any, socket: Any) -> None:
-    if socket is not None:
-        raise NotImplementedError(
-            "socket= is not supported: there is no socket object to hand in"
-        )
+def _refuse_unsupported(realtime: Any) -> None:
     if realtime:
         raise NotImplementedError(
             "realtime= is not supported; inter= paces the send instead"
         )
+
+
+def _send_on(sock: Any, x: Any, count: Optional[int], loop: int, gap: float,
+             verbose: Optional[int], return_packets: bool) -> Any:
+    """``socket=``: every packet goes through that socket's ``send``, which
+    is a Python call per packet, the socket being a Python object."""
+    pkts = _as_list(x)
+    sent = 0
+    n = 0
+    try:
+        while loop or n < _passes(count):
+            for p in pkts:
+                sock.send(p)
+                sent += 1
+                if gap:
+                    time.sleep(gap)
+            n += 1
+    except KeyboardInterrupt:
+        pass
+    _report(sent, verbose)
+    return pkts if return_packets else None
 
 
 def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
@@ -882,9 +885,11 @@ def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
     IPv4 only: the raw socket writes datagrams with the header included, and
     IPv6 needs a second address family. ``loop`` repeats until interrupted.
     """
-    _b.capture_check()
-    _refuse_unsupported(realtime, socket)
+    _refuse_unsupported(realtime)
     gap = _pause(inter)
+    if socket is not None:
+        return _send_on(socket, x, count, loop, gap, verbose, return_packets)
+    _b.capture_check()
     _, ip = _local_addrs(_iface_name(iface))
     if isinstance(x, Packet):
         x = _with_src(x, None, ip)
@@ -912,9 +917,11 @@ def sendp(x: Any, inter: float = 0, loop: int = 0, iface: Any = None,
     The whole list is serialised here and crosses into Rust once; the repeat
     and the ``inter`` pacing happen there. ``loop`` repeats until interrupted.
     """
-    _b.capture_check()
-    _refuse_unsupported(realtime, socket)
+    _refuse_unsupported(realtime)
     gap = _pause(inter)
+    if socket is not None:
+        return _send_on(socket, x, count, loop, gap, verbose, return_packets)
+    _b.capture_check()
     name = _iface_name(iface)
     mac, ip = _local_addrs(name)
     if isinstance(x, Packet):
@@ -1278,9 +1285,8 @@ class _Conf:
         """The class a state machine opens to send layer-3 datagrams.
 
         Set it to swap in your own; set it to ``None`` to go back to wiry's.
-        The send path of ``send()`` and ``sr()`` opens its own socket in Rust
-        and does not read this, which is why ``send(socket=...)`` is still
-        refused (E17)."""
+        ``send()`` and ``sr()`` open their own socket in Rust and do not read
+        this; ``send(socket=...)`` is how to send through a socket object."""
         from .supersocket import L3Socket
 
         return self._l3socket or L3Socket

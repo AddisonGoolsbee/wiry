@@ -69,10 +69,10 @@ class AnsweringMachine(metaclass=ReferenceAM):
     filter: Optional[str] = None
     sniff_options: Dict[str, Any] = {"store": 0}
     sniff_options_list = ["store", "iface", "count", "promisc", "filter",
-                          "type", "prn", "stop_filter", "offline", "where",
-                          "timeout", "quiet"]
+                          "type", "prn", "stop_filter", "opened_socket",
+                          "offline", "where", "timeout", "quiet"]
     send_options: Dict[str, Any] = {"verbose": 0}
-    send_options_list = ["iface", "inter", "loop", "verbose"]
+    send_options_list = ["iface", "inter", "loop", "verbose", "socket"]
     send_function: Any = None
 
     def __init__(self, **kargs: Any):
@@ -245,12 +245,7 @@ class AnsweringMachineTCP(AnsweringMachine):
             sock.close()
 
     def sniff(self) -> None:
-        """Accept clients and answer each one on its own thread.
-
-        This reads the client socket directly rather than going through
-        ``sniff``: the source is a stream, not an interface, and wiry's capture
-        backend does not take a socket handed in from Python.
-        """
+        """Accept clients and answer each one on its own thread."""
         from .capture import conf, get_if_addr
         from .supersocket import StreamSocket
 

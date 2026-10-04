@@ -658,17 +658,25 @@ class Packet(metaclass=_PacketMeta):
             else:
                 return NotImplemented
 
-        # A materialised packet cannot be turned back into a field spec:
-        # variable-length header content does not survive the build path, so
-        # reconstructing would reset every field to its default.
-        if self._rust is not None or other._rust is not None:
-            new = self._materialize().copy()
-            n = len(new.layer_names())
-            if n:
-                new.set_payload(n - 1, bytes(other))
+        mine = self._rust is None or self._spec_live
+        theirs = other._rust is None or other._spec_live
+        if mine and theirs:
+            return Packet(_stack=_float_padding(self._spec() + other._spec()))
+        # A dissected packet cannot be turned back into a field spec: variable-
+        # length header content does not survive the build path. Its octets go
+        # in as the payload instead, behind a stand-in of its first layer so
+        # the binding below it (EtherType, protocol, port) is written.
+        if mine and not any(n == "Padding" for n, _ in self._stack):
+            first = other.layers()[:1]
+            head = Packet(_stack=self._spec() + [(first[0], {})] if first else self._spec())
+            new = head._materialize().copy()
+            new.set_payload(len(self._stack) - 1, bytes(other))
             return Packet(_rust=new, time=self.time, wirelen=self.wirelen)
-
-        return Packet(_stack=_float_padding(self._spec() + other._spec()))
+        new = self._materialize().copy()
+        n = len(new.layer_names())
+        if n:
+            new.set_payload(n - 1, bytes(other))
+        return Packet(_rust=new, time=self.time, wirelen=self.wirelen)
 
     def __rtruediv__(self, other: Any) -> "Packet":
         if _is_bytes(other) or isinstance(other, str):

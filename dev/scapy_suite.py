@@ -34,12 +34,11 @@ from pathlib import Path
 import wiry
 
 # Names we deliberately do not provide: a scope boundary, not a defect.
-# `restart` is scapy's "exec myself again"; wiry's console does not offer one,
-# and the test imports it from `scapy.utils` anyway, so it reads scapy's own
-# `conf` rather than wiry's however wiry answers.
+# psdump and pdfdump draw each packet through Packet.canvas_dump, which wiry
+# does not have.
 OUT_OF_SCOPE = {
     "BER_Exception", "load_contrib", "load_layer",
-    "pdfdump", "psdump", "restart", "tcpdump", "voip_play", "wireshark",
+    "pdfdump", "psdump", "voip_play",
 }
 
 
@@ -90,16 +89,19 @@ _PLATFORM = {
     "osx": sys.platform == "darwin",
     "bsd": sys.platform.startswith(("freebsd", "openbsd", "netbsd", "darwin")),
 }
-# External programs scapy shells out to, none of which we provide.
-_NEEDS_TOOL = {"tshark", "tcpdump", "wireshark", "netaccess", "vcan_socket",
-               "needs_root", "root", "manufdb"}
+# What a test needs from the host that this run may not have: a network, root,
+# a CAN socket. A program is needed only where it is not on PATH.
+_NEEDS_TOOL = {"netaccess", "vcan_socket", "needs_root", "root"}
+_PROGRAMS = {"tshark", "tcpdump", "wireshark"}
 
 
 def environment_block(kw):
+    import shutil
+
     for key, present in _PLATFORM.items():
         if key in kw and not present:
             return f"needs a {key} host"
-    tool = kw & _NEEDS_TOOL
+    tool = (kw & _NEEDS_TOOL) | {p for p in kw & _PROGRAMS if shutil.which(p) is None}
     if tool:
         return f"needs {sorted(tool)[0]}"
     return None
