@@ -1,0 +1,8 @@
+pkt = Ether(dst="00:11:22:33:44:55", src="66:77:88:99:aa:bb") / IP(dst="10.0.0.1") / UDP(dport=53) / Raw(load=b"hi")
+hexdump(pkt)
+print(hexdump(pkt, dump=True))
+print(linehexdump(pkt, dump=True))
+ls(UDP)
+ls(pkt[UDP])
+print(raw(pkt) == bytes(pkt))
+print(len(raw(pkt)))
