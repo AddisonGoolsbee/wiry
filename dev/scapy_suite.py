@@ -17,21 +17,68 @@ Outcomes are three-way and the distinction matters for honest reporting:
 Only FAIL is a defect. A SKIP is a scope boundary.
 """
 
+import importlib
+import importlib.abc
+import importlib.util
 import re
 import sys
 import traceback
+import types
 from pathlib import Path
 
 import wiry
 
 # Names we deliberately do not provide: a scope boundary, not a defect.
-# `restart` is scapy's "exec myself again"; wiry's console does not offer one,
-# and the test imports it from `scapy.utils` anyway, so it reads scapy's own
-# `conf` rather than wiry's however wiry answers.
+# `restart` is scapy's "exec myself again"; wiry's console does not offer one.
 OUT_OF_SCOPE = {
-    "BER_Exception", "load_contrib", "load_layer",
+    "load_contrib", "load_layer",
     "pdfdump", "psdump", "restart", "tcpdump", "voip_play", "wireshark",
 }
+
+
+class _ScapyAsWiry(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Answer `import scapy.x.y` with `wiry.x.y`, or with a view of `wiry`
+    itself where wiry has no such module.
+
+    scapy is installed beside wiry for the parity oracle, so without this a
+    test's `from scapy.layers.x509 import X509_Cert` runs scapy and scores
+    scapy's answer as wiry's. A name wiry lacks then fails as an ImportError,
+    which is a skip.
+    """
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != "scapy" and not fullname.startswith("scapy."):
+            return None
+        # `from scapy.utils import missing` retries `missing` as a submodule;
+        # answering that with another view would hide the ImportError.
+        parent = sys.modules.get(fullname.rpartition(".")[0])
+        if getattr(parent, "__wiry_view__", False):
+            return None
+        return importlib.util.spec_from_loader(fullname, self)
+
+    def create_module(self, spec):
+        rest = spec.name[len("scapy"):]
+        try:
+            return importlib.import_module("wiry" + rest)
+        except ImportError:
+            pass
+        # A fresh module per name: the import system binds each child onto
+        # its parent, and binding `layers` onto `wiry` itself would shadow
+        # wiry's lazy attributes.
+        proxy = types.ModuleType(spec.name)
+        proxy.__getattr__ = lambda name: getattr(wiry, name)
+        proxy.__path__ = []
+        proxy.__all__ = [n for n in dir(wiry) if not n.startswith("_")]
+        proxy.__wiry_view__ = True
+        return proxy
+
+    def exec_module(self, module):
+        pass
+
+
+for _name in [m for m in sys.modules if m == "scapy" or m.startswith("scapy.")]:
+    del sys.modules[_name]
+sys.meta_path.insert(0, _ScapyAsWiry())
 
 
 def parse_uts(path):
