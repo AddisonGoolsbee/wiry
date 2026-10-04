@@ -605,8 +605,9 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
         let next = match crate::proto::bound_next(proto, hdr) {
             Some(p) => Next::Proto(p),
             None => match (d.next)(hdr) {
-                Next::Raw => crate::layers::dispatch::by_layer(proto, hdr)
-                    .map_or(Next::Raw, Next::Proto),
+                Next::Raw => {
+                    crate::layers::dispatch::by_layer(proto, hdr).map_or(Next::Raw, Next::Proto)
+                }
                 n => n,
             },
         };

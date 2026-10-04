@@ -793,7 +793,10 @@ def render_layer(s: dict, existing: str) -> str:
     for line in s["citation"].strip().splitlines():
         lines.append(("//! " + line).rstrip())
     lines.append("//!")
-    lines.append("//! " + BANNER.format(spec=s["_file"]))
+    banner = BANNER.format(spec=s["_file"])
+    if s.get("provenance"):
+        banner = banner.replace("the RFC cited above", "the sources cited above")
+    lines.append("//! " + banner)
     lines.append("")
     bind = render_bind_next(s)
     hooks = [render_conds(s), render_header_len(s), render_set_len(s),
@@ -1173,8 +1176,7 @@ def render_by_layer(entries: list[tuple[dict, dict]]) -> list[str]:
     out = []
     fwd = ["#[inline]", "pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {",
            "    match parent {"]
-    rev = ["#[inline]", "pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {",
-           "    match (parent, child) {"]
+    rev = ["#[inline]", "pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {"]
     funcs = []
     for parent in sorted(parents):
         fn = "by_" + re.sub(r"(?<!^)([A-Z])", r"_\1", parent).lower()
@@ -1189,16 +1191,24 @@ def render_by_layer(entries: list[tuple[dict, dict]]) -> list[str]:
             for v in p["values"]:
                 keyed.setdefault((p["off"], p["len"]), []).append((v, s["id"]))
             bv = p.get("bind", p["values"][0])
-            rev.append(f"        (ProtoId::{parent}, ProtoId::{s['id']}) => "
-                       f"crate::field::write_bits(hdr, {p['off']}, {p['len']}, {bv}),")
+            rev += [f"    if parent == ProtoId::{parent} && child == ProtoId::{s['id']} {{",
+                    f"        crate::field::write_bits(hdr, {p['off']}, {p['len']}, {bv});",
+                    "    }"]
         for (off, ln), arms in sorted(keyed.items()):
             seen = {}
             for v, pid in arms:
                 if v in seen and seen[v] != pid:
                     raise SpecError(f"{parent} bit {off}: {v} binds both {seen[v]} and {pid}")
                 seen[v] = pid
+            read = f"crate::field::read_bits(hdr, {off}, {ln})"
+            if len(seen) == 1:
+                (v, pid), = seen.items()
+                body.append(f"    if hdr.len() * 8 >= {off + ln} && {read} == {v} {{")
+                body.append(f"        return Some(ProtoId::{pid});")
+                body.append("    }")
+                continue
             body.append(f"    if hdr.len() * 8 >= {off + ln} {{")
-            body.append(f"        match crate::field::read_bits(hdr, {off}, {ln}) {{")
+            body.append(f"        match {read} {{")
             for v in sorted(seen):
                 body.append(f"            {v} => return Some(ProtoId::{seen[v]}),")
             body.append("            _ => {}")
@@ -1210,7 +1220,7 @@ def render_by_layer(entries: list[tuple[dict, dict]]) -> list[str]:
         body.append("}")
         funcs += body + [""]
     fwd += ["        _ => None,", "    }", "}", ""]
-    rev += ["        _ => {}", "    }", "}", ""]
+    rev += ["}", ""]
     if not parents:
         fwd = ["#[inline]", "pub fn by_layer(_parent: ProtoId, _hdr: &[u8]) -> Option<ProtoId> {",
                "    None", "}", ""]
