@@ -109,6 +109,23 @@ per-file blocks are authoritative.
 | `crates/wiry-core/src/layers/linux_sll.rs` | `scapy/layers/l2.py` | scapy 2.7.0 | 2026-10-03 |
 | `crates/wiry-core/src/layers/pppoe.rs` | `scapy/layers/ppp.py` | scapy 2.7.0 | 2026-10-03 |
 | `python/wiry/fields.py` | `scapy/fields.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/ah.rs` | `scapy/layers/ipsec.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/dhcp6.rs` | `scapy/layers/dhcp6.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/dot11.rs` | `scapy/layers/dot11.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/dot11auth.rs` | `scapy/layers/dot11.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/hsrp.rs` | `scapy/layers/hsrp.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/icmpv6_na.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/icmpv6_ns.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/icmpv6_ra.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/icmpv6_redirect.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/icmpv6_rs.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/mld_done.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/mld_report.rs` | `scapy/layers/inet6.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/nbtsession.rs` | `scapy/layers/netbios.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/radius.rs` | `scapy/layers/radius.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/smb2.rs` | `scapy/layers/smb2.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/snap.rs` | `scapy/layers/l2.py` | scapy 2.7.0 | 2026-10-03 |
+| `crates/wiry-core/src/layers/tftp.rs` | `scapy/layers/tftp.py` | scapy 2.7.0 | 2026-10-03 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift

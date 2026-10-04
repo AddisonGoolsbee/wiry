@@ -6,6 +6,7 @@
 //
 // Changed by the wiry authors:
 //   2026-09-18 — ICMPv6MLReport2's field names and ICMPv6MLDMultAddrRec's field table transcribed as a nested repeating group; the auxiliary data length is read in 32-bit words per RFC 3810 §5.2.6, which scapy reads as octets, and it is counted into the record width
+//   2026-10-03 — enumerated names of type transcribed
 
 //! RFC 3810 §5.2, Version 2 Multicast Listener Report: ICMPv6 type 143, a reserved
 //! octet, the checksum, a 16-bit reserved field and a 16-bit count of multicast
@@ -35,7 +36,42 @@ use crate::repeat::{ElemLen, Extent, GroupDesc, LenTerm};
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("type", 0, 8, 143),
+    FieldDesc::uint("type", 0, 8, 143).named(&[
+        (1, "Destination unreachable"),
+        (2, "Packet too big"),
+        (3, "Time exceeded"),
+        (4, "Parameter problem"),
+        (100, "Private Experimentation"),
+        (101, "Private Experimentation"),
+        (128, "Echo Request"),
+        (129, "Echo Reply"),
+        (130, "MLD Query"),
+        (131, "MLD Report"),
+        (132, "MLD Done"),
+        (133, "Router Solicitation"),
+        (134, "Router Advertisement"),
+        (135, "Neighbor Solicitation"),
+        (136, "Neighbor Advertisement"),
+        (137, "Redirect Message"),
+        (138, "Router Renumbering"),
+        (139, "ICMP Node Information Query"),
+        (140, "ICMP Node Information Response"),
+        (141, "Inverse Neighbor Discovery Solicitation Message"),
+        (142, "Inverse Neighbor Discovery Advertisement Message"),
+        (143, "MLD Report Version 2"),
+        (144, "Home Agent Address Discovery Request Message"),
+        (145, "Home Agent Address Discovery Reply Message"),
+        (146, "Mobile Prefix Solicitation"),
+        (147, "Mobile Prefix Advertisement"),
+        (148, "Certification Path Solicitation"),
+        (149, "Certification Path Advertisement"),
+        (151, "Multicast Router Advertisement"),
+        (152, "Multicast Router Solicitation"),
+        (153, "Multicast Router Termination"),
+        (155, "RPL Control Message"),
+        (200, "Private Experimentation"),
+        (201, "Private Experimentation"),
+    ]),
     FieldDesc::uint("res", 8, 8, 0),
     FieldDesc::uint("cksum", 16, 16, 0),
     FieldDesc::uint("reserved", 32, 16, 0),

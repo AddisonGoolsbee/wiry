@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/netbios.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of TYPE transcribed
+
 //! RFC 1002 §4.3.1: the NetBIOS session service prefixes each message over TCP
 //! port 139 with a one-octet type, a one-octet flags field whose low bit extends
 //! the length, and a 16-bit length. Type 0 is a session message, which over port
@@ -36,7 +45,14 @@ pub fn looks_like(p: &[u8]) -> bool {
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("TYPE", 0, 8, 0),
+    FieldDesc::uint("TYPE", 0, 8, 0).named(&[
+        (0, "Session Message"),
+        (129, "Session Request"),
+        (130, "Positive Session Response"),
+        (131, "Negative Session Response"),
+        (132, "Retarget Session Response"),
+        (133, "Session Keepalive"),
+    ]),
     FieldDesc::uint("FLAGS", 8, 8, 0),
     FieldDesc::uint("LENGTH", 16, 16, 0),
 ];

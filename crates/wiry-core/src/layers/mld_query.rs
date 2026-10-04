@@ -6,6 +6,7 @@
 //
 // Changed by the wiry authors:
 //   2026-09-18 — ICMPv6MLQuery2's field names (Resv, S, QRV, QQIC, sources_number) and its sources IP6ListField transcribed as a count-driven repeating group; checked against RFC 3810 §5.1
+//   2026-10-03 — enumerated names of type transcribed
 
 //! RFC 2710 §3, Multicast Listener Query: ICMPv6 type 130, code 0, checksum, a
 //! 16-bit Maximum Response Delay in milliseconds, a 16-bit reserved field and the
@@ -43,7 +44,42 @@ fn header_len(hdr: &[u8]) -> usize {
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("type", 0, 8, 130),
+    FieldDesc::uint("type", 0, 8, 130).named(&[
+        (1, "Destination unreachable"),
+        (2, "Packet too big"),
+        (3, "Time exceeded"),
+        (4, "Parameter problem"),
+        (100, "Private Experimentation"),
+        (101, "Private Experimentation"),
+        (128, "Echo Request"),
+        (129, "Echo Reply"),
+        (130, "MLD Query"),
+        (131, "MLD Report"),
+        (132, "MLD Done"),
+        (133, "Router Solicitation"),
+        (134, "Router Advertisement"),
+        (135, "Neighbor Solicitation"),
+        (136, "Neighbor Advertisement"),
+        (137, "Redirect Message"),
+        (138, "Router Renumbering"),
+        (139, "ICMP Node Information Query"),
+        (140, "ICMP Node Information Response"),
+        (141, "Inverse Neighbor Discovery Solicitation Message"),
+        (142, "Inverse Neighbor Discovery Advertisement Message"),
+        (143, "MLD Report Version 2"),
+        (144, "Home Agent Address Discovery Request Message"),
+        (145, "Home Agent Address Discovery Reply Message"),
+        (146, "Mobile Prefix Solicitation"),
+        (147, "Mobile Prefix Advertisement"),
+        (148, "Certification Path Solicitation"),
+        (149, "Certification Path Advertisement"),
+        (151, "Multicast Router Advertisement"),
+        (152, "Multicast Router Solicitation"),
+        (153, "Multicast Router Termination"),
+        (155, "RPL Control Message"),
+        (200, "Private Experimentation"),
+        (201, "Private Experimentation"),
+    ]),
     FieldDesc::uint("code", 8, 8, 0),
     FieldDesc::uint("cksum", 16, 16, 0),
     FieldDesc::uint("mrd", 32, 16, 10000),

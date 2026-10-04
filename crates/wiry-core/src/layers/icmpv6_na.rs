@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/inet6.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of type transcribed
+
 //! RFC 4861 §4.4, Neighbor Advertisement: ICMPv6 type 136, code 0, checksum, the
 //! Router, Solicited and Override flags followed by 29 reserved bits, the 128-bit
 //! target address, then options (§4.6).
@@ -17,7 +26,42 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("type", 0, 8, 136),
+    FieldDesc::uint("type", 0, 8, 136).named(&[
+        (1, "Destination unreachable"),
+        (2, "Packet too big"),
+        (3, "Time exceeded"),
+        (4, "Parameter problem"),
+        (100, "Private Experimentation"),
+        (101, "Private Experimentation"),
+        (128, "Echo Request"),
+        (129, "Echo Reply"),
+        (130, "MLD Query"),
+        (131, "MLD Report"),
+        (132, "MLD Done"),
+        (133, "Router Solicitation"),
+        (134, "Router Advertisement"),
+        (135, "Neighbor Solicitation"),
+        (136, "Neighbor Advertisement"),
+        (137, "Redirect Message"),
+        (138, "Router Renumbering"),
+        (139, "ICMP Node Information Query"),
+        (140, "ICMP Node Information Response"),
+        (141, "Inverse Neighbor Discovery Solicitation Message"),
+        (142, "Inverse Neighbor Discovery Advertisement Message"),
+        (143, "MLD Report Version 2"),
+        (144, "Home Agent Address Discovery Request Message"),
+        (145, "Home Agent Address Discovery Reply Message"),
+        (146, "Mobile Prefix Solicitation"),
+        (147, "Mobile Prefix Advertisement"),
+        (148, "Certification Path Solicitation"),
+        (149, "Certification Path Advertisement"),
+        (151, "Multicast Router Advertisement"),
+        (152, "Multicast Router Solicitation"),
+        (153, "Multicast Router Termination"),
+        (155, "RPL Control Message"),
+        (200, "Private Experimentation"),
+        (201, "Private Experimentation"),
+    ]),
     FieldDesc::uint("code", 8, 8, 0),
     FieldDesc::uint("cksum", 16, 16, 0),
     FieldDesc::uint("R", 32, 1, 0),

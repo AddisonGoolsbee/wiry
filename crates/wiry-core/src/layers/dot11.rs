@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/dot11.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of type transcribed
+
 //! IEEE Std 802.11-2020 §9.2.4: the MAC header is a two-octet Frame Control field
 //! (§9.2.4.1: protocol version, type, subtype, then the eight To DS / From DS /
 //! More Fragments / Retry / Power Management / More Data / Protected / +HTC bits),
@@ -93,7 +102,12 @@ pub fn info_elements(hdr: &[u8], at: usize) -> Vec<Item> {
 
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("subtype", 0, 4, 0),
-    FieldDesc::uint("type", 4, 2, 0),
+    FieldDesc::uint("type", 4, 2, 0).named(&[
+        (0, "Management"),
+        (1, "Control"),
+        (2, "Data"),
+        (3, "Extension"),
+    ]),
     FieldDesc::uint("proto", 6, 2, 0),
     FieldDesc::flags(
         "FCfield",

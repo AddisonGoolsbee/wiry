@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/hsrp.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of opcode, state transcribed
+
 //! RFC 2281 §5: a one-octet version, a one-octet opcode, a one-octet state, the
 //! hello and hold times in seconds, a one-octet priority, a one-octet group, a
 //! reserved octet, eight octets of authentication data and the four-octet virtual
@@ -14,8 +23,20 @@ use crate::proto::{ProtoDesc, ProtoId};
 
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("version", 0, 8, 0),
-    FieldDesc::uint("opcode", 8, 8, 0),
-    FieldDesc::uint("state", 16, 8, 16),
+    FieldDesc::uint("opcode", 8, 8, 0).named(&[
+        (0, "Hello"),
+        (1, "Coup"),
+        (2, "Resign"),
+        (3, "Advertise"),
+    ]),
+    FieldDesc::uint("state", 16, 8, 16).named(&[
+        (0, "Initial"),
+        (1, "Learn"),
+        (2, "Listen"),
+        (4, "Speak"),
+        (8, "Standby"),
+        (16, "Active"),
+    ]),
     FieldDesc::uint("hellotime", 24, 8, 3),
     FieldDesc::uint("holdtime", 32, 8, 10),
     FieldDesc::uint("priority", 40, 8, 120),

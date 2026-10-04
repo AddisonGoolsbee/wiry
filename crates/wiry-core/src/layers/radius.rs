@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/radius.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of code transcribed
+
 //! RFC 2865 §3: a one-octet code, a one-octet identifier, a 16-bit length covering
 //! the whole packet and a 16-octet authenticator, followed by attributes. §5: an
 //! attribute is a one-octet type and a one-octet length that counts the type and
@@ -63,7 +72,50 @@ fn parse_options(hdr: &[u8]) -> Vec<Item> {
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("code", 0, 8, 1),
+    FieldDesc::uint("code", 0, 8, 1).named(&[
+        (1, "Access-Request"),
+        (2, "Access-Accept"),
+        (3, "Access-Reject"),
+        (4, "Accounting-Request"),
+        (5, "Accounting-Response"),
+        (6, "Accounting-Status (now Interim Accounting)"),
+        (7, "Password-Request"),
+        (8, "Password-Ack"),
+        (9, "Password-Reject"),
+        (10, "Accounting-Message"),
+        (11, "Access-Challenge"),
+        (12, "Status-Server (experimental)"),
+        (13, "Status-Client (experimental)"),
+        (21, "Resource-Free-Request"),
+        (22, "Resource-Free-Response"),
+        (23, "Resource-Query-Request"),
+        (24, "Resource-Query-Response"),
+        (25, "Alternate-Resource-Reclaim-Request"),
+        (26, "NAS-Reboot-Request"),
+        (27, "NAS-Reboot-Response"),
+        (28, "Reserved"),
+        (29, "Next-Passcode"),
+        (30, "New-Pin"),
+        (31, "Terminate-Session"),
+        (32, "Password-Expired"),
+        (33, "Event-Request"),
+        (34, "Event-Response"),
+        (40, "Disconnect-Request"),
+        (41, "Disconnect-ACK"),
+        (42, "Disconnect-NAK"),
+        (43, "CoA-Request"),
+        (44, "CoA-ACK"),
+        (45, "CoA-NAK"),
+        (50, "IP-Address-Allocate"),
+        (51, "IP-Address-Release"),
+        (52, "Protocol-Error"),
+        (250, "Experimental Use"),
+        (251, "Experimental Use"),
+        (252, "Experimental Use"),
+        (253, "Experimental Use"),
+        (254, "Reserved"),
+        (255, "Reserved"),
+    ]),
     FieldDesc::uint("id", 8, 8, 0),
     FieldDesc::uint("len", 16, 16, 20),
     FieldDesc::bytes("authenticator", 32, 128),

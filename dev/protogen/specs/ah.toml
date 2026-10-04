@@ -18,6 +18,7 @@ next = "hand"
 name = "nh"
 off = 0
 len = 8
+enum = "IP_PROTOS"
 
 [[fields]]
 name = "payloadlen"
@@ -58,3 +59,8 @@ payloadlen = 4
 reserved = 0
 spi = 0x11223344
 seq = 1
+
+[provenance]
+source = "scapy/layers/ipsec.py"
+version = "scapy 2.7.0"
+changed = ["2026-10-03 — enumerated names of nh transcribed"]

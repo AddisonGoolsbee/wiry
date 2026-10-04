@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/l2.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of code transcribed
+
 //! RFC 1042 §"Frame Format" and IEEE Std 802-2014 §9.2: the SNAP header is a
 //! three-octet organizationally unique identifier followed by a two-octet protocol
 //! identifier. With OUI 0x000000 the identifier is an EtherType (RFC 1042);
@@ -28,7 +37,7 @@ fn next(hdr: &[u8]) -> Next {
 
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("OUI", 0, 24, 0),
-    FieldDesc::uint("code", 24, 16, 2048),
+    FieldDesc::uint("code", 24, 16, 2048).host_named(crate::names::Host::EtherTypes),
 ];
 
 fn header_len(_: &[u8]) -> usize {

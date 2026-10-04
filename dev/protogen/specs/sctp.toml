@@ -26,11 +26,13 @@ parse_options = "hand"
 name = "sport"
 off = 0
 len = 16
+enum = "SCTP_SERVICES"
 
 [[fields]]
 name = "dport"
 off = 16
 len = 16
+enum = "SCTP_SERVICES"
 
 [[fields]]
 name = "tag"
@@ -68,4 +70,4 @@ chksum = 0
 [provenance]
 source = "scapy/layers/sctp.py"
 version = "scapy 2.7.0"
-changed = ["2026-09-18 — sctpchunktypes, sctpchunkparamtypes and the SCTPChunkInit field names transcribed; the chunks and their parameters are one nested item list rather than a chain of sub-packets. Checked against RFC 9260 §3.2 and §3.3"]
+changed = ["2026-09-18 — sctpchunktypes, sctpchunkparamtypes and the SCTPChunkInit field names transcribed; the chunks and their parameters are one nested item list rather than a chain of sub-packets. Checked against RFC 9260 §3.2 and §3.3", "2026-10-03 — enumerated names of sport, dport transcribed"]

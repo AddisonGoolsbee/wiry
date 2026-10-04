@@ -24,6 +24,7 @@ len = 4
 name = "type"
 off = 4
 len = 2
+enum = { 0 = "Management", 1 = "Control", 2 = "Data", 3 = "Extension" }
 
 [[fields]]
 name = "proto"
@@ -85,3 +86,8 @@ type = 0
 proto = 0
 ID = 0
 SC = 0
+
+[provenance]
+source = "scapy/layers/dot11.py"
+version = "scapy 2.7.0"
+changed = ["2026-10-03 — enumerated names of type transcribed"]

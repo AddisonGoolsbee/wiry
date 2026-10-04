@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/ipsec.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — enumerated names of nh transcribed
+
 //! RFC 4302 §2: an Authentication Header is a one-octet Next Header, a one-octet
 //! Payload Length giving the header size in 32-bit words minus two, a reserved
 //! 16-bit field, a 32-bit Security Parameters Index, a 32-bit Sequence Number and
@@ -39,7 +48,7 @@ fn next(hdr: &[u8]) -> Next {
 // protogen:hand end
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("nh", 0, 8, 0),
+    FieldDesc::uint("nh", 0, 8, 0).host_named(crate::names::Host::IpProtos),
     FieldDesc::uint("payloadlen", 8, 8, 4),
     FieldDesc::uint("reserved", 16, 16, 0),
     FieldDesc::uint("spi", 32, 32, 0),
