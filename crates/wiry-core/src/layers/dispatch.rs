@@ -69,7 +69,7 @@ pub fn by_ipproto_of(p: ProtoId) -> Option<u8> {
 
 const UDP_PORT_VALUES: &[u16] = &[
     69, 80, 123, 137, 161, 162, 434, 443, 514, 520, 546, 547, 1645, 1646, 1812, 1813, 1985, 2055,
-    2056, 3784, 3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
+    3784, 3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
 ];
 
 static UDP_PORT_CLAIMED: [u64; 810] = port_bits(UDP_PORT_VALUES);
@@ -102,7 +102,6 @@ fn by_udp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
             }
             None
         }
-        2056 => Some(ProtoId::NetflowHeader),
         3784 | 3785 | 4784 => Some(ProtoId::Bfd),
         4739 => crate::layers::ipfix::looks_like(payload).then_some(ProtoId::Ipfix),
         5060 | 5061 => crate::layers::sip::looks_like(payload).then_some(ProtoId::Sip),
@@ -136,7 +135,6 @@ pub fn by_udp_port_of(p: ProtoId) -> Option<u16> {
         ProtoId::Radius => Some(1812),
         ProtoId::Rip => Some(520),
         ProtoId::MobileIP => Some(434),
-        ProtoId::NetflowHeader => Some(2056),
         ProtoId::SFlow => Some(6343),
         ProtoId::Sip => Some(5060),
         ProtoId::Snmp => Some(161),

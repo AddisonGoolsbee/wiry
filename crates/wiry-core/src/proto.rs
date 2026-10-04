@@ -330,6 +330,7 @@ impl ProtoId {
     pub const PPTPCallDisconnectNotify: ProtoId = ProtoId(6243);
     pub const PPTPWANErrorNotify: ProtoId = ProtoId(6244);
     pub const PPTPSetLinkInfo: ProtoId = ProtoId(6245);
+    pub const Dot11QoS: ProtoId = ProtoId(6256);
     pub const RSNCipherSuite: ProtoId = ProtoId(6261);
     pub const AKMSuite: ProtoId = ProtoId(6262);
     pub const Dot11EltCountryConstraintTriplet: ProtoId = ProtoId(6265);
@@ -344,6 +345,7 @@ impl ProtoId {
     pub const BSSTerminationDuration: ProtoId = ProtoId(6290);
     pub const Dot11SpectrumManagement: ProtoId = ProtoId(6294);
     pub const Dot11S1GBeacon: ProtoId = ProtoId(6296);
+    pub const Dot11Encrypted: ProtoId = ProtoId(6297);
     pub const Dot11CCMP: ProtoId = ProtoId(6300);
     pub const TPMSSCHEMESIGHASH: ProtoId = ProtoId(6311);
     pub const TPMSNULLPARMS: ProtoId = ProtoId(6317);
@@ -364,7 +366,6 @@ impl ProtoId {
     pub const NRBFMemberReference: ProtoId = ProtoId(6422);
     pub const NRBFObjectNull: ProtoId = ProtoId(6423);
     pub const NRBFMessageEnd: ProtoId = ProtoId(6427);
-    pub const NetflowHeader: ProtoId = ProtoId(6430);
     pub const NetflowRecordV1: ProtoId = ProtoId(6432);
     pub const NetflowRecordV5: ProtoId = ProtoId(6434);
     pub const NetflowRecordV9: ProtoId = ProtoId(6440);
@@ -774,6 +775,7 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::PPTPCallDisconnectNotify,
     ProtoId::PPTPWANErrorNotify,
     ProtoId::PPTPSetLinkInfo,
+    ProtoId::Dot11QoS,
     ProtoId::RSNCipherSuite,
     ProtoId::AKMSuite,
     ProtoId::Dot11EltCountryConstraintTriplet,
@@ -788,6 +790,7 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::BSSTerminationDuration,
     ProtoId::Dot11SpectrumManagement,
     ProtoId::Dot11S1GBeacon,
+    ProtoId::Dot11Encrypted,
     ProtoId::Dot11CCMP,
     ProtoId::TPMSSCHEMESIGHASH,
     ProtoId::TPMSNULLPARMS,
@@ -808,7 +811,6 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::NRBFMemberReference,
     ProtoId::NRBFObjectNull,
     ProtoId::NRBFMessageEnd,
-    ProtoId::NetflowHeader,
     ProtoId::NetflowRecordV1,
     ProtoId::NetflowRecordV5,
     ProtoId::NetflowRecordV9,
@@ -1240,6 +1242,7 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::PPTPCallDisconnectNotify.0 as usize] = &pptp_pptpcalldisconnectnotify::DESC;
     t[ProtoId::PPTPWANErrorNotify.0 as usize] = &pptp_pptpwanerrornotify::DESC;
     t[ProtoId::PPTPSetLinkInfo.0 as usize] = &pptp_pptpsetlinkinfo::DESC;
+    t[ProtoId::Dot11QoS.0 as usize] = &dot11_dot11qos::DESC;
     t[ProtoId::RSNCipherSuite.0 as usize] = &dot11_rsnciphersuite::DESC;
     t[ProtoId::AKMSuite.0 as usize] = &dot11_akmsuite::DESC;
     t[ProtoId::Dot11EltCountryConstraintTriplet.0 as usize] =
@@ -1255,6 +1258,7 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::BSSTerminationDuration.0 as usize] = &dot11_bssterminationduration::DESC;
     t[ProtoId::Dot11SpectrumManagement.0 as usize] = &dot11_dot11spectrummanagement::DESC;
     t[ProtoId::Dot11S1GBeacon.0 as usize] = &dot11_dot11s1gbeacon::DESC;
+    t[ProtoId::Dot11Encrypted.0 as usize] = &dot11_dot11encrypted::DESC;
     t[ProtoId::Dot11CCMP.0 as usize] = &dot11_dot11ccmp::DESC;
     t[ProtoId::TPMSSCHEMESIGHASH.0 as usize] = &tpm_tpms_scheme_sighash::DESC;
     t[ProtoId::TPMSNULLPARMS.0 as usize] = &tpm_tpms_null_parms::DESC;
@@ -1275,7 +1279,6 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::NRBFMemberReference.0 as usize] = &ms_nrtp_nrbfmemberreference::DESC;
     t[ProtoId::NRBFObjectNull.0 as usize] = &ms_nrtp_nrbfobjectnull::DESC;
     t[ProtoId::NRBFMessageEnd.0 as usize] = &ms_nrtp_nrbfmessageend::DESC;
-    t[ProtoId::NetflowHeader.0 as usize] = &netflow_netflowheader::DESC;
     t[ProtoId::NetflowRecordV1.0 as usize] = &netflow_netflowrecordv1::DESC;
     t[ProtoId::NetflowRecordV5.0 as usize] = &netflow_netflowrecordv5::DESC;
     t[ProtoId::NetflowRecordV9.0 as usize] = &netflow_netflowrecordv9::DESC;

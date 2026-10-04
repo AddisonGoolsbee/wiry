@@ -6,14 +6,19 @@ IEEE Std 802.11-2020 §9.2.4: the MAC header is a two-octet Frame Control field
 (§9.2.4.1: protocol version, type, subtype, then the eight To DS / From DS /
 More Fragments / Retry / Power Management / More Data / Protected / +HTC bits),
 a two-octet Duration/ID, three addresses, a Sequence Control word, and a fourth
-address only when both To DS and From DS are set (§9.2.4.5). A QoS Data frame
-carries two further octets of QoS Control (§9.2.4.5.1). Frame Control and
-Duration are little-endian on the wire (§9.2.2).
+address only when both To DS and From DS are set (§9.2.4.5). The two octets of
+QoS Control a QoS Data frame carries (§9.2.4.5.1) are the Dot11QoS layer that
+follows, as in scapy, and a frame with the Protected bit set continues as
+Dot11Encrypted. Control frames carry no third address or Sequence Control and
+only some carry a second address (§9.3.1), and the S1G Beacon of §9.3.4.3 has
+the first address alone. Frame Control and Duration are little-endian on the
+wire (§9.2.2).
 """
 min_len = 10
 header_len = "hand"
 build_len = 24
 next = "hand"
+bind_next = "hand"
 
 [[fields]]
 name = "subtype"
@@ -53,17 +58,20 @@ kind = "mac"
 name = "addr2"
 off = 80
 kind = "mac"
+when = "has_addr2"
 
 [[fields]]
 name = "addr3"
 off = 128
 kind = "mac"
+when = "has_addr3"
 
 [[fields]]
 name = "SC"
 off = 176
 len = 16
 kind = "le_uint"
+when = "has_sc"
 
 [[fields]]
 name = "addr4"
@@ -90,4 +98,4 @@ SC = 0
 [provenance]
 source = "scapy/layers/dot11.py"
 version = "scapy 2.7.0"
-changed = ["2026-10-03 — enumerated names of type transcribed"]
+changed = ["2026-10-03 — enumerated names of type transcribed", "2026-10-04 — guess_payload_class and the Dot11 bindings transcribed into next and bind_next"]

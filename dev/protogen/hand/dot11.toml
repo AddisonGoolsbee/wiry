@@ -1,0 +1,11 @@
+# Partial classes scapy2spec.py emits because hand-written code closes their gaps.
+
+# Dot11QoS chooses Dot11Encrypted when its Dot11 has the Protected bit set,
+# which a layer's `next` cannot see; the LLC binding is kept, and a protected
+# QoS frame is the gap DEVIATIONS.md states.
+[Dot11QoS]
+covers = ["guess_payload"]
+
+[Dot11Encrypted]
+covers = ["dispatch_hook"]
+changed = ["2026-10-04 — dispatch_hook transcribed into crates/wiry-core/src/layers/variants.rs"]
