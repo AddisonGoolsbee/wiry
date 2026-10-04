@@ -108,12 +108,21 @@ def _printing(prn: Optional[Callable], quiet: bool) -> Optional[Callable]:
     return show
 
 
+class _MixedLinks(Exception):
+    """Packets one capture cannot hold: they start with different link
+    layers, or with a layer no link type names."""
+
+    def __init__(self, pkts: list):
+        super().__init__()
+        self.pkts = pkts
+
+
 def _offline_source(offline: Any) -> Any:
     """A capture buffer for whatever ``offline=`` was given: a path, a binary
     file object, a ``PacketList``, or packets, which are written into one so
     that the same machine and the same BPF read them."""
-    if isinstance(offline, PacketList):
-        return offline._list
+    if isinstance(offline, PacketList) and offline._rust is not None:
+        return offline._rust
     if isinstance(offline, (str, os.PathLike)) or hasattr(offline, "read"):
         with _as_path(offline) as real:
             return _b.read_pcap(real)
@@ -126,6 +135,11 @@ def _offline_source(offline: Any) -> Any:
             pkts.append(sock.recv())
         except EOFError:
             break
+    links = {_link_of(p) for p in pkts}
+    unnamed = any(isinstance(p, Packet) and _link_of(p) == _RAW_LINK
+                  and p.layers()[:1] != ["Raw"] for p in pkts)
+    if len(links) > 1 or unnamed:
+        raise _MixedLinks(pkts)
     return _capture_of(pkts)
 
 
@@ -148,19 +162,8 @@ def _link_of(pkt: Any) -> int:
 
 
 def _capture_of(pkts: list) -> Any:
-    """Python packets as a capture buffer, so the one Rust machine and BPF
-    read them as they read a file.
-
-    A capture declares one link type. Packets that disagree on theirs are all
-    kept as ``Raw`` rather than misread, with a warning.
-    """
-    links = {_link_of(p) for p in pkts}
-    if len(links) > 1:
-        warnings.warn(
-            "these packets start with different link layers, which one capture "
-            "cannot hold; they are kept as Raw", RuntimeWarning, stacklevel=3,
-        )
-    link = links.pop() if len(links) == 1 else (_RAW_LINK if links else 1)
+    """Python packets that share one link type, as a capture buffer."""
+    link = _link_of(pkts[0]) if pkts else 1
     return _b.PktList.from_frames([
         (_octets(p), float(getattr(p, "time", 0.0) or 0.0),
          int(getattr(p, "wirelen", 0) or 0))
@@ -496,7 +499,24 @@ def sniff(
         )
         _add_session(args, session, store)
         return PacketList(_b.sniff_live(**args))
-    src = _offline_source(offline)
+    try:
+        src = _offline_source(offline)
+    except _MixedLinks as mixed:
+        if bulk is not None or filter is not None or where is not None:
+            raise NotImplementedError(
+                "these packets start with different link layers, or with one "
+                "no link type names, so no one capture holds them, and "
+                "session=, filter= and where= all run over a capture. Sniff "
+                "them without, or keep the link layers alike"
+            ) from None
+        from .supersocket import IterSocket
+
+        return _sniff_opened(
+            IterSocket(mixed.pkts), iface=None, count=count, store=store,
+            prn=prn, filter=None, lfilter=lfilter, timeout=timeout,
+            stop_filter=stop_filter, offline=None, quiet=quiet, promisc=None,
+            where=None, session=session, started_callback=started_callback,
+        )
     if bulk is not None:
         # The capture filter runs first, as libpcap's would, so a session never
         # reassembles a stream the caller filtered out.
@@ -543,7 +563,11 @@ def _sniff_opened(opened_socket: Any, *, iface: Any, count: int, store: int,
     if offline is not None:
         from .supersocket import IterSocket
 
-        socks[IterSocket(PacketList(_offline_source(offline)))] = None
+        try:
+            source = PacketList(_offline_source(offline))
+        except _MixedLinks as mixed:
+            source = mixed.pkts
+        socks[IterSocket(source)] = None
     opened = []
     if iface is not None:
         listener = conf.l2listen(iface=iface, filter=filter, promisc=promisc)

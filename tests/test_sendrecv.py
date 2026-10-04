@@ -208,11 +208,15 @@ def test_offline_takes_a_file_object(cap):
     assert octets(got) == octets(P.rdpcap(cap))
 
 
-def test_offline_packets_of_different_links_are_kept_as_raw():
-    with pytest.warns(RuntimeWarning, match="different link"):
-        got = P.sniff(offline=[Ether() / IP(), IP() / UDP()])
-    assert [p.layers() for p in got] == [["Raw"], ["Raw"]]
-    assert bytes(got[1]) == bytes(IP() / UDP())
+def test_offline_packets_of_different_links_are_read_one_by_one():
+    pkts = [Ether() / IP(), ARP(), IP() / UDP()]
+    got = P.sniff(offline=pkts, lfilter=lambda p: UDP not in p)
+    assert [p.layers() for p in got] == [["Ether", "IP"], ["ARP"]]
+
+
+def test_offline_packets_no_capture_holds_refuse_a_capture_query():
+    with pytest.raises(NotImplementedError, match="different link"):
+        P.sniff(offline=[Ether() / IP(), IP() / UDP()], where=[("IP", "ttl", "==", 64)])
 
 
 @pytest.mark.skipif(not P.capture_available(), reason="BPF needs libpcap")
