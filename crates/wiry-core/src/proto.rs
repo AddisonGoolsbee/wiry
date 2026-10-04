@@ -259,6 +259,23 @@ impl ProtoId {
     pub const HCILEMetaLongTermKeyRequest: ProtoId = ProtoId(2202);
     pub const HCIMonHdr: ProtoId = ProtoId(2205);
     pub const HCIMonPcapHdr: ProtoId = ProtoId(2206);
+    pub const SCTPChunkParamIPv4Addr: ProtoId = ProtoId(6173);
+    pub const SCTPChunkParamIPv6Addr: ProtoId = ProtoId(6174);
+    pub const SCTPChunkParamCookiePreservative: ProtoId = ProtoId(6177);
+    pub const SCTPChunkParamSSNTSNResetReq: ProtoId = ProtoId(6182);
+    pub const SCTPChunkParamReConfigRes: ProtoId = ProtoId(6183);
+    pub const SCTPChunkParamAddOutgoingStreamReq: ProtoId = ProtoId(6184);
+    pub const SCTPChunkParamAddIncomingStreamReq: ProtoId = ProtoId(6185);
+    pub const SCTPChunkParamECNCapable: ProtoId = ProtoId(6186);
+    pub const SCTPChunkParamFwdTSN: ProtoId = ProtoId(6191);
+    pub const SCTPChunkParamSuccessIndication: ProtoId = ProtoId(6196);
+    pub const SCTPChunkParamAdaptationLayer: ProtoId = ProtoId(6197);
+    pub const SCTPForwardSkip: ProtoId = ProtoId(6200);
+    pub const SCTPIForwardSkip: ProtoId = ProtoId(6202);
+    pub const SCTPChunkShutdown: ProtoId = ProtoId(6210);
+    pub const SCTPChunkShutdownAck: ProtoId = ProtoId(6211);
+    pub const SCTPChunkCookieAck: ProtoId = ProtoId(6214);
+    pub const SCTPChunkShutdownComplete: ProtoId = ProtoId(6215);
     pub const PPTP: ProtoId = ProtoId(6230);
     pub const PPTPStartControlConnectionRequest: ProtoId = ProtoId(6231);
     pub const PPTPStartControlConnectionReply: ProtoId = ProtoId(6232);
@@ -593,6 +610,23 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::HCILEMetaLongTermKeyRequest,
     ProtoId::HCIMonHdr,
     ProtoId::HCIMonPcapHdr,
+    ProtoId::SCTPChunkParamIPv4Addr,
+    ProtoId::SCTPChunkParamIPv6Addr,
+    ProtoId::SCTPChunkParamCookiePreservative,
+    ProtoId::SCTPChunkParamSSNTSNResetReq,
+    ProtoId::SCTPChunkParamReConfigRes,
+    ProtoId::SCTPChunkParamAddOutgoingStreamReq,
+    ProtoId::SCTPChunkParamAddIncomingStreamReq,
+    ProtoId::SCTPChunkParamECNCapable,
+    ProtoId::SCTPChunkParamFwdTSN,
+    ProtoId::SCTPChunkParamSuccessIndication,
+    ProtoId::SCTPChunkParamAdaptationLayer,
+    ProtoId::SCTPForwardSkip,
+    ProtoId::SCTPIForwardSkip,
+    ProtoId::SCTPChunkShutdown,
+    ProtoId::SCTPChunkShutdownAck,
+    ProtoId::SCTPChunkCookieAck,
+    ProtoId::SCTPChunkShutdownComplete,
     ProtoId::PPTP,
     ProtoId::PPTPStartControlConnectionRequest,
     ProtoId::PPTPStartControlConnectionReply,
@@ -931,6 +965,28 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
         &bluetooth_hci_le_meta_long_term_key_request::DESC;
     t[ProtoId::HCIMonHdr.0 as usize] = &bluetooth_hci_mon_hdr::DESC;
     t[ProtoId::HCIMonPcapHdr.0 as usize] = &bluetooth_hci_mon_pcap_hdr::DESC;
+    t[ProtoId::SCTPChunkParamIPv4Addr.0 as usize] = &sctp_sctpchunkparamipv4addr::DESC;
+    t[ProtoId::SCTPChunkParamIPv6Addr.0 as usize] = &sctp_sctpchunkparamipv6addr::DESC;
+    t[ProtoId::SCTPChunkParamCookiePreservative.0 as usize] =
+        &sctp_sctpchunkparamcookiepreservative::DESC;
+    t[ProtoId::SCTPChunkParamSSNTSNResetReq.0 as usize] = &sctp_sctpchunkparamssntsnresetreq::DESC;
+    t[ProtoId::SCTPChunkParamReConfigRes.0 as usize] = &sctp_sctpchunkparamreconfigres::DESC;
+    t[ProtoId::SCTPChunkParamAddOutgoingStreamReq.0 as usize] =
+        &sctp_sctpchunkparamaddoutgoingstreamreq::DESC;
+    t[ProtoId::SCTPChunkParamAddIncomingStreamReq.0 as usize] =
+        &sctp_sctpchunkparamaddincomingstreamreq::DESC;
+    t[ProtoId::SCTPChunkParamECNCapable.0 as usize] = &sctp_sctpchunkparamecncapable::DESC;
+    t[ProtoId::SCTPChunkParamFwdTSN.0 as usize] = &sctp_sctpchunkparamfwdtsn::DESC;
+    t[ProtoId::SCTPChunkParamSuccessIndication.0 as usize] =
+        &sctp_sctpchunkparamsuccessindication::DESC;
+    t[ProtoId::SCTPChunkParamAdaptationLayer.0 as usize] =
+        &sctp_sctpchunkparamadaptationlayer::DESC;
+    t[ProtoId::SCTPForwardSkip.0 as usize] = &sctp_sctpforwardskip::DESC;
+    t[ProtoId::SCTPIForwardSkip.0 as usize] = &sctp_sctpiforwardskip::DESC;
+    t[ProtoId::SCTPChunkShutdown.0 as usize] = &sctp_sctpchunkshutdown::DESC;
+    t[ProtoId::SCTPChunkShutdownAck.0 as usize] = &sctp_sctpchunkshutdownack::DESC;
+    t[ProtoId::SCTPChunkCookieAck.0 as usize] = &sctp_sctpchunkcookieack::DESC;
+    t[ProtoId::SCTPChunkShutdownComplete.0 as usize] = &sctp_sctpchunkshutdowncomplete::DESC;
     t[ProtoId::PPTP.0 as usize] = &pptp_pptp::DESC;
     t[ProtoId::PPTPStartControlConnectionRequest.0 as usize] =
         &pptp_pptpstartcontrolconnectionrequest::DESC;
