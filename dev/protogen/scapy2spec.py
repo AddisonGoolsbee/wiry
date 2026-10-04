@@ -1573,7 +1573,8 @@ OVERLAY_KEYS = ("header_len", "content_len", "parse_options", "bind_next", "set_
 def load_overlay(short: str) -> dict:
     """`hand/<module>.toml`: per class, which gaps hand-written hooks close and
     the spec keys that name those hooks. A partial class is emitted only when
-    every gap it has is listed in `covers`."""
+    every gap it has is listed in `covers`; `emit = false` withholds a clean
+    one whose layer would contradict a hand-written model of the protocol."""
     import tomllib
 
     p = HAND / f"{short}.toml"
@@ -2132,8 +2133,9 @@ def main(argv: list[str]) -> int:
         overlay = load_overlay(short)
         for r in rs:
             r["overlay"] = overlay.get(r["class"], {})
-        emit_set = {r["class"] for r in rs if r["status"] == "clean"
-                    or (r["status"] == "partial" and (a.emit == "partial" or covered(r)))}
+        emit_set = {r["class"] for r in rs if r["overlay"].get("emit", True) and (
+            r["status"] == "clean"
+            or (r["status"] == "partial" and (a.emit == "partial" or covered(r))))}
         bindings({r["class"]: r for r in rs}, wl, classes_of(mod), emit_set)
         if not a.report_only:
             d = OUT / short

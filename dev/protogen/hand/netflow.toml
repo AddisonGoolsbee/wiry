@@ -1,0 +1,6 @@
+# NetflowHeaderV5, NetflowHeaderV9 and IPFIX are hand-written with their
+# version field inside them, where scapy puts it in a NetflowHeader that
+# dispatches on it. Emitting NetflowHeader would stack the version twice, so it
+# waits until those three are remodelled the way scapy layers them.
+[NetflowHeader]
+emit = false
