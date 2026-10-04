@@ -101,10 +101,11 @@ def test_repr_and_times(capture):
     assert [p.time for p in got] == times
 
 
-def test_rdpcap_rejects_the_unimplemented_count_argument(capture):
-    path, _ = capture
-    with pytest.raises(NotImplementedError):
-        rdpcap(path, count=2)
+def test_rdpcap_count_keeps_the_first_records(capture):
+    path, pkts = capture
+    assert [bytes(p) for p in rdpcap(path, count=2)] == [bytes(p) for p in pkts[:2]]
+    assert len(rdpcap(path, count=0)) == 0
+    assert len(rdpcap(path, count=10 ** 6)) == len(pkts)
 
 
 def test_pcapreader_is_a_context_manager_and_iterator(capture):

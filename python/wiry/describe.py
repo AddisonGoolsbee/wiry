@@ -1,4 +1,4 @@
-"""A packet as data, as the expression that rebuilds it, and as a diff.
+"""A packet as data, and as the expression that rebuilds it.
 
 `command()` is the strong one: `eval(pkt.command())` must produce the same
 octets, which makes it a self-check on the whole build path as well as a way to
@@ -7,7 +7,6 @@ turn a captured packet into a script.
 
 from __future__ import annotations
 
-import difflib
 import json as _json
 import re
 import sys
@@ -16,12 +15,7 @@ from typing import Any
 
 from . import _wiry as _b
 
-__all__ = ["command", "json_str", "to_dict", "hexdiff", "hexdiff_str",
-           "from_hexcap"]
-
-# Aligning two byte strings is quadratic, and a diff of two 64 KB datagrams is
-# not what anyone means by hexdiff. Past this, the columns line up by offset.
-ALIGN_LIMIT = 4096
+__all__ = ["command", "json_str", "to_dict", "from_hexcap"]
 
 
 def _settled(pkt: Any) -> Any:
@@ -122,70 +116,6 @@ def to_dict(pkt: Any) -> dict:
 
 def json_str(pkt: Any, **kw: Any) -> str:
     return _json.dumps(to_dict(pkt), **kw)
-
-
-def _aligned(a: bytes, b: bytes) -> tuple[list, list]:
-    """Two equal-length rows of octets and gaps. A gap is `None`."""
-    left: list = []
-    right: list = []
-    # difflib's autojunk heuristic stays on: without it a run of one byte
-    # (zero padding, which most packets carry) makes the match quadratic —
-    # 1.7s for a 4 KB pair here, against 1.2ms with it, for the same opcodes.
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=a, b=b).get_opcodes():
-        x, y = list(a[i1:i2]), list(b[j1:j2])
-        if tag in ("equal", "replace"):
-            n = max(len(x), len(y))
-            x += [None] * (n - len(x))
-            y += [None] * (n - len(y))
-        elif tag == "delete":
-            y = [None] * len(x)
-        else:
-            x = [None] * len(y)
-        left += x
-        right += y
-    return left, right
-
-
-def _col(off: int, cells: list, width: int) -> str:
-    hexes = " ".join("  " if c is None else f"{c:02x}" for c in cells)
-    text = "".join(
-        " " if c is None else (chr(c) if 32 <= c < 127 else ".") for c in cells
-    )
-    return f"{off:04x}  {hexes:<{width * 3 - 1}}  {text:<{width}}"
-
-
-def _padded(a: bytes, b: bytes) -> tuple[list, list]:
-    left, right = list(a), list(b)
-    n = max(len(left), len(right))
-    left += [None] * (n - len(left))
-    right += [None] * (n - len(right))
-    return left, right
-
-
-def hexdiff_str(a: Any, b: Any, width: int = 16) -> str:
-    """Two packets side by side, aligned so an inserted or deleted run does not
-    shift everything after it. A row that differs is marked."""
-    x, y = bytes(a), bytes(b)
-    if max(len(x), len(y)) > ALIGN_LIMIT:
-        left, right = _padded(x, y)
-    else:
-        left, right = _aligned(x, y)
-    rows = []
-    at_a = at_b = 0
-    for at in range(0, len(left), width):
-        row_a, row_b = left[at : at + width], right[at : at + width]
-        # The marker leads the row: every printable octet can appear in the text
-        # column, so a mark between the columns would be ambiguous.
-        mark = " " if row_a == row_b else "|"
-        rows.append(f"{mark} {_col(at_a, row_a, width)}  {_col(at_b, row_b, width)}".rstrip())
-        at_a += sum(1 for c in row_a if c is not None)
-        at_b += sum(1 for c in row_b if c is not None)
-    return "".join(r + "\n" for r in rows)
-
-
-def hexdiff(a: Any, b: Any, width: int = 16) -> None:
-    """Print two packets side by side, aligned."""
-    print(hexdiff_str(a, b, width), end="")
 
 
 # An offset column, then up to 16 hex pairs, then whatever ASCII the tool put

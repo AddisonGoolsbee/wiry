@@ -1473,8 +1473,44 @@ impl PyPktList {
         }
     }
 
+    /// The whole buffer the index points into: for a list read from a file,
+    /// the file itself, which is where pcapng keeps per-packet options.
+    fn blob<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new_bound(py, &self.buf)
+    }
+
+    /// A capture assembled from frames already in hand: `(octets, time,
+    /// wirelen)` each, one link type for all. Times are kept to the
+    /// nanosecond and clamped into what a capture record can hold.
+    #[staticmethod]
+    fn from_frames(frames: Vec<(Vec<u8>, f64, u32)>, dlt: u32) -> PyResult<PyPktList> {
+        let mut buf = Vec::with_capacity(frames.iter().map(|f| f.0.len()).sum());
+        let mut index = Vec::with_capacity(frames.len());
+        for (data, time, wirelen) in frames {
+            let len = u32::try_from(data.len())
+                .map_err(|_| PyValueError::new_err("frame longer than a capture record holds"))?;
+            let t = if time.is_finite() {
+                time.clamp(0.0, u32::MAX as f64)
+            } else {
+                0.0
+            };
+            let sec = t.floor();
+            let frac = (((t - sec) * 1e9).round() as u32).min(999_999_999);
+            index.push((buf.len(), len, sec as u32, frac, wirelen.max(len)));
+            buf.extend_from_slice(&data);
+        }
+        Ok(PyPktList::from_capture(buf, index, dlt, true))
+    }
+
     fn nums(&self) -> Vec<u32> {
         (0..self.index.len()).map(|i| self.num_at(i)).collect()
+    }
+
+    /// Every record's `(data offset, caplen, sec, frac, origlen)`, in one
+    /// crossing: what a raw reader hands out per record without minting a
+    /// packet.
+    fn index(&self) -> Vec<Record> {
+        self.index.clone()
     }
 
     fn times(&self) -> Vec<f64> {

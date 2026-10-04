@@ -272,15 +272,20 @@ def test_show_prints_what_show_str_returns(pkt):
 def test_hexdump_str_formats_offset_hex_and_text():
     lines = hexdump_str(Ether() / IP()).splitlines()
     assert len(lines) == 3
-    assert lines[0].startswith("0000  ff ff ff ff ff ff")
+    assert lines[0].startswith("0000  FF FF FF FF FF FF")
     assert lines[1].startswith("0010  ")
-    assert lines[0].endswith("..............E.")
-    assert all(len(line) == len(lines[0]) for line in lines[:2])
+    assert lines[0].endswith(" ..............E.")
+    assert all(len(line) == 6 + 48 + 1 + 16 for line in lines[:2])
+    assert lines[2] == "0020  00 01" + " " * 44 + ".."
 
 
 def test_hexdump_str_accepts_raw_bytes_and_a_width():
     text = hexdump_str(b"ABCDEFGH", width=4)
     assert text == "0000  41 42 43 44  ABCD\n0004  45 46 47 48  EFGH\n"
+
+
+def test_hexdump_dump_returns_the_text_without_a_trailing_newline():
+    assert wiry.hexdump(b"AB", dump=True) == "0000  41 42" + " " * 44 + "AB"
 
 
 def test_hexdump_prints(capsys):
