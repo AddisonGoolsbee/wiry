@@ -21,11 +21,12 @@ import platform
 import shutil
 from typing import Any, Callable
 
+from . import __version__ as VERSION
 from .capture import _Conf as Conf
 from .capture import conf
 
 __all__ = [
-    "conf", "Conf", "isPyPy", "isCryptographyValid", "isCryptographyAdvanced",
+    "conf", "Conf", "VERSION", "isPyPy", "isCryptographyValid", "isCryptographyAdvanced",
     "isCryptographyBackendCompatible", "crypto_validator",
     "scapy_delete_temp_files",
 ]

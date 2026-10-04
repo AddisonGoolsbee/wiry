@@ -13,6 +13,9 @@
 #                ioctl so routing works in a build without the live feature,
 #                and RFC 3484 source selection is reduced to scope plus longest
 #                common prefix.
+#   2026-10-03 — IPv6 scopes and source selection now come from wiry.utils6,
+#                so in6_getifaddr answers in scapy's scope values; added
+#                Route6.ifchange.
 
 """The routing table, read from the OS.
 

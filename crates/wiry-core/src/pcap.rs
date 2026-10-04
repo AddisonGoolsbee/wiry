@@ -277,6 +277,18 @@ mod tests {
     }
 
     #[test]
+    fn a_raw_ip_capture_reads_each_record_by_its_version() {
+        for lt in [linktype::RAW, linktype::DLT_RAW, linktype::DLT_RAW_OPENBSD] {
+            assert_eq!(link_to_proto(lt), ProtoId::Ipv4);
+        }
+        // RFC 8200 §3: version 6, then a header with no payload.
+        let mut v6 = vec![0x60, 0, 0, 0, 0, 0, 59, 64];
+        v6.extend_from_slice(&[0; 32]);
+        let pkt = crate::packet::Packet::dissect(v6, link_to_proto(linktype::RAW));
+        assert_eq!(pkt.layers()[0].proto, ProtoId::Ipv6);
+    }
+
+    #[test]
     fn an_unregistered_link_type_still_falls_back_to_raw() {
         assert_eq!(link_to_proto(999), ProtoId::Raw);
     }

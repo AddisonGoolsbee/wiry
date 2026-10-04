@@ -82,7 +82,7 @@ _ANSWERING = (
 )
 
 _CONFIG = (
-    "Conf", "isPyPy", "isCryptographyValid", "isCryptographyAdvanced",
+    "Conf", "VERSION", "isPyPy", "isCryptographyValid", "isCryptographyAdvanced",
     "isCryptographyBackendCompatible", "crypto_validator",
     "scapy_delete_temp_files",
 )

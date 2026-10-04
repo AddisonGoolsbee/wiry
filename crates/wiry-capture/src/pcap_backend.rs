@@ -217,3 +217,17 @@ pub fn compile_filter(
 pub fn send_l3(frames: &[Vec<u8>], count: usize, inter: f64) -> Result<usize, CaptureError> {
     crate::l3::send_l3(frames, count, inter)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::dlt_of;
+
+    #[test]
+    fn a_file_link_type_is_compiled_against_its_dlt() {
+        let raw = if cfg!(target_os = "openbsd") { 14 } else { 12 };
+        assert_eq!(dlt_of(101), raw);
+        assert_eq!(dlt_of(100), 11);
+        assert_eq!(dlt_of(1), 1);
+        assert_eq!(dlt_of(228), 228);
+    }
+}

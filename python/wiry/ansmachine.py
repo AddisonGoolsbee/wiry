@@ -8,6 +8,9 @@
 # Changed by the wiry authors:
 #   2026-09-18 — ported onto wiry's sniff/sendp and given an offline= route so
 #                a machine's replies can be checked from canned packets.
+#   2026-10-03 — function names published in the defining module, sniff and
+#                send as patchable module globals, and opened_socket/socket
+#                taken as options, as scapy's are.
 
 """Answering machines: listen for a request, build a reply, send it.
 
