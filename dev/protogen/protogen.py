@@ -307,6 +307,7 @@ def validate(s: dict) -> None:
     hl = s.get("header_len")
     fixed_hl = hl if isinstance(hl, int) else None
     prev_end = -1
+    taken: list[tuple[int, int]] = []
     for i, fd in enumerate(fields):
         kind = fd.get("kind", "uint")
         if kind not in KINDS:
@@ -333,11 +334,16 @@ def validate(s: dict) -> None:
                     f"{f}: {fd['name']!r} names {len(names)} flags in {fd['len']} bits"
                 )
         off, ln = fd["off"], fd["len"]
-        if not fd.get("when") and not fd.get("overlaps") and off < prev_end:
+        # Bit fields counted from the least significant end are declared in an
+        # order their offsets do not follow, so any earlier field is checked.
+        exempt = fd.get("when") or fd.get("overlaps")
+        if not exempt and (off < prev_end if not ln else
+                           any(off < b and a < off + ln for a, b in taken)):
             raise SpecError(
-                f"{f}: {fd['name']!r} at bit {off} overlaps the field before it; "
+                f"{f}: {fd['name']!r} at bit {off} overlaps an earlier field; "
                 "give it a `when` condition or set overlaps = true if that is real"
             )
+        taken.append((off, off + ln))
         prev_end = max(prev_end, off + ln)
         if fixed_hl is not None and not kind.startswith("var_"):
             if off + ln > fixed_hl * 8:

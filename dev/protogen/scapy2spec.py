@@ -408,6 +408,13 @@ BITS = {"BitField", "XBitField", "BitEnumField", "BitFieldLenField", "FlagsField
 IPV4 = {"IPField", "SourceIPField", "DestIPField"}
 IPV6 = {"IP6Field", "SourceIP6Field", "DestIP6Field"}
 MAC = {"MACField", "SourceMACField", "DestMACField"}
+# Six octets stored reversed: bluetooth's BD_ADDR.
+LE_MAC = {"LEMACField", "BDAddrField"}
+# contrib/ethercat's bit fields: a run up to an octet boundary is one
+# little-endian integer, and the first field takes its least significant bits.
+LSB_BITS = {"LEBitField", "LEBitEnumField", "LEBitFieldLenField"}
+# A forty-bit little-endian integer that overrides getfield to read it.
+LE_FIXED = {"BTLEChanMapField": 40}
 FIXED_BYTES = {"StrFixedLenField", "XStrFixedLenField", "StrFixedLenEnumField"}
 TAIL_BYTES = {"StrField", "XStrField"}
 LEN_BYTES = {"StrLenField", "XStrLenField"}
@@ -423,6 +430,25 @@ REFUSAL_CODE = {
     "StrNullField": "null_terminated",
     "DNSStrField": "dns_name",
 }
+
+
+# What a subclass may define and still behave exactly as its base.
+INERT = {"__init__", "__module__", "__qualname__", "__doc__", "__slots__",
+         "__orig_bases__", "__parameters__", "__annotations__", "__firstlineno__",
+         "__static_attributes__"}
+
+
+def kind_name_of(f) -> str:
+    """The field's class, or the supported base it only re-parameterises:
+    `BTLEPhysField` is a `FlagsField` whose subclass sets nothing but the
+    arguments. A subclass that overrides anything else is itself."""
+    own = type(f).__name__
+    for c in type(f).__mro__:
+        if c.__name__ in SUPPORTED:
+            return c.__name__
+        if set(vars(c)) - INERT:
+            return own
+    return own
 
 
 def refusal_code(cls_name: str) -> str:
@@ -553,8 +579,14 @@ def enum_of(f, bits: int, lay: Layout) -> dict[int, str] | str | None:
 def map_field(f, raw_f, fd: dict, last: bool, readable: set[str], lay: Layout,
               defaults: dict) -> int | None:
     """Fill `fd` for one field; the width in bits, or None for a variable one."""
-    kind_name = type(f).__name__
+    kind_name = kind_name_of(f)
     d = defaults.get(raw_f.name, f.default)
+    if kind_name in LE_FIXED:
+        width = LE_FIXED[kind_name]
+        fd["kind"] = "le_uint"
+        fd["len"] = width
+        fd["default"] = int_default(f, d, width, lay)
+        return width
     if kind_name in BE_UINT or kind_name in LE_UINT or kind_name in SIGNED:
         width = int(f.sz) * 8
         fd["kind"] = "le_uint" if f.fmt.startswith("<") else "uint"
@@ -576,9 +608,7 @@ def map_field(f, raw_f, fd: dict, last: bool, readable: set[str], lay: Layout,
         fd["len"] = width
         fd["default"] = int_default(f, d, width, lay)
         return width
-    if kind_name in BITS:
-        if f.size < 0 or getattr(f, "rev", False):
-            raise Refuse("le_bitfield", f"{f.name} is a little-endian bit field")
+    if kind_name in BITS or kind_name in LSB_BITS:
         width = f.size
         if width > 64:
             raise Refuse("wide_int", f"{f.name} is {width} bits, wider than 64")
@@ -621,13 +651,16 @@ def map_field(f, raw_f, fd: dict, last: bool, readable: set[str], lay: Layout,
         if any(b):
             fd["default_bytes"] = list(b)
         return 128
-    if kind_name in MAC:
+    if kind_name in MAC or kind_name in LE_MAC:
         fd["kind"] = "mac"
         if d is None:
-            if kind_name != "MACField":
+            if kind_name in MAC and kind_name != "MACField":
                 lay.gap("routed_default", f"{f.name} defaults from the interface")
             d = "00:00:00:00:00:00"
         b = F.mac2str(str(d))
+        if kind_name in LE_MAC:
+            fd["le"] = {"at": fd["off"] // 8, "len": 6}
+            b = b[::-1]
         if any(b):
             fd["default_bytes"] = list(b)
         return 48
@@ -671,6 +704,80 @@ def map_field(f, raw_f, fd: dict, last: bool, readable: set[str], lay: Layout,
     raise Refuse(refusal_code(kind_name), f"{f.name} is a {kind_name}")
 
 
+class LeRun:
+    """A run of bit fields scapy reads as one little-endian integer.
+
+    scapy has two conventions, and they number the same octets from opposite
+    ends. A core `_BitField` with `tot_size=-n` reverses the next n octets
+    before reading, so the first field takes the integer's most significant
+    bits and the declared order is the order of `off`; the field closing the
+    run carries `end_tot_size=-n` and the build reverses them back. contrib's
+    `LEBitField` collects fields up to the next octet boundary and hands the
+    first one the least significant bits, so `off` runs backwards.
+
+    Either way the run becomes one `le` group with each field's offset counted
+    from the integer's top. Every shape whose build and dissection would not
+    invert each other is refused rather than modelled."""
+
+    def __init__(self, at_bit: int, n: int | None, msb: bool):
+        self.at = at_bit // 8
+        self.n = n
+        self.msb = msb
+        self.fds: list[tuple[dict, int]] = []
+        self.bits = 0
+
+    @staticmethod
+    def opens(f, off: int, lsb: bool) -> "LeRun | None":
+        if lsb:
+            if off % 8:
+                raise Refuse("le_bitfield", f"{f.name} starts a little-endian run mid-octet")
+            return LeRun(off, None, False)
+        if getattr(f, "rev", False) and f.tot_size > 1:
+            if off % 8:
+                raise Refuse("le_bitfield", f"{f.name} reverses octets it starts inside")
+            if f.tot_size > 8:
+                raise Refuse("wide_int", f"{f.name} is a {f.tot_size}-octet little-endian run")
+            return LeRun(off, f.tot_size, True)
+        return None
+
+    def add(self, f, fd: dict, width: int, off: int) -> bool:
+        """Place one field; True when it closes the run."""
+        self.fds.append((fd, width))
+        self.bits += width
+        end = off + width
+        if not self.msb:
+            if self.bits % 8:
+                return False
+            self.n = self.bits // 8
+            if self.n > 8:
+                raise Refuse("wide_int", f"{f.name} closes a {self.n}-octet little-endian run")
+            shift = 0
+            for x, w in self.fds:
+                x["off"] = (self.at + self.n) * 8 - shift - w
+                shift += w
+                if self.n > 1:
+                    x["le"] = {"at": self.at, "len": self.n}
+            return True
+        fd["le"] = {"at": self.at, "len": self.n}
+        stop = (self.at + self.n) * 8
+        closes = end % 8 == 0 and getattr(f, "rev", False) and f.end_tot_size > 1
+        if end > stop or (closes and (end != stop or f.end_tot_size != self.n)):
+            raise Refuse("le_bitfield", f"{f.name} closes a little-endian run "
+                         "other than the one it is in")
+        if end == stop and not closes:
+            raise Refuse("le_bitfield", f"{f.name} ends a run scapy reverses when it "
+                         "reads but not when it builds")
+        return closes
+
+
+def is_le_bits(f) -> tuple[bool, bool]:
+    """(a little-endian bit field at all, of the least-significant-first kind)."""
+    n = kind_name_of(f)
+    if n in LSB_BITS:
+        return True, True
+    return n in BITS and bool(getattr(f, "rev", False)), False
+
+
 def analyse(cls) -> Layout:
     """Lay the fields out at static bit offsets.
 
@@ -692,6 +799,7 @@ def analyse(cls) -> Layout:
     except Exception:  # noqa: BLE001
         defaults = {}
     run: dict | None = None
+    le: LeRun | None = None
     tail_expr = None  # the variable part of the header, in octets past `off`
 
     def close_run(at_end: bool):
@@ -763,7 +871,23 @@ def analyse(cls) -> Layout:
             fd["off"] = off
         at = fd["off"]
 
+        le_bits, lsb = is_le_bits(f)
+        bits = kind_name_of(f) in BITS or lsb
+        if le is not None and (not bits or lsb != (not le.msb)):
+            raise Refuse("le_bitfield", f"{f.name} interrupts a little-endian run")
+        if cexpr is not None and (le_bits or le is not None):
+            raise Refuse("le_bitfield", f"{f.name} is a conditional little-endian bit field")
+        if le is None and le_bits:
+            le = LeRun.opens(f, at, lsb)
+            if le is None and f.end_tot_size > 1 and (at + f.size) % 8 == 0:
+                raise Refuse("le_bitfield", f"{f.name} reverses octets on build only")
+        elif le is not None and le.msb and le.fds and getattr(f, "rev", False) \
+                and f.tot_size > 1 and at % 8 == 0:
+            raise Refuse("le_bitfield", f"{f.name} reverses octets inside a run already reversed")
+
         width = map_field(f, raw_f, fd, last, readable, lay, defaults)
+        if le is not None and le.add(f, fd, width, at):
+            le = None
 
         if enum := (enum_of(f, fd["len"], lay) if fd.get("kind") in ("uint", "le_uint") else None):
             fd["enum"] = enum
@@ -808,6 +932,8 @@ def analyse(cls) -> Layout:
                 readable.add(fd["name"])
                 widths[fd["name"]] = fd["len"]
 
+    if le is not None:
+        raise Refuse("le_bitfield", "a little-endian run is never closed")
     if run is not None:
         close_run(True)
     if off % 8:
@@ -880,18 +1006,22 @@ def list_group(f, start: int, readable: set[str], lay: Layout) -> dict:
         if cond is not None or pad != 1:
             raise Refuse("list_elem", f"{f.name}'s element is conditional or padded")
         sub = Layout(lay.cls)
-        n = type(inner).__name__
+        n = kind_name_of(inner)
+        le = None
         if n in BE_UINT or n in LE_UINT or n in SIGNED:
             w = int(inner.sz) * 8
             kind = "le_uint" if inner.fmt.startswith("<") else "uint"
-        elif n in BITS and n != "FlagsField" and inner.size % 8 == 0:
+        elif (n in BITS and n != "FlagsField" and inner.size % 8 == 0
+              and not getattr(inner, "rev", False)):
             w, kind = inner.size, "uint"
         elif n in IPV4:
             w, kind = 32, "ipv4"
         elif n in IPV6:
             w, kind = 128, "ipv6"
-        elif n in MAC:
+        elif n in MAC or n in LE_MAC:
             w, kind = 48, "mac"
+            if n in LE_MAC:
+                le = {"at": 0, "len": 6}
         else:
             raise Refuse(refusal_code(n), f"{f.name} is a list of {n}")
         if n in SIGNED:
@@ -902,6 +1032,8 @@ def list_group(f, start: int, readable: set[str], lay: Layout) -> dict:
         fd = {"name": inner.name or f.name, "off": 0, "kind": kind}
         if kind in ("uint", "le_uint"):
             fd["len"] = w
+        if le:
+            fd["le"] = le
         g["fields"] = [fd]
         g["elem_len"] = w // 8
         g["elem_cls"] = None
@@ -939,7 +1071,7 @@ def list_group(f, start: int, readable: set[str], lay: Layout) -> dict:
             fname, a, b = lin
             base = hl["base"] + b
             ef = next(x for x in el.fields if x["name"] == fname)
-            if base < 0 or ef["kind"] not in ("uint",):
+            if base < 0 or ef["kind"] not in ("uint",) or "le" in ef:
                 raise Refuse("list_elem", f"{f.name}'s element length cannot be expressed")
             g["elem_base"] = base
             g["elem_min"] = hl["base"]
@@ -960,6 +1092,8 @@ def list_group(f, start: int, readable: set[str], lay: Layout) -> dict:
         if e[0] != "field":
             raise Refuse("list_extent", f"{f.name}'s count is not a plain field")
         src = next(x for x in lay.fields if x["name"] == e[1])
+        if le_group(src):
+            raise Refuse("le_extent", f"{f.name}'s count is little-endian")
         g["extent"] = "count"
         g["count_off"], g["count_len"] = src["off"], src["len"]
         if "elem_len" in g:
@@ -975,6 +1109,8 @@ def list_group(f, start: int, readable: set[str], lay: Layout) -> dict:
             raise Refuse("list_extent", f"{f.name}'s length is not one field, scaled, minus a constant")
         fname, a, b = lin
         src = next(x for x in lay.fields if x["name"] == fname)
+        if le_group(src):
+            raise Refuse("le_extent", f"{f.name}'s length is little-endian")
         g["extent"] = "length"
         g["len_off"], g["len_len"] = src["off"], src["len"]
         g["len_scale"], g["len_covers"] = a, -b
@@ -1113,18 +1249,43 @@ def write_bits(buf: bytearray, off: int, n: int, val: int) -> None:
     buf[:] = v.to_bytes(len(buf), "big")
 
 
-def le_swap(v: int, bits: int) -> int:
-    n = bits // 8
-    return int.from_bytes(v.to_bytes(n, "big"), "little")
+def le_group(fd: dict) -> tuple[int, int] | None:
+    if fd["kind"] == "le_uint":
+        return fd["off"] // 8, fd["len"] // 8
+    le = fd.get("le")
+    return (le["at"], le["len"]) if le and le["len"] > 1 else None
+
+
+def get_uint(fd: dict, buf: bytes) -> int:
+    """field::read_uint: a little-endian group reads from its reversed image,
+    and one the buffer does not hold reads as zero."""
+    g = le_group(fd)
+    if g is None:
+        return read_bits(buf, fd["off"], fd["len"])
+    at, n = g
+    img = bytes(buf[at:at + n])
+    if len(img) < n:
+        return 0
+    return read_bits(img[::-1], fd["off"] - at * 8, fd["len"])
+
+
+def put_uint(fd: dict, buf: bytearray, v: int) -> None:
+    g = le_group(fd)
+    if g is None:
+        return write_bits(buf, fd["off"], fd["len"], v)
+    at, n = g
+    if at + n > len(buf):
+        return
+    img = bytearray(buf[at:at + n][::-1])
+    write_bits(img, fd["off"] - at * 8, fd["len"], v)
+    buf[at:at + n] = img[::-1]
 
 
 def field_value(fd: dict, hdr: bytes):
     k = fd["kind"]
     o = fd["off"]
-    if k in ("uint", "flags"):
-        return read_bits(hdr, o, fd["len"])
-    if k == "le_uint":
-        return le_swap(read_bits(hdr, o, fd["len"]), fd["len"])
+    if k in ("uint", "flags", "le_uint"):
+        return get_uint(fd, hdr)
     if k in ("ipv4", "ipv6", "mac", "bytes"):
         n = {"ipv4": 4, "ipv6": 16, "mac": 6}.get(k, fd.get("len", 0) // 8)
         b = hdr[o // 8: o // 8 + n]
@@ -1251,13 +1412,9 @@ def mutate(lay: Layout, rng: random.Random, base: bytes, consts: dict[str, list[
             continue
         cs = consts.get(fd["name"])
         if cs and rng.random() < 0.7:
-            v = rng.choice(cs) & ((1 << fd["len"]) - 1)
-            write_bits(buf, fd["off"], fd["len"], v)
+            put_uint(fd, buf, rng.choice(cs) & ((1 << fd["len"]) - 1))
         elif fd["name"] in lay.small_fields and rng.random() < 0.7:
-            v = rng.randrange(0, min(64, 1 << fd["len"]))
-            if fd["kind"] == "le_uint":
-                v = le_swap(v, fd["len"])
-            write_bits(buf, fd["off"], fd["len"], v)
+            put_uint(fd, buf, rng.randrange(0, min(64, 1 << fd["len"])))
     return bytes(buf)
 
 
@@ -1415,17 +1572,15 @@ def model_build(lay: Layout, content: str | None) -> bytes:
             b = bytes(fd["default_bytes"])
             buf[a:a + len(b)] = b[: max(0, n - a)]
         elif fd.get("default"):
-            v = fd["default"]
-            if fd["kind"] == "le_uint":
-                v = le_swap(v, fd["len"])
-            write_bits(buf, fd["off"], FIX_BITS.get(fd["kind"], fd.get("len", 0)), v)
+            if fd["kind"] in FIX_BITS:
+                write_bits(buf, fd["off"], FIX_BITS[fd["kind"]], fd["default"])
+            else:
+                put_uint(fd, buf, fd["default"])
     if lay.set_len:
         fd = next(f for f in lay.fields if f["name"] == lay.set_len["field"])
         v = evaluate(lay.set_len["expr"], {"x": 0})
         if v >= 0:
-            if fd["kind"] == "le_uint":
-                v = le_swap(v, fd["len"])
-            write_bits(buf, fd["off"], fd["len"], v)
+            put_uint(fd, buf, v)
     g = lay.group
     if g:
         if g["extent"] == "count":
@@ -1675,7 +1830,8 @@ def classes_of(mod) -> list[type]:
 
 
 SUPPORTED = (set(BE_UINT) | LE_UINT | SIGNED | set(THREE) | BITS | IPV4 | IPV6 | MAC
-             | FIXED_BYTES | TAIL_BYTES | LEN_BYTES | LISTS | {"NBytesField"})
+             | LE_MAC | LSB_BITS | set(LE_FIXED) | FIXED_BYTES | TAIL_BYTES | LEN_BYTES
+             | LISTS | {"NBytesField"})
 
 
 def field_blockers(cls) -> list[str]:
@@ -1690,13 +1846,11 @@ def field_blockers(cls) -> list[str]:
         f = fields.pop()
         while type(f).__name__ in WRAPPERS:
             f = f.fld
-        n = type(f).__name__
+        n = kind_name_of(f)
         if n == "MultipleTypeField":
             out.add("multiple_type")
             fields.extend(fl for fl, _ in f.flds)
             fields.append(f.dflt)
-        elif n in BITS and (f.size < 0 or getattr(f, "rev", False)):
-            out.add("le_bitfield")
         elif n not in SUPPORTED:
             out.add(refusal_code(n))
     return sorted(out)
@@ -1824,8 +1978,8 @@ def next_table(r: dict, arms: list[tuple[str, int, str]]):
         return {"proto": arms[0][2]}
     field = arms[0][0]
     fd = next((f for f in r["layout"].fields if f["name"] == field), None)
-    if fd is None or "cond" in fd or fd["kind"] not in ("uint", "flags"):
-        r["dropped"].append(f"children on {field}, not a plain field")
+    if fd is None or "cond" in fd or fd["kind"] not in ("uint", "flags") or "le" in fd:
+        r["dropped"].append(f"children on {field}, not a plain big-endian field")
         return "raw"
     keep = [a for a in arms if a[0] == field]
     r["dropped"] += [f"a child on {a[0]} beside children on {field}" for a in arms if a[0] != field]
@@ -1863,8 +2017,8 @@ def binding(parent, fval: dict, cls, results, wl, universe):
         return {"from": sel, "values": [v]}
     if pname in results and "layout" in results[pname]:
         fd = next((f for f in results[pname]["layout"].fields if f["name"] == k), None)
-        if fd is None or "cond" in fd or fd["kind"] not in ("uint", "flags"):
-            return f"under {pname} on {k}, not a plain field there"
+        if fd is None or "cond" in fd or fd["kind"] not in ("uint", "flags") or "le" in fd:
+            return f"under {pname} on {k}, not a plain big-endian field there"
         place = (fd["off"], fd["len"])
     else:
         place = field_place(wl.get(pname, []), k)

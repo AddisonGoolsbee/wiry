@@ -318,7 +318,7 @@ pub struct ProtoDesc {
 
 /// Room for every scapy layer class converted by `dev/protogen/scapy2spec.py`,
 /// with the registry's ids above it still inside a `u16`.
-pub const BUILTIN_COUNT: u16 = 4096;
+pub const BUILTIN_COUNT: u16 = 8192;
 
 const _: () = assert!(BUILTIN_COUNT as usize + MAX_REGISTERED <= u16::MAX as usize + 1);
 
