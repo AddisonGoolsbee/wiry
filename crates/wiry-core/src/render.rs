@@ -24,6 +24,8 @@ use crate::render_tables as tbl;
 /// what the `FieldKind` gives: an address, a flag string, a decimal integer.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Repr {
+    /// `StrEnumField`: the octets, then their name in parentheses.
+    StrEnum(&'static [(&'static [u8], &'static str)]),
     Auto,
     Hex,
     Bytes,
@@ -163,6 +165,14 @@ impl<'a> View<'a> {
                 b.iter().map(|c| format!("{c:02x}")).collect()
             }
             (Repr::Chaddr, _, FieldValue::Bytes(b)) => self.chaddr(i, b),
+            (Repr::StrEnum(t), _, FieldValue::Bytes(b)) => {
+                let end = b.iter().rposition(|c| *c != 0).map_or(0, |i| i + 1);
+                let r = &b[..end];
+                match t.iter().find(|e| e.0 == &b[..] || e.0 == r) {
+                    Some((_, name)) => format!("{} ({name})", py_bytes(r)),
+                    None => py_bytes(r),
+                }
+            }
             (Repr::Ip6List, _, FieldValue::Bytes(b)) => {
                 let list: Vec<String> = b
                     .chunks_exact(16)
@@ -271,11 +281,22 @@ fn dhcp_options_repr(items: &[crate::options::Item]) -> String {
                 lookup(DHCP_TYPES, *n).map_or_else(|| n.to_string(), str::to_string)
             ),
             ItemValue::Uint(n) => format!("{}={n}", it.name),
-            ItemValue::Bytes(b) => format!(
-                "{}=[{}]",
-                it.name,
-                b.iter().map(u8::to_string).collect::<Vec<_>>().join(", ")
-            ),
+            // The two options scapy declares as a list of octets.
+            ItemValue::Bytes(b)
+                if matches!(
+                    it.name.as_ref(),
+                    "param_req_list" | "forcerenew_nonce_capable"
+                ) =>
+            {
+                format!(
+                    "{}=[{}]",
+                    it.name,
+                    b.iter().map(u8::to_string).collect::<Vec<_>>().join(", ")
+                )
+            }
+            // Every other value scapy keeps is the option's octets.
+            ItemValue::Bytes(b) => format!("{}={}", it.name, py_bytes(b)),
+            ItemValue::Text(t) => format!("{}={}", it.name, py_bytes(t.as_bytes())),
             ItemValue::Ipv4List(l) => format!(
                 "{}={}",
                 it.name,
@@ -825,11 +846,17 @@ fn empty_list(v: &View, i: usize, f: &FieldDesc) -> bool {
     let Some(s) = v.spans.get(i) else {
         return false;
     };
-    if tbl::repr_of(v.name_of(i), f.name) == Repr::Ip6List {
+    let layer = v.name_of(i);
+    if tbl::repr_of(layer, f.name) == Repr::Ip6List {
         return matches!(v.value(i, f), FieldValue::Bytes(b) if b.is_empty());
     }
-    proto::parsed_field_name(s.proto) == f.name
-        && crate::packet::options_at(v.buf, v.spans, i).map_or(true, |items| items.is_empty())
+    if proto::parsed_field_name(s.proto) != f.name {
+        return false;
+    }
+    if tbl::scalar(layer, f.name) {
+        return false;
+    }
+    crate::packet::options_at(v.buf, v.spans, i).map_or(true, |items| items.is_empty())
 }
 
 /// For a packet still being built, which fields each layer was given. A layer

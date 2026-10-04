@@ -269,8 +269,8 @@ def test_a_long_value_split_over_repeated_codes_is_joined():
     opts += bytes([255])
     pkt = Ether(bytes(dhcp_frame(bytes(bare_bootp()), opts)))
     names = [n for n, _ in pkt[DHCP].options]
-    assert names == ["message-type", "60", "end"]
-    assert dict(pkt[DHCP].options)["60"] == b"abcde"
+    assert names == ["message-type", "vendor_class_id", "end"]
+    assert dict(pkt[DHCP].options)["vendor_class_id"] == b"abcde"
 
 
 def test_options_in_sname_and_file_are_read_when_option_52_says_so():

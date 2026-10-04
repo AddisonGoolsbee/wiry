@@ -97,6 +97,10 @@ def rs_str(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def rs_bytes(b):
+    return 'b"' + "".join("\\x%02x" % c for c in b) + '"'
+
+
 def unwrap(f):
     while hasattr(f, "fld"):
         f = f.fld
@@ -118,6 +122,8 @@ def main():
     byname = classes()
     entries = {}  # layer -> [(field, rust Repr expression)]
     holds = []  # (layer, field) scapy shows as a nested packet list
+    scalars = []  # (layer, field) scapy holds as one value, never a list
+    str_enums = {}  # (layer, field) -> [(bytes, name)]
     unset_none = []  # (layer, field) an unbuilt layer shows as None
     display = {}
 
@@ -141,10 +147,19 @@ def main():
                 continue
             if unset_prints_none(cls, f):
                 unset_none.append((layer, f.name))
+            if not getattr(f, "islist", False):
+                scalars.append((layer, f.name))
             if getattr(f, "islist", False) and getattr(f, "holds_packets", False):
                 holds.append((layer, f.name))
                 continue
             name = type(unwrap(f)).__name__
+            if name == "StrEnumField":
+                str_enums[(layer, f.name)] = sorted(
+                    (bytes(k), str(v)) for k, v in unwrap(f).enum.items())
+                rows.append((f.name, "Repr::StrEnum(%s)" % (
+                    "&[" + ", ".join("(%s, %s)" % (rs_bytes(k), rs_str(v))
+                                     for k, v in str_enums[(layer, f.name)]) + "]")))
+                continue
             if name in XENUMISH:
                 rows.append((f.name, "Repr::Hex"))
                 continue
@@ -214,6 +229,9 @@ def main():
     pairs("holds_packets",
           "/// Fields scapy shows as a nested list of packets rather than as a\n"
           "/// value, which `show()` marks with a backslash line.", holds)
+    pairs("scalar",
+          "/// Fields scapy holds as a single value. An empty one still prints,\n"
+          "/// where `repr()` leaves out an empty list.", scalars)
     pairs("unset_is_none",
           "/// Fields a layer still being built shows as `None`: their value is\n"
           "/// computed when it is built.", unset_none)

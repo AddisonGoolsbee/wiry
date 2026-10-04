@@ -12,6 +12,7 @@ Run: python dev/render_parity.py [pcap] [limit] [-v]
 import collections
 import contextlib
 import io
+import re
 import sys
 
 import wiry as W
@@ -91,13 +92,22 @@ class Tally:
         return sum(self.ok.values()), sum(self.total.values())
 
 
-def corpus(path, limit, tally):
+_LAYER = re.compile(r"<(\w+) ")
+
+
+def corpus(path, limit, tally, same):
+    """`same` tallies only the packets both libraries dissect into the same
+    chain of layers, which separates how a layer prints from which layers
+    are there."""
     raw = W.rdpcap(path)
     n = min(limit, len(raw))
     stride = max(1, len(raw) // n)
     for i in range(0, stride * n, stride):
         data = raw.raw_at(i)
-        tally.add(S.Ether(data), W.Ether(data), ("summary", "repr", "show"))
+        sp, wp = S.Ether(data), W.Ether(data)
+        tally.add(sp, wp, ("summary", "repr", "show"))
+        if _LAYER.findall(render(sp, "repr")) == _LAYER.findall(render(wp, "repr")):
+            same.add(sp, wp, ("summary", "repr", "show"))
 
 
 # Stacks a user types, evaluated in each library's namespace.
@@ -182,9 +192,11 @@ def main():
     path = args[0] if args else "/tmp/bigFlows.pcap"
     limit = int(args[1]) if len(args) > 1 else 20000
     a = Tally(f"{path} ({limit} sampled)")
-    corpus(path, limit, a)
+    same = Tally("  of which both dissect into the same layers")
+    corpus(path, limit, a, same)
     b = Tally("constructed: every shared layer, plus typed stacks")
     constructed(b, verbose)
+    same.report(verbose)
     ok = tot = 0
     for t in (a, b):
         x, y = t.report(verbose)

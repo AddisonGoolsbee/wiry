@@ -176,7 +176,7 @@ def test_bootp_option_field_is_the_magic_cookie():
     assert pkt[DHCP].raw_options() == bytes([255])
 
 
-# RFC 2132 §9.13: option 60 is unnamed here, so it is labelled with its code.
+# RFC 2132 §9.13: option 60, the vendor class identifier.
 DHCP_WITH_VENDOR_CLASS = bytes(
     [53, 1, 3, 60, 8]
 ) + b"MSFT 5.0" + bytes([55, 3, 1, 3, 6, 255])
@@ -184,7 +184,7 @@ DHCP_WITH_VENDOR_CLASS = bytes(
 
 def test_a_parsed_option_list_encodes_back_to_the_same_bytes():
     pkt = UDP(_dhcp_frame(DHCP_WITH_VENDOR_CLASS))
-    assert ("60", b"MSFT 5.0") in pkt[DHCP].options
+    assert ("vendor_class_id", b"MSFT 5.0") in pkt[DHCP].options
     assert bytes(DHCP(options=pkt[DHCP].options)) == DHCP_WITH_VENDOR_CLASS
 
 
