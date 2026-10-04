@@ -176,11 +176,16 @@ def main():
 
     overloads = {}  # (parent, child) -> [field]
     known = [l for l in _b.known_layers() if l in byname]
+    # `Packet.add_payload`: the first of the lower layer's alias types the
+    # upper one overloads.
     for child in known:
-        for parent_cls, fields in byname[child]._overload_fields.items():
-            parent = parent_cls.__name__
-            if parent in known and fields:
-                overloads[(parent, child)] = sorted(fields)
+        table = byname[child]._overload_fields
+        for parent in known:
+            for t in byname[parent].aliastypes:
+                if t in table:
+                    if table[t]:
+                        overloads[(parent, child)] = sorted(table[t])
+                    break
 
     if unknown:
         print("unmapped scapy field classes (rendered as-is):",
