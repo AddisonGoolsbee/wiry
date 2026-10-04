@@ -11,6 +11,7 @@ pub mod field;
 pub mod frag;
 pub mod generate;
 pub mod layers;
+pub mod names;
 pub mod options;
 pub mod packet;
 pub mod parse;

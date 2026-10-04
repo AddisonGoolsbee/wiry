@@ -61,7 +61,7 @@ def test_literal_text_survives(pkt):
 
 def test_a_bare_field_searches_the_layers(pkt):
     assert pkt.sprintf("%ttl%") == "64"
-    assert pkt.sprintf("%dport%") == "80"
+    assert pkt.sprintf("%r,dport%") == "80"
 
 
 def test_an_occurrence_number_picks_the_layer():
@@ -75,14 +75,17 @@ def test_the_colon_spelling_names_a_field(pkt):
 
 def test_format_modifiers(pkt):
     assert pkt.sprintf("%02x,IP.ttl%") == "40"
-    assert pkt.sprintf("%#05x,TCP.sport%") == "0x4d2"
+    assert pkt.sprintf("%#05xr,TCP.sport%") == "0x4d2"
     assert pkt.sprintf("%-6s,IP.ttl%|") == "64    |"
-    assert pkt.sprintf("%05d,TCP.dport%") == "00080"
+    assert pkt.sprintf("%05dr,TCP.dport%") == "00080"
 
 
-def test_the_raw_flag_is_accepted_after_a_modifier(pkt):
-    assert pkt.sprintf("%#05xr,TCP.sport%") == pkt.sprintf("%#05x,TCP.sport%")
+def test_the_raw_flag_reads_an_enumerated_field_as_its_integer(pkt):
+    assert pkt.sprintf("%IP.proto% %r,IP.proto%") == "tcp 6"
     assert pkt.sprintf("%r,TCP.flags%") == "S"
+    # The name is a string, so an integer conversion needs the raw value.
+    with pytest.raises(ValueError):
+        pkt.sprintf("%05d,IP.proto%")
 
 
 def test_a_flags_field_formats_as_its_name_and_its_bits(pkt):

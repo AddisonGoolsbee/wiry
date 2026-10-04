@@ -1,9 +1,39 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/inet6.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — next-header names transcribed into the field table
+
 //! IPv6 header layout from RFC 8200 §3; Next Header values from the IANA
 //! "Protocol Numbers" registry.
 
 use crate::field::FieldDesc;
 use crate::layers::dispatch;
+use crate::names::Table;
 use crate::proto::{ipproto, Next, ProtoDesc, ProtoId};
+
+/// scapy 2.7.0 `ipv6nh`.
+pub static NH: Table = &[
+    (0, "Hop-by-Hop Option Header"),
+    (4, "IP"),
+    (6, "TCP"),
+    (17, "UDP"),
+    (41, "IPv6"),
+    (43, "Routing Header"),
+    (44, "Fragment Header"),
+    (47, "GRE"),
+    (50, "ESP Header"),
+    (51, "AH Header"),
+    (58, "ICMPv6"),
+    (59, "No Next Header"),
+    (60, "Destination Option Header"),
+    (112, "VRRP"),
+    (132, "SCTP"),
+    (135, "Mobility Header"),
+];
 
 /// RFC 8200 §4.7: the payload ends here.
 pub const NO_NEXT_HEADER: u8 = 59;
@@ -13,7 +43,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("tc", 4, 8, 0),
     FieldDesc::uint("fl", 12, 20, 0),
     FieldDesc::computed_uint("plen", 32, 16),
-    FieldDesc::uint("nh", 48, 8, NO_NEXT_HEADER as u64),
+    FieldDesc::uint("nh", 48, 8, NO_NEXT_HEADER as u64).named(NH),
     FieldDesc::uint("hlim", 56, 8, 64),
     FieldDesc::ipv6("src", 64).defaulting_to(&LOOPBACK),
     FieldDesc::ipv6("dst", 192).defaulting_to(&LOOPBACK),

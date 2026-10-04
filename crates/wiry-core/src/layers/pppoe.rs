@@ -1,18 +1,221 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/ppp.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — PPPoE code and PPP protocol names transcribed into the field table
+
 //! PPPoE from RFC 2516 §4 and PPP framing from RFC 1661 §2. EtherType values
 //! 0x8863 (Discovery) and 0x8864 (Session) come from the IANA "ETHER TYPES"
 //! registry; PPP protocol numbers from the IANA "PPP DLL PROTOCOL NUMBERS"
 //! registry.
 
 use crate::field::FieldDesc;
+use crate::names::Table;
 use crate::proto::{fixed_len, raw_next, Next, ProtoDesc, ProtoId};
 
-pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("version", 0, 4, 1),
-    FieldDesc::uint("type", 4, 4, 1),
-    FieldDesc::uint("code", 8, 8, 0),
-    FieldDesc::uint("sessionid", 16, 16, 0),
-    FieldDesc::computed_uint("len", 32, 16),
+/// scapy 2.7.0 `PPPoED.code`, `PPPoE.code` and `_PPP_PROTOCOLS`.
+static DISC_CODES: Table = &[
+    (0, "PPP Session Stage"),
+    (7, "PPPoE Active Discovery Offer (PADO)"),
+    (9, "PPPoE Active Discovery Initiation (PADI)"),
+    (10, "PPPoE Active Discovery Session-Grant (PADG)"),
+    (11, "PPPoE Active Discovery Session-Credit Response (PADC)"),
+    (12, "PPPoE Active Discovery Quality (PADQ)"),
+    (25, "PPPoE Active Discovery Request (PADR)"),
+    (101, "PPPoE Active Discovery Session-confirmation (PADS)"),
+    (167, "PPPoE Active Discovery Terminate (PADT)"),
 ];
+
+static SESSION_CODES: Table = &[(0, "Session")];
+
+static PPP_PROTOS: Table = &[
+    (1, "Padding Protocol"),
+    (3, "ROHC small-CID [RFC3095]"),
+    (5, "ROHC large-CID [RFC3095]"),
+    (33, "Internet Protocol version 4"),
+    (35, "OSI Network Layer"),
+    (37, "Xerox NS IDP"),
+    (39, "DECnet Phase IV"),
+    (41, "Appletalk"),
+    (43, "Novell IPX"),
+    (45, "Van Jacobson Compressed TCP/IP"),
+    (47, "Van Jacobson Uncompressed TCP/IP"),
+    (49, "Bridging PDU"),
+    (51, "Stream Protocol (ST-II)"),
+    (53, "Banyan Vines"),
+    (55, "reserved (until 1993) [Typo in RFC1172]"),
+    (57, "AppleTalk EDDP"),
+    (59, "AppleTalk SmartBuffered"),
+    (61, "Multi-Link [RFC1717]"),
+    (63, "NETBIOS Framing"),
+    (65, "Cisco Systems"),
+    (67, "Ascom Timeplex"),
+    (69, "Fujitsu Link Backup and Load Balancing (LBLB)"),
+    (71, "DCA Remote Lan"),
+    (73, "Serial Data Transport Protocol (PPP-SDTP)"),
+    (75, "SNA over 802.2"),
+    (77, "SNA"),
+    (79, "IPv6 Header Compression"),
+    (81, "KNX Bridging Data [ianp]"),
+    (83, "Encryption [Meyer]"),
+    (85, "Individual Link Encryption [Meyer]"),
+    (87, "Internet Protocol version 6 [Hinden]"),
+    (89, "PPP Muxing [RFC3153]"),
+    (91, "Vendor-Specific Network Protocol (VSNP) [RFC3772]"),
+    (97, "RTP IPHC Full Header [RFC3544]"),
+    (99, "RTP IPHC Compressed TCP [RFC3544]"),
+    (101, "RTP IPHC Compressed Non TCP [RFC3544]"),
+    (103, "RTP IPHC Compressed UDP 8 [RFC3544]"),
+    (105, "RTP IPHC Compressed RTP 8 [RFC3544]"),
+    (111, "Stampede Bridging"),
+    (113, "Reserved [Fox]"),
+    (115, "MP+ Protocol [Smith]"),
+    (125, "reserved (Control Escape) [RFC1661]"),
+    (127, "reserved (compression inefficient [RFC1662]"),
+    (129, "Reserved Until 20-Oct-2000 [IANA]"),
+    (131, "Reserved Until 20-Oct-2000 [IANA]"),
+    (193, "NTCITS IPI [Ungar]"),
+    (207, "reserved (PPP NLID)"),
+    (251, "single link compression in multilink [RFC1962]"),
+    (253, "compressed datagram [RFC1962]"),
+    (255, "reserved (compression inefficient)"),
+    (513, "802.1d Hello Packets"),
+    (515, "IBM Source Routing BPDU"),
+    (517, "DEC LANBridge100 Spanning Tree"),
+    (519, "Cisco Discovery Protocol [Sastry]"),
+    (521, "Netcs Twin Routing [Korfmacher]"),
+    (523, "STP - Scheduled Transfer Protocol [Segal]"),
+    (525, "EDP - Extreme Discovery Protocol [Grosser]"),
+    (529, "Optical Supervisory Channel Protocol (OSCP)[Prasad]"),
+    (531, "Optical Supervisory Channel Protocol (OSCP)[Prasad]"),
+    (561, "Luxcom"),
+    (563, "Sigma Network Systems"),
+    (565, "Apple Client Server Protocol [Ridenour]"),
+    (641, "MPLS Unicast [RFC3032]  "),
+    (643, "MPLS Multicast [RFC3032]"),
+    (645, "IEEE p1284.4 standard - data packets [Batchelder]"),
+    (647, "ETSI TETRA Network Protocol Type 1 [Nieminen]"),
+    (649, "Multichannel Flow Treatment Protocol [McCann]"),
+    (8291, "RTP IPHC Compressed TCP No Delta [RFC3544]"),
+    (8293, "RTP IPHC Context State [RFC3544]"),
+    (8295, "RTP IPHC Compressed UDP 16 [RFC3544]"),
+    (8297, "RTP IPHC Compressed RTP 16 [RFC3544]"),
+    (16385, "Cray Communications Control Protocol [Stage]"),
+    (16387, "CDPD Mobile Network Registration Protocol [Quick]"),
+    (16389, "Expand accelerator protocol [Rachmani]"),
+    (16391, "ODSICP NCP [Arvind]"),
+    (16393, "DOCSIS DLL [Gaedtke]"),
+    (16395, "Cetacean Network Detection Protocol [Siller]"),
+    (16417, "Stacker LZS [Simpson]"),
+    (16419, "RefTek Protocol [Banfill]"),
+    (16421, "Fibre Channel [Rajagopal]"),
+    (16423, "EMIT Protocols [Eastham]"),
+    (16475, "Vendor-Specific Protocol (VSP) [RFC3772]"),
+    (32801, "Internet Protocol Control Protocol"),
+    (32803, "OSI Network Layer Control Protocol"),
+    (32805, "Xerox NS IDP Control Protocol"),
+    (32807, "DECnet Phase IV Control Protocol"),
+    (32809, "Appletalk Control Protocol"),
+    (32811, "Novell IPX Control Protocol"),
+    (32813, "reserved"),
+    (32815, "reserved"),
+    (32817, "Bridging NCP"),
+    (32819, "Stream Protocol Control Protocol"),
+    (32821, "Banyan Vines Control Protocol"),
+    (32823, "reserved (until 1993)"),
+    (32825, "reserved"),
+    (32827, "reserved"),
+    (32829, "Multi-Link Control Protocol"),
+    (32831, "NETBIOS Framing Control Protocol"),
+    (32833, "Cisco Systems Control Protocol"),
+    (32835, "Ascom Timeplex"),
+    (32837, "Fujitsu LBLB Control Protocol"),
+    (32839, "DCA Remote Lan Network Control Protocol (RLNCP)"),
+    (32841, "Serial Data Control Protocol (PPP-SDCP)"),
+    (32843, "SNA over 802.2 Control Protocol"),
+    (32845, "SNA Control Protocol"),
+    (32847, "IP6 Header Compression Control Protocol"),
+    (32849, "KNX Bridging Control Protocol [ianp]"),
+    (32851, "Encryption Control Protocol [Meyer]"),
+    (32853, "Individual Link Encryption Control Protocol [Meyer]"),
+    (32855, "IPv6 Control Protovol [Hinden]"),
+    (32857, "PPP Muxing Control Protocol [RFC3153]"),
+    (
+        32859,
+        "Vendor-Specific Network Control Protocol (VSNCP) [RFC3772]",
+    ),
+    (32879, "Stampede Bridging Control Protocol"),
+    (32881, "Reserved [Fox]"),
+    (32883, "MP+ Control Protocol [Smith]"),
+    (32893, "Not Used - reserved [RFC1661]"),
+    (32897, "Reserved Until 20-Oct-2000 [IANA]"),
+    (32899, "Reserved Until 20-Oct-2000 [IANA]"),
+    (32961, "NTCITS IPI Control Protocol [Ungar]"),
+    (32975, "Not Used - reserved [RFC1661]"),
+    (
+        33019,
+        "single link compression in multilink control [RFC1962]",
+    ),
+    (33021, "Compression Control Protocol [RFC1962]"),
+    (33023, "Not Used - reserved [RFC1661]"),
+    (33287, "Cisco Discovery Protocol Control [Sastry]"),
+    (33289, "Netcs Twin Routing [Korfmacher]"),
+    (33291, "STP - Control Protocol [Segal]"),
+    (
+        33293,
+        "EDPCP - Extreme Discovery Protocol Ctrl Prtcl [Grosser]",
+    ),
+    (33333, "Apple Client Server Protocol Control [Ridenour]"),
+    (33409, "MPLSCP [RFC3032]"),
+    (
+        33413,
+        "IEEE p1284.4 standard - Protocol Control [Batchelder]",
+    ),
+    (33415, "ETSI TETRA TNP1 Control Protocol [Nieminen]"),
+    (33417, "Multichannel Flow Treatment Protocol [McCann]"),
+    (49185, "Link Control Protocol"),
+    (49187, "Password Authentication Protocol"),
+    (49189, "Link Quality Report"),
+    (49191, "Shiva Password Authentication Protocol"),
+    (49193, "CallBack Control Protocol (CBCP)"),
+    (
+        49195,
+        "BACP Bandwidth Allocation Control Protocol [RFC2125]",
+    ),
+    (49197, "BAP [RFC2125]"),
+    (
+        49243,
+        "Vendor-Specific Authentication Protocol (VSAP) [RFC3772]",
+    ),
+    (49281, "Container Control Protocol [KEN]"),
+    (49699, "Challenge Handshake Authentication Protocol"),
+    (49701, "RSA Authentication Protocol [Narayana]"),
+    (49703, "Extensible Authentication Protocol [RFC2284]"),
+    (49705, "Mitsubishi Security Info Exch Ptcl (SIEP) [Seno]"),
+    (49775, "Stampede Bridging Authorization Protocol"),
+    (49793, "Proprietary Authentication Protocol [KEN]"),
+    (49795, "Proprietary Authentication Protocol [Tackabury]"),
+    (50305, "Proprietary Node ID Authentication Protocol [KEN]"),
+];
+
+/// Discovery and Session share the header; only the names of `code` differ.
+macro_rules! header_fields {
+    ($codes:expr) => {
+        &[
+            FieldDesc::uint("version", 0, 4, 1),
+            FieldDesc::uint("type", 4, 4, 1),
+            FieldDesc::uint("code", 8, 8, 0).named($codes),
+            FieldDesc::uint("sessionid", 16, 16, 0),
+            FieldDesc::computed_uint("len", 32, 16),
+        ]
+    };
+}
+
+pub static FIELDS: &[FieldDesc] = header_fields!(SESSION_CODES);
+pub static DISC_FIELDS: &[FieldDesc] = header_fields!(DISC_CODES);
 
 /// RFC 2516 §4: LENGTH covers the payload alone, so the datagram ends six
 /// octets further on than it claims.
@@ -57,7 +260,7 @@ pub static DESC: ProtoDesc = ProtoDesc {
 pub static DISC_DESC: ProtoDesc = ProtoDesc {
     id: ProtoId::PppoeDisc,
     name: "PPPoED",
-    fields: FIELDS,
+    fields: DISC_FIELDS,
     min_len: 6,
     header_len: fixed_len,
     next: raw_next,
@@ -80,7 +283,8 @@ pub mod pppproto {
 /// RFC 1661 §2 allows a one-octet Protocol field, but RFC 2516 §4 forbids that
 /// compression over PPPoE, which is the only framing this build reaches PPP
 /// through, so the field is always two octets here.
-pub static PPP_FIELDS: &[FieldDesc] = &[FieldDesc::uint("proto", 0, 16, pppproto::IPV4 as u64)];
+pub static PPP_FIELDS: &[FieldDesc] =
+    &[FieldDesc::uint("proto", 0, 16, pppproto::IPV4 as u64).named(PPP_PROTOS)];
 
 fn ppp_next(hdr: &[u8]) -> Next {
     if hdr.len() < 2 {

@@ -1,3 +1,5 @@
+use crate::names::{Host, Names, Table};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldKind {
     Uint,
@@ -33,6 +35,7 @@ pub struct FieldDesc {
     /// `VarBytes` only: runs to the end of the whole layer rather than of its
     /// header, so writing it resizes the packet.
     pub to_end: bool,
+    pub names: Names,
 }
 
 impl FieldDesc {
@@ -49,6 +52,38 @@ impl FieldDesc {
     pub const fn defaulting_to(mut self, b: &'static [u8]) -> Self {
         self.default_bytes = Some(b);
         self
+    }
+
+    /// Sorted by value.
+    pub const fn named(mut self, t: Table) -> Self {
+        self.names = Names::Table(t);
+        self
+    }
+
+    pub const fn host_named(mut self, h: Host) -> Self {
+        self.names = Names::Host(h);
+        self
+    }
+
+    /// The table is picked by the field at `on_off`/`on_len` of the same
+    /// header. Both levels sorted by value.
+    pub const fn named_by(
+        mut self,
+        on_off: u16,
+        on_len: u16,
+        tables: &'static [(u64, Table)],
+    ) -> Self {
+        self.names = Names::Multi {
+            on_off,
+            on_len,
+            tables,
+        };
+        self
+    }
+
+    /// The enumerated name of `v`, given the header it was read from.
+    pub fn name_of(&self, hdr: &[u8], v: u64) -> Option<&'static str> {
+        self.names.name(hdr, v)
     }
 
     #[inline]
@@ -77,6 +112,7 @@ impl FieldDesc {
             cond: None,
             default_bytes: None,
             to_end: false,
+            names: Names::None,
         }
     }
 

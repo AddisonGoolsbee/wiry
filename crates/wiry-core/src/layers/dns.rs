@@ -1,10 +1,32 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/dns.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — opcode and rcode names transcribed into the field table
+
 //! RFC 1035 §4.1.1 header; sections stay `Raw` and are decoded by
 //! [`parse_records`]. RDATA layouts: RFC 1035 §3.3, RFC 2782 (SRV),
 //! RFC 6891 (OPT), RFC 4034 (DS, RRSIG, NSEC, DNSKEY), RFC 5155 (NSEC3),
 //! RFC 8659 (CAA). DEVIATIONS.md E8.
 
 use crate::field::FieldDesc;
+use crate::names::Table;
 use crate::proto::{Next, ProtoDesc, ProtoId};
+
+/// scapy 2.7.0 `DNS.opcode` and `DNS.rcode`.
+static OPCODES: Table = &[(0, "QUERY"), (1, "IQUERY"), (2, "STATUS")];
+
+static RCODES: Table = &[
+    (0, "ok"),
+    (1, "format-error"),
+    (2, "server-failure"),
+    (3, "name-error"),
+    (4, "not-implemented"),
+    (5, "refused"),
+];
 
 /// The header is the same twelve octets either way; over a stream RFC 1035
 /// §4.2.2 puts a length in front of it. One macro so the two layouts cannot
@@ -15,7 +37,7 @@ macro_rules! header_fields {
             $($pre,)?
             FieldDesc::uint("id", $at, 16, 0),
             FieldDesc::uint("qr", $at + 16, 1, 0),
-            FieldDesc::uint("opcode", $at + 17, 4, 0),
+            FieldDesc::uint("opcode", $at + 17, 4, 0).named(OPCODES),
             FieldDesc::uint("aa", $at + 21, 1, 0),
             FieldDesc::uint("tc", $at + 22, 1, 0),
             FieldDesc::uint("rd", $at + 23, 1, 1),
@@ -24,7 +46,7 @@ macro_rules! header_fields {
             FieldDesc::uint("z", $at + 25, 1, 0),
             FieldDesc::uint("ad", $at + 26, 1, 0),
             FieldDesc::uint("cd", $at + 27, 1, 0),
-            FieldDesc::uint("rcode", $at + 28, 4, 0),
+            FieldDesc::uint("rcode", $at + 28, 4, 0).named(RCODES),
             FieldDesc::uint("qdcount", $at + 32, 16, 1),
             FieldDesc::uint("ancount", $at + 48, 16, 0),
             FieldDesc::uint("nscount", $at + 64, 16, 0),

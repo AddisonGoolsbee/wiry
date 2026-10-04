@@ -91,12 +91,22 @@ pub fn flags(s: &str, names: &[&str]) -> Option<u64> {
 }
 
 pub fn value_for(f: &FieldDesc, s: &str) -> Option<ValueBits> {
+    value_in(f, s, &[])
+}
+
+/// `hdr` is the header the value will be written into, which is what picks
+/// the table of a field whose names depend on another field.
+pub fn value_in(f: &FieldDesc, s: &str, hdr: &[u8]) -> Option<ValueBits> {
     match f.kind {
         FieldKind::Ipv4Addr => ipv4(s).map(|b| ValueBits::Bytes(b.to_vec())),
         FieldKind::Ipv6Addr => ipv6(s).map(|b| ValueBits::Bytes(b.to_vec())),
         FieldKind::MacAddr => mac(s).map(|b| ValueBits::Bytes(b.to_vec())),
         FieldKind::Flags => flags(s, f.flags).map(ValueBits::Uint),
-        FieldKind::Uint | FieldKind::LeUint => s.parse::<u64>().ok().map(ValueBits::Uint),
+        FieldKind::Uint | FieldKind::LeUint => s
+            .parse::<u64>()
+            .ok()
+            .or_else(|| f.names.value(hdr, s))
+            .map(ValueBits::Uint),
         FieldKind::Bytes | FieldKind::VarBytes => Some(ValueBits::Bytes(s.as_bytes().to_vec())),
     }
 }
@@ -175,6 +185,17 @@ mod tests {
     fn a_name_that_is_part_of_another_sets_only_its_own_bit() {
         let names: &[&str] = &["a", "ab", "b"];
         assert_eq!(flags("ab", names), Some(0b010));
+    }
+
+    #[test]
+    fn an_enumerated_field_takes_its_names() {
+        let f = FieldDesc::uint("type", 0, 8, 0).named(&[(0, "echo-reply"), (8, "echo-request")]);
+        assert!(matches!(
+            value_for(&f, "echo-request"),
+            Some(ValueBits::Uint(8))
+        ));
+        assert!(matches!(value_for(&f, "3"), Some(ValueBits::Uint(3))));
+        assert!(value_for(&f, "nope").is_none());
     }
 
     #[test]

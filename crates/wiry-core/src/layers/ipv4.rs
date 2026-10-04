@@ -2,6 +2,7 @@
 //! "Protocol Numbers" registry.
 
 use crate::field::FieldDesc;
+use crate::names::Host;
 use crate::options::{Item, LenRule, OptDesc, OptTable, Shape};
 use crate::proto::{ipproto, Next, ProtoDesc, ProtoId};
 
@@ -18,7 +19,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::flags("flags", 48, 3, FLAG_NAMES),
     FieldDesc::uint("frag", 51, 13, 0),
     FieldDesc::uint("ttl", 64, 8, 64),
-    FieldDesc::uint("proto", 72, 8, 0),
+    FieldDesc::uint("proto", 72, 8, 0).host_named(Host::IpProtos),
     FieldDesc::computed_uint("chksum", 80, 16),
     FieldDesc::ipv4("src", 96, 0x7f00_0001),
     FieldDesc::ipv4("dst", 128, 0x7f00_0001),

@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/l2.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — packet-type names transcribed into the field table
+
 //! LINKTYPE_LINUX_SLL (113) and LINKTYPE_LINUX_SLL2 (276) from the tcpdump
 //! link-layer header type registry: the cooked headers libpcap synthesises for
 //! a capture on the Linux `any` device, where frames from interfaces with
@@ -8,22 +17,32 @@
 //! leads with the protocol type instead.
 
 use crate::field::FieldDesc;
+use crate::names::{Host, Table};
 use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
 
+/// scapy 2.7.0 `CookedLinux.pkttype`; `CookedLinuxV2` shares it.
+static PKTTYPES: Table = &[
+    (0, "unicast"),
+    (1, "broadcast"),
+    (2, "multicast"),
+    (3, "unicast-to-another-host"),
+    (4, "sent-by-us"),
+];
+
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("pkttype", 0, 16, 0),
+    FieldDesc::uint("pkttype", 0, 16, 0).named(PKTTYPES),
     FieldDesc::uint("lladdrtype", 16, 16, 1),
     FieldDesc::uint("lladdrlen", 32, 16, 6),
     FieldDesc::bytes("src", 48, 64),
-    FieldDesc::uint("proto", 112, 16, ethertype::IPV4 as u64),
+    FieldDesc::uint("proto", 112, 16, ethertype::IPV4 as u64).host_named(Host::EtherTypes),
 ];
 
 pub static FIELDS_V2: &[FieldDesc] = &[
-    FieldDesc::uint("proto", 0, 16, ethertype::IPV4 as u64),
+    FieldDesc::uint("proto", 0, 16, ethertype::IPV4 as u64).host_named(Host::EtherTypes),
     FieldDesc::uint("reserved", 16, 16, 0),
     FieldDesc::uint("ifindex", 32, 32, 0),
     FieldDesc::uint("lladdrtype", 64, 16, 1),
-    FieldDesc::uint("pkttype", 80, 8, 0),
+    FieldDesc::uint("pkttype", 80, 8, 0).named(PKTTYPES),
     FieldDesc::uint("lladdrlen", 88, 8, 6),
     FieldDesc::bytes("src", 96, 64),
 ];

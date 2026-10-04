@@ -15,7 +15,7 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any, Callable, Iterable, Iterator, Sequence
 
-from . import FlagValue, PacketList, _LayerView, _b, _flag_names
+from . import FlagValue, PacketList, _LayerView, _b, _enum_table, _flag_names
 
 __all__ = [
     "sprintf", "sprintf_list", "show2_str", "Sessions", "sessions",
@@ -64,9 +64,10 @@ def _directive(body: str) -> tuple | None:
     spec, sep, ref = body.partition(",")
     if not sep:
         ref, spec = spec, ""
-    # The raw flag changes nothing here, since wiry renders no enum names, but
-    # it has to come off: `%r` is Python's repr conversion.
-    if spec.endswith("r"):
+    # `r` asks for the stored value rather than its rendering, an enumerated
+    # field's integer rather than its name; it is not Python's `%r`.
+    raw = spec.endswith("r")
+    if raw:
         spec = spec[:-1]
     if ref.startswith("."):
         return ("time", spec) if ref == ".time" else None
@@ -86,7 +87,7 @@ def _directive(body: str) -> tuple | None:
         field = ref
     if not field.isidentifier() or (layer is not None and not layer.isidentifier()):
         return None
-    return ("fld", layer, nb, field, spec)
+    return ("fld", layer, nb, field, spec, raw)
 
 
 @lru_cache(maxsize=256)
@@ -176,7 +177,7 @@ class _PktSource:
     def time(self) -> Any:
         return self.pkt.time
 
-    def value(self, layer: str | None, nb: int, field: str) -> Any:
+    def value(self, layer: str | None, nb: int, field: str, raw: bool = True) -> Any:
         seen = 0
         for i, name in enumerate(self.names):
             if layer is None:
@@ -188,6 +189,11 @@ class _PktSource:
                 seen += 1
                 if seen != nb:
                     continue
+            if not raw and field in _enum_table(name):
+                try:
+                    return self.pkt._materialize().field_repr(i, field)
+                except KeyError:
+                    pass
             return getattr(_LayerView(self.pkt, i, name), field, _MISS)
         return _MISS
 
@@ -210,8 +216,8 @@ class _ColSource:
     def time(self) -> Any:
         return self.cols[("Frame", "time")][self.row]
 
-    def value(self, layer: str | None, nb: int, field: str) -> Any:
-        v = self.cols[(layer, field)][self.row]
+    def value(self, layer: str | None, nb: int, field: str, raw: bool = True) -> Any:
+        v = self.cols[(layer, _column_key(layer, field, raw))][self.row]
         if v is None:
             return _MISS
         names = self.flags.get((layer, field))
@@ -225,6 +231,12 @@ class _ColSource:
         return self.cols[(layer, field)][self.row] is not None
 
 
+def _column_key(layer: str, field: str, raw: bool) -> str:
+    """The column that answers a directive: an enumerated field is fetched
+    already rendered unless the directive asks for the raw value."""
+    return field if raw or field not in _enum_table(layer) else "%" + field
+
+
 def _render(parts: Sequence, src: Any) -> str:
     out: list[str] = []
     for p in parts:
@@ -236,8 +248,8 @@ def _render(parts: Sequence, src: Any) -> str:
         elif p[0] == "time":
             out.append(_apply(_clock(src.time()), p[1]))
         else:
-            _, layer, nb, field, spec = p
-            out.append(_apply(src.value(layer, nb, field), spec))
+            _, layer, nb, field, spec, raw = p
+            out.append(_apply(src.value(layer, nb, field, raw), spec))
     return "".join(out)
 
 
@@ -278,11 +290,11 @@ def _plan(parts: Sequence, need: dict[tuple[str, str], None]) -> bool:
             if not _plan(p[3], need):
                 return False
         else:
-            _, layer, nb, field, _spec = p
+            _, layer, nb, field, _spec, raw = p
             known = None if layer is None else _column_fields(layer)
             if nb != 1 or known is None or field not in known:
                 return False
-            need[(layer, field)] = None
+            need[(layer, _column_key(layer, field, raw))] = None
     return True
 
 
@@ -302,7 +314,7 @@ def sprintf_list(pl: Any, fmt: str) -> list[str]:
     cols = dict(zip(specs, pl._list.columns(specs, None, [])))
     flags = {}
     for layer, field in specs:
-        if field and layer != "Frame":
+        if field and layer != "Frame" and not field.startswith("%"):
             names = _flag_names(layer, field)
             if names is not None:
                 flags[(layer, field)] = names

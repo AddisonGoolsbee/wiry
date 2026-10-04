@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/l2.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — address-family names transcribed into the field table
+
 //! DLT_NULL (LINKTYPE_NULL, 0) and DLT_LOOP (LINKTYPE_LOOP, 108) from the
 //! tcpdump link-layer header type registry: four octets holding the address
 //! family of the datagram that follows.
@@ -11,7 +20,19 @@
 //! DEVIATIONS.md C3.
 
 use crate::field::FieldDesc;
+use crate::names::Table;
 use crate::proto::{Next, ProtoDesc, ProtoId};
+
+/// scapy 2.7.0 `LOOPBACK_TYPES`.
+static TYPES: Table = &[
+    (2, "IPv4"),
+    (7, "OSI"),
+    (16, "Appletalk"),
+    (23, "Netware IPX/SPX"),
+    (24, "IPv6"),
+    (28, "IPv6"),
+    (30, "IPv6"),
+];
 
 /// `AF_INET` is 2 everywhere. `AF_INET6` is not: 24 on NetBSD and OpenBSD, 28
 /// on FreeBSD, 30 on macOS, and a capture carries whichever its writer used.
@@ -23,8 +44,12 @@ pub mod af {
 }
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::le_uint("type", 0, 32, af::INET as u64).when(host_order),
-    FieldDesc::uint("type", 0, 32, af::INET as u64).when(network_order),
+    FieldDesc::le_uint("type", 0, 32, af::INET as u64)
+        .when(host_order)
+        .named(TYPES),
+    FieldDesc::uint("type", 0, 32, af::INET as u64)
+        .when(network_order)
+        .named(TYPES),
 ];
 
 fn known(v: u32) -> bool {

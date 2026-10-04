@@ -1,6 +1,7 @@
 //! TCP header layout from RFC 9293 §3.1.
 
 use crate::field::FieldDesc;
+use crate::names::Host;
 use crate::options::{Item, LenRule, OptDesc, OptTable, Shape};
 use crate::proto::{ports, Next, ProtoDesc, ProtoId};
 
@@ -9,8 +10,8 @@ use crate::proto::{ports, Next, ProtoDesc, ProtoId};
 pub static FLAG_NAMES: &[&str] = &["F", "S", "R", "P", "A", "U", "E", "C", "N"];
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("sport", 0, 16, 20),
-    FieldDesc::uint("dport", 16, 16, 80),
+    FieldDesc::uint("sport", 0, 16, 20).host_named(Host::TcpServices),
+    FieldDesc::uint("dport", 16, 16, 80).host_named(Host::TcpServices),
     FieldDesc::uint("seq", 32, 32, 0),
     FieldDesc::uint("ack", 64, 32, 0),
     FieldDesc::uint("dataofs", 96, 4, 5),

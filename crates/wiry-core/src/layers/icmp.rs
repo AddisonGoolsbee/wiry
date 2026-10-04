@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/inet.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — type names and the per-type code names transcribed into the field table
+
 //! RFC 792 gives every ICMPv4 message the same Type / Code / Checksum prefix;
 //! what the four octets after it mean depends on the type, so those fields are
 //! conditional:
@@ -37,7 +46,83 @@ pub mod types {
     pub const DOMAIN_NAME_REPLY: u8 = 38;
 }
 
+use crate::names::Table;
 use types::*;
+
+/// scapy 2.7.0 `icmptypes` and `icmpcodes`.
+static TYPE_NAMES: Table = &[
+    (0, "echo-reply"),
+    (3, "dest-unreach"),
+    (4, "source-quench"),
+    (5, "redirect"),
+    (8, "echo-request"),
+    (9, "router-advertisement"),
+    (10, "router-solicitation"),
+    (11, "time-exceeded"),
+    (12, "parameter-problem"),
+    (13, "timestamp-request"),
+    (14, "timestamp-reply"),
+    (15, "information-request"),
+    (16, "information-response"),
+    (17, "address-mask-request"),
+    (18, "address-mask-reply"),
+    (30, "traceroute"),
+    (31, "datagram-conversion-error"),
+    (32, "mobile-host-redirect"),
+    (33, "ipv6-where-are-you"),
+    (34, "ipv6-i-am-here"),
+    (35, "mobile-registration-request"),
+    (36, "mobile-registration-reply"),
+    (37, "domain-name-request"),
+    (38, "domain-name-reply"),
+    (39, "skip"),
+    (40, "photuris"),
+];
+
+static CODES_3: Table = &[
+    (0, "network-unreachable"),
+    (1, "host-unreachable"),
+    (2, "protocol-unreachable"),
+    (3, "port-unreachable"),
+    (4, "fragmentation-needed"),
+    (5, "source-route-failed"),
+    (6, "network-unknown"),
+    (7, "host-unknown"),
+    (9, "network-prohibited"),
+    (10, "host-prohibited"),
+    (11, "TOS-network-unreachable"),
+    (12, "TOS-host-unreachable"),
+    (13, "communication-prohibited"),
+    (14, "host-precedence-violation"),
+    (15, "precedence-cutoff"),
+];
+static CODES_5: Table = &[
+    (0, "network-redirect"),
+    (1, "host-redirect"),
+    (2, "TOS-network-redirect"),
+    (3, "TOS-host-redirect"),
+];
+static CODES_11: Table = &[
+    (0, "ttl-zero-during-transit"),
+    (1, "ttl-zero-during-reassembly"),
+];
+static CODES_12: Table = &[(0, "ip-header-bad"), (1, "required-option-missing")];
+static CODES_40: Table = &[
+    (0, "bad-spi"),
+    (1, "authentication-failed"),
+    (2, "decompression-failed"),
+    (3, "decryption-failed"),
+    (4, "need-authentification"),
+    (5, "need-authorization"),
+];
+
+static CODE_NAMES: &[(u64, Table)] = &[
+    (3, CODES_3),
+    (5, CODES_5),
+    (11, CODES_11),
+    (12, CODES_12),
+    (40, CODES_40),
+];
 
 fn msg_type(hdr: &[u8]) -> u8 {
     hdr.first().copied().unwrap_or(ECHO_REQUEST)
@@ -101,8 +186,8 @@ fn never(_: &[u8]) -> bool {
 }
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("type", 0, 8, ECHO_REQUEST as u64),
-    FieldDesc::uint("code", 8, 8, 0),
+    FieldDesc::uint("type", 0, 8, ECHO_REQUEST as u64).named(TYPE_NAMES),
+    FieldDesc::uint("code", 8, 8, 0).named_by(0, 8, CODE_NAMES),
     FieldDesc::computed_uint("chksum", 16, 16),
     FieldDesc::uint("id", 32, 16, 0).when(has_id_seq),
     FieldDesc::uint("seq", 48, 16, 0).when(has_id_seq),

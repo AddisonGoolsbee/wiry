@@ -20,6 +20,7 @@ use std::sync::Arc;
 use wiry_capture::Flow;
 use wiry_core::field::{self, FieldDesc, FieldKind, FieldValue};
 use wiry_core::frag;
+use wiry_core::names::Names;
 use wiry_core::options::{Item, OptArg};
 use wiry_core::packet::{self, dissect_spans, LayerSpan, Packet as CorePacket, Spans};
 use wiry_core::pcap;
@@ -49,6 +50,8 @@ const FRAME: &str = "Frame";
 #[derive(Clone, Copy)]
 enum ColSpec {
     Field(ProtoId, FieldRef),
+    /// The field as rendered, an enumerated one by its name.
+    Rendered(ProtoId, FieldRef),
     Options(ProtoId),
     Present(ProtoId),
     Time,
@@ -180,6 +183,26 @@ fn decode_at(buf: &[u8], spans: &[LayerSpan], at: usize, r: &FieldRef) -> Option
     decode_span(buf, spans.get(at)?, r.at(spans, at)?)
 }
 
+fn rendered_at(buf: &[u8], spans: &[LayerSpan], at: usize, r: &FieldRef) -> Option<String> {
+    let s = spans.get(at)?;
+    let f = r.at(spans, at)?;
+    let hdr = s.header(buf);
+    if !f.is_active(hdr) {
+        return None;
+    }
+    Some(rendered(hdr, f))
+}
+
+/// An enumerated field by its name where it has one, otherwise as `show()`
+/// prints the value.
+fn rendered(hdr: &[u8], f: &FieldDesc) -> String {
+    let v = field::decode(hdr, f);
+    v.as_uint()
+        .filter(|_| matches!(f.kind, FieldKind::Uint | FieldKind::LeUint))
+        .and_then(|n| f.name_of(hdr, n))
+        .map_or_else(|| show::render_value(&v), str::to_string)
+}
+
 fn options_to_py(py: Python<'_>, items: &[Item]) -> PyResult<Py<PyList>> {
     use wiry_core::options::ItemValue;
     let out = PyList::empty_bound(py);
@@ -232,6 +255,12 @@ fn resolve_spec(layer: &str, name: &str) -> PyResult<ColSpec> {
         };
     }
     let id = proto_by_name(layer)?;
+    // `%` cannot begin a field name, so it marks the rendered form internally.
+    if let Some(bare) = name.strip_prefix('%') {
+        let r = FieldRef::resolve(id, bare)
+            .ok_or_else(|| PyKeyError::new_err(format!("no field {bare:?} on {layer}")))?;
+        return Ok(ColSpec::Rendered(id, r));
+    }
     if name.is_empty() {
         return Ok(ColSpec::Present(id));
     }
@@ -293,6 +322,7 @@ pub(crate) fn build_query(
 enum Cell {
     Null,
     Val(FieldValue),
+    Text(String),
     Bool(bool),
     Time(f64),
     Opts(Vec<Item>),
@@ -303,6 +333,7 @@ impl Cell {
         Ok(match self {
             Cell::Null => py.None(),
             Cell::Val(v) => value_to_py(py, &v),
+            Cell::Text(t) => t.into_py(py),
             Cell::Bool(b) => b.into_py(py),
             Cell::Time(t) => t.into_py(py),
             Cell::Opts(items) => options_to_py(py, &items)?.into_py(py),
@@ -345,6 +376,15 @@ impl PyPkt {
         }
     }
 
+    /// The value as rendered: an enumerated field's name where it has one.
+    fn field_repr(&self, layer: usize, name: &str) -> PyResult<String> {
+        let f = self
+            .inner
+            .active_field(layer, name)
+            .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
+        Ok(rendered(self.inner.header(layer), f))
+    }
+
     fn get_field_by_layer(
         &self,
         py: Python<'_>,
@@ -384,7 +424,7 @@ impl PyPkt {
             .inner
             .active_field(layer, name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
-        match wiry_core::parse::value_for(f, val) {
+        match wiry_core::parse::value_in(f, val, self.inner.header(layer)) {
             Some(wiry_core::parse::ValueBits::Uint(v)) => {
                 self.inner.set_uint(layer, name, v);
                 Ok(())
@@ -919,7 +959,10 @@ impl PyPktList {
             || resolved.iter().any(|s| {
                 matches!(
                     s,
-                    ColSpec::Field(..) | ColSpec::Options(..) | ColSpec::Present(_)
+                    ColSpec::Field(..)
+                        | ColSpec::Rendered(..)
+                        | ColSpec::Options(..)
+                        | ColSpec::Present(_)
                 )
             });
 
@@ -953,6 +996,14 @@ impl PyPktList {
                             }
                             None => Cell::Null,
                         },
+                        ColSpec::Rendered(id, r) => {
+                            match spans.iter().position(|s| s.proto == *id) {
+                                Some(at) => {
+                                    rendered_at(bytes, &spans, at, r).map_or(Cell::Null, Cell::Text)
+                                }
+                                None => Cell::Null,
+                            }
+                        }
                         // The named item list a per-packet `.options` read
                         // returns, not the raw region: `raw_options()` is that.
                         ColSpec::Options(id) => match spans.iter().position(|s| s.proto == *id) {
@@ -1871,7 +1922,7 @@ fn apply_fields(
         let f = pkt
             .active_field(*layer, name)
             .ok_or_else(|| PyKeyError::new_err(format!("no field {name:?} in layer {layer}")))?;
-        match wiry_core::parse::value_for(f, s) {
+        match wiry_core::parse::value_in(f, s, pkt.header(*layer)) {
             Some(wiry_core::parse::ValueBits::Uint(v)) => {
                 pkt.set_uint(*layer, name, v);
             }
@@ -2023,6 +2074,26 @@ fn flag_names(name: &str, field: &str) -> PyResult<Option<Vec<&'static str>>> {
         .map(|f| f.flags.to_vec()))
 }
 
+type NamePairs = Vec<(u64, &'static str)>;
+
+/// Each enumerated field's (value, name) pairs. A field whose table another
+/// field selects is listed with none, since its names depend on the header.
+#[pyfunction]
+fn enum_names(name: &str) -> PyResult<Vec<(&'static str, NamePairs)>> {
+    let id = proto_by_name(name)?;
+    let mut out: Vec<(&'static str, NamePairs)> = Vec::new();
+    for f in proto::desc(id).fields {
+        if f.names.is_none() {
+            continue;
+        }
+        if out.iter().any(|(n, _)| *n == f.name) {
+            continue;
+        }
+        out.push((f.name, f.names.pairs(&[])));
+    }
+    Ok(out)
+}
+
 #[pyfunction]
 fn known_layers() -> Vec<&'static str> {
     proto::known_layers()
@@ -2032,8 +2103,27 @@ fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
 
-/// name, bit width, kind, integer default, wide default, flag names.
-type FieldSpec = (String, u16, String, u64, Option<Vec<u8>>, Vec<String>);
+fn leak_names(mut pairs: Vec<(u64, String)>) -> Names {
+    if pairs.is_empty() {
+        return Names::None;
+    }
+    pairs.sort_by_key(|p| p.0);
+    pairs.dedup_by_key(|p| p.0);
+    let t: Vec<(u64, &'static str)> = pairs.into_iter().map(|(v, n)| (v, leak(n))).collect();
+    Names::Table(Box::leak(t.into_boxed_slice()))
+}
+
+/// name, bit width, kind, integer default, wide default, flag names, and the
+/// enumerated names as (value, name) pairs.
+type FieldSpec = (
+    String,
+    u16,
+    String,
+    u64,
+    Option<Vec<u8>>,
+    Vec<String>,
+    Vec<(u64, String)>,
+);
 
 pub(crate) fn kind_name(k: FieldKind) -> &'static str {
     match k {
@@ -2069,7 +2159,7 @@ fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
     let mut descs = Vec::with_capacity(fields.len());
     let mut bit_off = 0u16;
     let last = fields.len().saturating_sub(1);
-    for (i, (fname, bit_len, kind, default, default_bytes, flag_names)) in
+    for (i, (fname, bit_len, kind, default, default_bytes, flag_names, enum_names)) in
         fields.into_iter().enumerate()
     {
         let kind = kind_of(&kind)?;
@@ -2113,6 +2203,7 @@ fn register_layer(name: String, fields: Vec<FieldSpec>) -> PyResult<u16> {
             default_bytes: default_bytes
                 .map(|b| &*Box::leak(b.into_boxed_slice()) as &'static [u8]),
             to_end: false,
+            names: leak_names(enum_names),
         });
         bit_off = bit_off.checked_add(bit_len).ok_or_else(|| {
             PyValueError::new_err(format!("{name} has too many bits to describe"))
@@ -2187,6 +2278,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(column_fields, m)?)?;
     m.add_function(wrap_pyfunction!(parsed_field, m)?)?;
     m.add_function(wrap_pyfunction!(flag_names, m)?)?;
+    m.add_function(wrap_pyfunction!(enum_names, m)?)?;
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
     m.add_function(wrap_pyfunction!(register_layer, m)?)?;
     m.add_function(wrap_pyfunction!(bind_layer, m)?)?;

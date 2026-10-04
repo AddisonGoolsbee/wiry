@@ -1,11 +1,12 @@
 //! UDP header layout from RFC 768.
 
 use crate::field::FieldDesc;
+use crate::names::Host;
 use crate::proto::{ports, Next, ProtoDesc, ProtoId};
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("sport", 0, 16, 53),
-    FieldDesc::uint("dport", 16, 16, 53),
+    FieldDesc::uint("sport", 0, 16, 53).host_named(Host::UdpServices),
+    FieldDesc::uint("dport", 16, 16, 53).host_named(Host::UdpServices),
     FieldDesc::computed_uint("len", 32, 16),
     FieldDesc::computed_uint("chksum", 48, 16),
 ];

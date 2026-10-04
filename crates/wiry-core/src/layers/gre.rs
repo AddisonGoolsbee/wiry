@@ -8,6 +8,7 @@
 //! can land on, gated so that exactly one is ever live.
 
 use crate::field::FieldDesc;
+use crate::names::Host;
 use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
 
 fn flag(hdr: &[u8], bit: u8) -> bool {
@@ -65,7 +66,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("recursion_control", 5, 3, 0),
     FieldDesc::uint("flags", 8, 5, 0),
     FieldDesc::uint("version", 13, 3, 0),
-    FieldDesc::uint("proto", 16, 16, ethertype::IPV4 as u64),
+    FieldDesc::uint("proto", 16, 16, ethertype::IPV4 as u64).host_named(Host::EtherTypes),
     FieldDesc::computed_uint("chksum", 32, 16).when(has_sum),
     FieldDesc::uint("offset", 48, 16, 0).when(has_sum),
     FieldDesc::uint("key", 32, 32, 0).when(key_at_4),
