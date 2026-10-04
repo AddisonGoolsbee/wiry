@@ -280,11 +280,43 @@ def run(path, verbose=False, limit=None):
     return results, failures, skips
 
 
+def run_isolated(path, verbose=False):
+    """`run` in a fresh interpreter. A campaign that sets `conf` and fails
+    before restoring it would otherwise change every file after it."""
+    import json
+    import subprocess
+
+    out = subprocess.run(
+        [sys.executable, __file__, path, "--json"] + (["-v"] if verbose else []),
+        capture_output=True, text=True,
+    )
+    lines = out.stdout.splitlines()
+    for line in lines[:-1]:
+        print(line)
+    if out.returncode not in (0, 1) or not lines:
+        return ({"pass": 0, "skip": 0, "fail": 1},
+                [("", Path(path).name, f"crashed: {out.stderr[-200:]}")], {})
+    r, fails, skips = json.loads(lines[-1])
+    return r, [tuple(f) for f in fails], skips
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     target = sys.argv[1]
     verbose = "-v" in sys.argv
+
+    if "--json" in sys.argv:
+        import contextlib
+        import io
+        import json
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = run(target, verbose)
+        print(buf.getvalue(), end="")
+        print(json.dumps(result))
+        sys.exit(0)
 
     files = [target]
     if Path(target).is_dir():
@@ -295,7 +327,7 @@ if __name__ == "__main__":
     all_skips = {}
 
     for f in files:
-        r, fails, skips = run(f, verbose)
+        r, fails, skips = run_isolated(f, verbose) if len(files) > 1 else run(f, verbose)
         print(f"{Path(f).name:28} pass {r['pass']:4}  skip {r['skip']:4}  "
               f"fail {r['fail']:4}")
         for k in total:
