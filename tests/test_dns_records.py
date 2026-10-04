@@ -201,3 +201,14 @@ def test_the_summary_names_rdata_only_for_a_plain_record_as_scapys_does():
     assert trailed.summary() == "IP / UDP / DNS Qry / Raw"
     for p in (answer(DNSRRMX(exchange="mx.example")), trailed):
         assert p.summary().split(" / ")[-1] in (p[DNS].summary(), "Raw")
+
+
+def test_sprintf_renders_record_fields_through_the_objects(tmp_path):
+    pkt = Ether(bytes(Ether() / IP() / UDP() / DNS(qd=DNSQR(qname="example.com"))))
+    assert pkt.sprintf("%DNS.qd% %DNS.opcode% %r,DNS.opcode%") == (
+        "[<DNSQR  qname=b'example.com.' qtype=A unicastresponse=0 qclass=IN |>]"
+        " QUERY 0")
+    path = str(tmp_path / "q.pcap")
+    wrpcap(path, [pkt, pkt])
+    pl = rdpcap(path)
+    assert pl.sprintf("%DNS.id% %DNS.qd%") == [pkt.sprintf("%DNS.id% %DNS.qd%")] * 2

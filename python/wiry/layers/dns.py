@@ -9,7 +9,9 @@
 #     bindings are the Rust DNS layer's, which keeps a capture's DNS visible to
 #     the bulk paths. The answering machines stay in wiry.answering. The EDNS0
 #     Owner thresholds, Client Subnet ADDRESS length and TSIG length defaults
-#     follow their specifications where 2.7.0 does not; master agrees.
+#     follow their specifications where 2.7.0 does not; master agrees. A dot
+#     or backslash inside a label is escaped (RFC 1035 §5.1), where scapy
+#     joins labels unescaped.
 """DNS (RFC 1035), mDNS (RFC 6762) and DNS-SD (RFC 6763) messages.
 
 The Rust DNS layer finds the message on UDP and TCP port 53 and on 5353, and
