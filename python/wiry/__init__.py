@@ -1727,8 +1727,9 @@ class Packet(metaclass=_PacketMeta):
         meta = {k: getattr(self, k) for k in _META}
         if self._spec_live:
             return (_from_stack, (self._stack, self._payload, meta))
-        names = self._rust.layer_names()
-        return (_from_bytes, (self._rust.to_bytes(), names[0] if names else "", meta))
+        rust = self._materialize()
+        names = rust.layer_names()
+        return (_from_bytes, (rust.to_bytes(), names[0] if names else "", meta))
 
 
 def _with_py_show(pkt: Packet, text: str, idx: int = 0) -> str:

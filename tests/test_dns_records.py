@@ -212,3 +212,12 @@ def test_sprintf_renders_record_fields_through_the_objects(tmp_path):
     wrpcap(path, [pkt, pkt])
     pl = rdpcap(path)
     assert pl.sprintf("%DNS.id% %DNS.qd%") == [pkt.sprintf("%DNS.id% %DNS.qd%")] * 2
+
+
+def test_an_edit_to_a_record_survives_pickling():
+    import pickle
+
+    pkt = IP(bytes(IP() / UDP() / DNS()))
+    pkt[DNS].qd[0].qname = "changed.example"
+    back = pickle.loads(pickle.dumps(pkt))
+    assert back[DNS].qd[0].qname == b"changed.example."
