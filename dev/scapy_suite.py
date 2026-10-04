@@ -15,11 +15,20 @@ Outcomes are three-way and the distinction matters for honest reporting:
   FAIL  it used only things we claim to support, and we got it wrong
 
 Only FAIL is a defect. A SKIP is a scope boundary.
+
+`--utscapy` runs a file the way UTscapy does: one namespace shared by every
+test in it, so a helper or capture defined by one test is there for the next,
+and `scapy.<module>` resolves to wiry's counterpart while any other scapy
+import fails. The default gives each test a fresh namespace and leaves real
+scapy importable, which is what the published baselines were measured with.
 """
 
+import importlib
+import importlib.abc
 import re
 import sys
 import traceback
+import types
 from pathlib import Path
 
 import wiry
@@ -124,12 +133,81 @@ def classify_error(exc, supported):
     return "fail", text
 
 
-def run(path, verbose=False, limit=None):
+# scapy module -> the wiry module standing in for it under --utscapy.
+SCAPY_ALIASES = {
+    "scapy.all": "wiry",
+    "scapy.ansmachine": "wiry.ansmachine",
+    "scapy.automaton": "wiry.automaton",
+    "scapy.supersocket": "wiry.supersocket",
+    "scapy.sendrecv": "wiry.sendrecv",
+    "scapy.utils": "wiry.utils",
+    "scapy.utils6": "wiry.utils6",
+    "scapy.data": "wiry.data",
+    "scapy.plist": "wiry.plist",
+    "scapy.config": "wiry.config",
+    "scapy.compat": "wiry.compat",
+    "scapy.error": "wiry.error",
+    "scapy.consts": "wiry.consts",
+    "scapy.pton_ntop": "wiry.compat",
+    "scapy.volatile": "wiry.volatile",
+    "scapy.route": "wiry.route",
+}
+
+
+class _NoScapy(importlib.abc.MetaPathFinder):
+    """Refuse every scapy module wiry does not stand in for, so a test cannot
+    pass by quietly running scapy itself."""
+
+    def find_spec(self, name, path=None, target=None):
+        if name == "scapy" or name.startswith("scapy."):
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return None
+
+
+def _install_aliases():
+    saved = {k: v for k, v in sys.modules.items()
+             if k == "scapy" or k.startswith("scapy.")}
+    for k in saved:
+        del sys.modules[k]
+    pkg = types.ModuleType("scapy")
+    pkg.__path__ = []
+    pkg.VERSION = pkg.__version__ = wiry.__version__
+    sys.modules["scapy"] = pkg
+    for alias, real in SCAPY_ALIASES.items():
+        try:
+            mod = importlib.import_module(real)
+        except ImportError:
+            continue
+        sys.modules[alias] = mod
+        setattr(pkg, alias.split(".", 1)[1], mod)
+    finder = _NoScapy()
+    sys.meta_path.insert(0, finder)
+
+    def restore():
+        sys.meta_path.remove(finder)
+        for k in [k for k in sys.modules if k == "scapy" or k.startswith("scapy.")]:
+            del sys.modules[k]
+        sys.modules.update(saved)
+
+    return restore
+
+
+def run(path, verbose=False, limit=None, utscapy=False):
     supported = set(dir(wiry))
     results = {"pass": 0, "skip": 0, "fail": 0}
     failures = []
     skips = {}
+    shared = namespace() if utscapy else None
+    restore = _install_aliases() if utscapy else None
+    try:
+        _run(path, verbose, limit, supported, results, failures, skips, shared)
+    finally:
+        if restore is not None:
+            restore()
+    return results, failures, skips
 
+
+def _run(path, verbose, limit, supported, results, failures, skips, shared):
     for i, (campaign, name, kw, code) in enumerate(parse_uts(path)):
         if limit and i >= limit:
             break
@@ -150,7 +228,7 @@ def run(path, verbose=False, limit=None):
                 f"uses {sorted(blocked)[0]}", 0) + 1
             continue
 
-        ns = namespace()
+        ns = namespace() if shared is None else shared
         try:
             exec(compile(code, f"<{name}>", "exec"), ns)
             results["pass"] += 1
@@ -171,14 +249,14 @@ def run(path, verbose=False, limit=None):
             else:
                 skips[why] = skips.get(why, 0) + 1
 
-    return results, failures, skips
-
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if not args:
         sys.exit(__doc__)
-    target = sys.argv[1]
+    target = args[0]
     verbose = "-v" in sys.argv
+    utscapy = "--utscapy" in sys.argv
 
     files = [target]
     if Path(target).is_dir():
@@ -189,7 +267,7 @@ if __name__ == "__main__":
     all_skips = {}
 
     for f in files:
-        r, fails, skips = run(f, verbose)
+        r, fails, skips = run(f, verbose, utscapy=utscapy)
         print(f"{Path(f).name:28} pass {r['pass']:4}  skip {r['skip']:4}  "
               f"fail {r['fail']:4}")
         for k in total:
