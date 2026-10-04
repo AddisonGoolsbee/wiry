@@ -23,29 +23,29 @@ pub fn repr_of(layer: &str, field: &str) -> Repr {
         "ARP" => match field {
             "hwtype" => Repr::Hex,
             "ptype" => Repr::Hex,
-            "hwsrc" => Repr::Bytes,
-            "psrc" => Repr::Bytes,
-            "hwdst" => Repr::Bytes,
-            "pdst" => Repr::Bytes,
+            "hwsrc" => Repr::FixedBytes,
+            "psrc" => Repr::FixedBytes,
+            "hwdst" => Repr::FixedBytes,
+            "pdst" => Repr::FixedBytes,
             _ => Repr::Auto,
         },
         "BOOTP" => match field {
             "xid" => Repr::Hex,
-            "chaddr" => Repr::Bytes,
-            "sname" => Repr::Bytes,
-            "file" => Repr::Bytes,
+            "chaddr" => Repr::Chaddr,
+            "sname" => Repr::FixedBytes,
+            "file" => Repr::FixedBytes,
             _ => Repr::Auto,
         },
         "CookedLinux" => match field {
             "lladdrtype" => Repr::Hex,
-            "src" => Repr::Bytes,
+            "src" => Repr::FixedBytes,
             "proto" => Repr::Hex,
             _ => Repr::Auto,
         },
         "CookedLinuxV2" => match field {
             "proto" => Repr::Hex,
             "lladdrtype" => Repr::Hex,
-            "src" => Repr::Bytes,
+            "src" => Repr::FixedBytes,
             _ => Repr::Auto,
         },
         "DHCP6" => match field {
@@ -72,15 +72,15 @@ pub fn repr_of(layer: &str, field: &str) -> Repr {
             _ => Repr::Auto,
         },
         "HSRP" => match field {
-            "auth" => Repr::Bytes,
+            "auth" => Repr::FixedBytes,
             _ => Repr::Auto,
         },
         "ICMP" => match field {
             "chksum" => Repr::Hex,
             "id" => Repr::Hex,
             "seq" => Repr::Hex,
-            "unused" => Repr::Bytes,
-            "extpad" => Repr::Bytes,
+            "unused" => Repr::FixedBytes,
+            "extpad" => Repr::FixedBytes,
             _ => Repr::Auto,
         },
         "ICMPv6MLDone" => match field {
@@ -126,6 +126,10 @@ pub fn repr_of(layer: &str, field: &str) -> Repr {
             "chksum" => Repr::Hex,
             _ => Repr::Auto,
         },
+        "IPv6ExtHdrRouting" => match field {
+            "addresses" => Repr::Ip6List,
+            _ => Repr::Auto,
+        },
         "LLC" => match field {
             "dsap" => Repr::Hex,
             "ssap" => Repr::Hex,
@@ -153,7 +157,7 @@ pub fn repr_of(layer: &str, field: &str) -> Repr {
             _ => Repr::Auto,
         },
         "Radius" => match field {
-            "authenticator" => Repr::Bytes,
+            "authenticator" => Repr::HexBytes,
             _ => Repr::Auto,
         },
         "Raw" => match field {
@@ -172,6 +176,13 @@ pub fn repr_of(layer: &str, field: &str) -> Repr {
         "SNAP" => match field {
             "OUI" => Repr::Hex,
             "code" => Repr::Hex,
+            _ => Repr::Auto,
+        },
+        "STP" => match field {
+            "age" => Repr::Bcd,
+            "maxage" => Repr::Bcd,
+            "hellotime" => Repr::Bcd,
+            "fwddelay" => Repr::Bcd,
             _ => Repr::Auto,
         },
         "TCP" => match field {

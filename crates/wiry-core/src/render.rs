@@ -22,12 +22,23 @@ use crate::render_tables as tbl;
 
 /// How one field's value prints when it has no enumerated name. `Auto` keeps
 /// what the `FieldKind` gives: an address, a flag string, a decimal integer.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Repr {
     Auto,
     Hex,
     Bytes,
+    /// `StrFixedLenField`: trailing NULs are not shown.
+    FixedBytes,
+    /// `XStrField` and kin: the octets as bare hex digits.
+    HexBytes,
     Utc,
+    /// `BCDFloatField`: 8.8 fixed point, shown as a float.
+    Bcd,
+    /// BOOTP's `chaddr`: a MAC address and what pads it to sixteen octets.
+    Chaddr,
+    /// `IP6ListField`: addresses inside `[ ... ]`; an empty list is omitted
+    /// from `repr()` as every empty list is.
+    Ip6List,
 }
 
 fn lookup(t: &[(u64, &'static str)], v: u64) -> Option<&'static str> {
@@ -143,8 +154,46 @@ impl<'a> View<'a> {
         match (tbl::repr_of(layer, f.name), n, &v) {
             (Repr::Hex, Some(n), _) => format!("0x{n:x}"),
             (Repr::Utc, Some(n), _) => utc(n),
-            (Repr::Bytes, _, FieldValue::Bytes(b)) => py_bytes(b),
+            (Repr::Bcd, Some(n), _) => py_float(n as f64 / 256.0),
+            (Repr::FixedBytes, _, FieldValue::Bytes(b)) => {
+                let end = b.iter().rposition(|c| *c != 0).map_or(0, |i| i + 1);
+                py_bytes(&b[..end])
+            }
+            (Repr::HexBytes, _, FieldValue::Bytes(b)) => {
+                b.iter().map(|c| format!("{c:02x}")).collect()
+            }
+            (Repr::Chaddr, _, FieldValue::Bytes(b)) => self.chaddr(i, b),
+            (Repr::Ip6List, _, FieldValue::Bytes(b)) => {
+                let list: Vec<String> = b
+                    .chunks_exact(16)
+                    .map(|c| {
+                        let mut a = [0u8; 16];
+                        a.copy_from_slice(c);
+                        crate::show::render_ipv6(&a)
+                    })
+                    .collect();
+                format!("[ {} ]", list.join(", "))
+            }
+            (_, _, FieldValue::Bytes(b)) => py_bytes(b),
             _ => render_value(&v),
+        }
+    }
+
+    /// `_BOOTP_chaddr.i2repr`: over Ethernet, the address and then its padding.
+    fn chaddr(&self, i: usize, b: &[u8]) -> String {
+        if self.uint(i, "htype") != Some(1) || b.len() < 6 {
+            let end = b.iter().rposition(|c| *c != 0).map_or(0, |i| i + 1);
+            return py_bytes(&b[..end]);
+        }
+        let mac = b[..6]
+            .iter()
+            .map(|c| format!("{c:02x}"))
+            .collect::<Vec<_>>()
+            .join(":");
+        if b[6..] == [0u8; 10] {
+            format!("{mac} (+ 10 nul pad)")
+        } else {
+            format!("{mac} (pad: {})", py_bytes(&b[6..]))
         }
     }
 
@@ -240,6 +289,17 @@ fn dhcp_options_repr(items: &[crate::options::Item]) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     format!("[{body}]")
+}
+
+/// Python's `repr()` of a float that holds a value of at most 24 significant
+/// bits, which is every one a `BCDFloatField` can produce.
+fn py_float(x: f64) -> String {
+    let s = format!("{x}");
+    if s.contains('.') || s.contains('e') || s.contains("inf") || s.contains("NaN") {
+        s
+    } else {
+        s + ".0"
+    }
 }
 
 /// Python's `repr()` of a str.
@@ -706,7 +766,9 @@ fn question_sub(q: &crate::layers::dns::Question) -> Sub {
     }
 }
 
-fn record_sub(rr: &crate::layers::dns::ResourceRecord, rdlen: usize) -> Sub {
+/// scapy recomputes `rdlen` on build, so a dissected record holds `None` for
+/// it: `show()` prints that and `repr()` leaves it out.
+fn record_sub(rr: &crate::layers::dns::ResourceRecord) -> Sub {
     Sub {
         name: "DNSRR",
         fields: vec![
@@ -715,7 +777,7 @@ fn record_sub(rr: &crate::layers::dns::ResourceRecord, rdlen: usize) -> Sub {
             ("cacheflush", (rr.rclass >> 15).to_string()),
             ("rclass", class_name(rr.rclass)),
             ("ttl", rr.ttl.to_string()),
-            ("rdlen", rdlen.to_string()),
+            ("rdlen", "None".to_string()),
             ("rdata", rdata_str(&rr.rdata)),
         ],
     }
@@ -732,28 +794,14 @@ fn dns_sections(v: &View, i: usize) -> Option<Vec<(&'static str, Vec<Sub>)>> {
     let n = framing_at(v.spans, i);
     let body = v.buf.get((s.off as usize + n).min(v.buf.len())..)?;
     let recs = crate::layers::dns::parse_records(body);
-    let rrs = |l: &[crate::layers::dns::ResourceRecord]| {
-        l.iter()
-            .map(|rr| record_sub(rr, rdlen_of(rr)))
-            .collect::<Vec<_>>()
-    };
+    let rrs =
+        |l: &[crate::layers::dns::ResourceRecord]| l.iter().map(record_sub).collect::<Vec<_>>();
     Some(vec![
         ("qd", recs.qd.iter().map(question_sub).collect()),
         ("an", rrs(&recs.an)),
         ("ns", rrs(&recs.ns)),
         ("ar", rrs(&recs.ar)),
     ])
-}
-
-fn rdlen_of(rr: &crate::layers::dns::ResourceRecord) -> usize {
-    use crate::layers::dns::RData;
-    match &rr.rdata {
-        RData::A(_) => 4,
-        RData::Aaaa(_) => 16,
-        RData::Name(n) => n.len() + 1,
-        RData::Other(b) => b.len(),
-        _ => 0,
-    }
 }
 
 /// True where this layer's payload is already displayed as part of it.
@@ -777,6 +825,9 @@ fn empty_list(v: &View, i: usize, f: &FieldDesc) -> bool {
     let Some(s) = v.spans.get(i) else {
         return false;
     };
+    if tbl::repr_of(v.name_of(i), f.name) == Repr::Ip6List {
+        return matches!(v.value(i, f), FieldValue::Bytes(b) if b.is_empty());
+    }
     proto::parsed_field_name(s.proto) == f.name
         && crate::packet::options_at(v.buf, v.spans, i).map_or(true, |items| items.is_empty())
 }
@@ -809,7 +860,8 @@ fn given_or_overloaded(v: &View, given: Option<Given>, i: usize, name: &str) -> 
 
 fn sub_repr(s: &Sub) -> String {
     let mut out = format!("<{} ", s.name);
-    for (n, v) in &s.fields {
+    // A dissected record does not hold its `rdlen`; see `record_sub`.
+    for (n, v) in s.fields.iter().filter(|(n, _)| *n != "rdlen") {
         out.push_str(&format!(" {n}={v}"));
     }
     out.push_str(" |>");

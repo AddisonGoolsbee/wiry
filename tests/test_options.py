@@ -38,6 +38,7 @@ def test_reads_a_realistic_syn_option_block():
         ("SAckOK", None),
         ("NOP", None),
         ("WScale", 7),
+        ("EOL", None),
     ]
 
 
@@ -72,20 +73,22 @@ def test_a_layer_without_an_option_region_reports_none_shaped_result():
         _ = pkt[Ether].options
 
 
+# Padding to a whole word is EOL octets, and the first reads back as an
+# option, as scapy reads it; a region that fills its words has none.
 @pytest.mark.parametrize(
-    "opts",
+    "opts, padded",
     [
-        [("MSS", 1460)],
-        [("MSS", 1460), ("SAckOK", None)],
-        [("MSS", 1460), ("SAckOK", None), ("NOP", None), ("WScale", 7)],
-        [("Timestamp", (111, 222))],
-        [("WScale", 7)],
+        ([("MSS", 1460)], False),
+        ([("MSS", 1460), ("SAckOK", None)], True),
+        ([("MSS", 1460), ("SAckOK", None), ("NOP", None), ("WScale", 7)], True),
+        ([("Timestamp", (111, 222))], True),
+        ([("WScale", 7)], True),
     ],
 )
-def test_written_options_read_back_identically(opts):
+def test_written_options_read_back_identically(opts, padded):
     pkt = Ether() / IP(dst="10.0.0.1") / TCP(dport=443, options=opts)
     back = Ether(bytes(pkt))
-    assert back[TCP].options == opts
+    assert back[TCP].options == opts + [("EOL", None)] * padded
 
 
 def test_writing_options_updates_the_data_offset():

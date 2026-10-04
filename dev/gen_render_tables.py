@@ -59,12 +59,14 @@ KIND = {
     "XLEShortField": "hex",
     "StrField": "bytes",
     "StrLenField": "bytes",
-    "StrFixedLenField": "bytes",
-    "XStrField": "bytes",
-    "XStrLenField": "bytes",
-    "XStrFixedLenField": "bytes",
+    "StrFixedLenField": "fixed_bytes",
+    "XStrField": "hex_bytes",
+    "XStrLenField": "hex_bytes",
+    "XStrFixedLenField": "hex_bytes",
     "StrNullField": "bytes",
-    "_BOOTP_chaddr": "bytes",
+    "_BOOTP_chaddr": "chaddr",
+    "BCDFloatField": "bcd",
+    "IP6ListField": "ip6_list",
     "OUIField": "hex",
     "UTCTimeField": "utc",
 }
@@ -153,7 +155,7 @@ def main():
                 unknown.add(name)
                 continue
             if kind != "auto":
-                rows.append((f.name, "Repr::%s" % kind.capitalize()))
+                rows.append((f.name, "Repr::%s" % kind.title().replace("_", "")))
         if rows:
             entries[layer] = rows
 

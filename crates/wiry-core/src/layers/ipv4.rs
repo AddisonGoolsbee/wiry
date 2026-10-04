@@ -237,8 +237,9 @@ mod tests {
         assert_eq!(p.get(ip, "ihl").unwrap(), FieldValue::Uint(8));
         assert_eq!(p.header(ip).len(), 32);
         let items = p.options(ip).unwrap();
-        assert_eq!(items.len(), 1);
+        assert_eq!(items.len(), 2);
         assert_eq!(items[0].name.as_ref(), "RR");
+        assert_eq!(items[1].name.as_ref(), "EOL");
         assert_eq!(items[0].code, 7);
         assert_eq!(
             items[0].value,
@@ -328,7 +329,7 @@ mod tests {
             let p = Packet::dissect(full[..cut].to_vec(), ProtoId::Ether);
             if let Some(ip) = p.find_layer(ProtoId::Ipv4) {
                 let items = p.options(ip).expect("ipv4 has an option region");
-                assert!(items.len() <= 1, "cut {cut} produced {items:?}");
+                assert!(items.len() <= 2, "cut {cut} produced {items:?}");
             }
         }
         let mut hdr = ip_hdr(RA_OPTS, 0);

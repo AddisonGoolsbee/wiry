@@ -266,8 +266,9 @@ mod tests {
         // RFC 9293 §3.1: EOL terminates and the padding after it is not decoded.
         let opts = &[0x03, 0x03, 0x07, 0x00, 0x02, 0x04, 0x05, 0xb4];
         let items = parse_options(&tcp_hdr(opts));
-        assert_eq!(items.len(), 1);
+        assert_eq!(items.len(), 2);
         assert_eq!(items[0].name.as_ref(), "WScale");
+        assert_eq!(items[1].name.as_ref(), "EOL");
 
         let mut hdr = tcp_hdr(SYN_OPTS);
         hdr[12] = 0x40;
@@ -283,7 +284,7 @@ mod tests {
             0x22, 0x04, 0xc0, 0xff, 0x00, 0x00,
         ];
         let items = parse_options(&tcp_hdr(opts));
-        assert_eq!(items.len(), 4);
+        assert_eq!(items.len(), 5);
         assert_eq!(items[0].name.as_ref(), "SAck");
         assert_eq!(items[0].value, ItemValue::Pairs(vec![(1, 2)]));
         assert_eq!(items[1], Item::uint("UTO", 28, 0x800a));

@@ -179,6 +179,21 @@ fn is_unstructured(hdr: &[u8]) -> bool {
     !(has_id_seq(hdr) || is_redirect(hdr) || is_param_problem(hdr) || is_error(hdr))
 }
 
+/// scapy declares `unused` for every type: four octets where nothing else is
+/// defined, the two after `length` on a time-exceeded or parameter problem,
+/// and a zero-width string on the rest. The two narrower shapes are here so a
+/// field read and a rendering agree with it.
+fn has_short_unused(hdr: &[u8]) -> bool {
+    matches!(msg_type(hdr), TIME_EXCEEDED | PARAM_PROBLEM)
+}
+
+fn has_empty_unused(hdr: &[u8]) -> bool {
+    matches!(
+        msg_type(hdr),
+        ECHO_REPLY | DEST_UNREACH | REDIRECT | ECHO_REQUEST | TIMESTAMP..=ADDR_MASK_REPLY
+    )
+}
+
 /// RFC 4884 §7 puts the extension structure after the quoted datagram, which
 /// this model treats as payload. The names are interface only.
 fn never(_: &[u8]) -> bool {
@@ -201,7 +216,11 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::ipv4("addr_mask", 64, 0).when(is_addr_mask),
     FieldDesc::uint("nexthopmtu", 48, 16, 0).when(is_unreach),
     FieldDesc::uint("unused", 32, 32, 0).when(is_unstructured),
-    FieldDesc::var_bytes("extpad", 64).when(never),
+    FieldDesc::uint("unused", 48, 16, 0).when(has_short_unused),
+    FieldDesc::bytes("unused", 64, 0).when(has_empty_unused),
+    // RFC 4884 §7 padding sits after the quoted datagram; what the header
+    // itself holds of it is nothing.
+    FieldDesc::bytes("extpad", 64, 0).when(has_ext_length),
     FieldDesc::var_bytes("ext", 64).when(never),
 ];
 
@@ -294,16 +313,12 @@ mod tests {
     fn echo_request_has_id_and_seq_only() {
         let p = Packet::dissect(echo_request(), ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
-        assert_eq!(active(&p, i), ["type", "code", "chksum", "id", "seq"]);
-        for absent in [
-            "gw",
-            "ptr",
-            "reserved",
-            "length",
-            "unused",
-            "ts_ori",
-            "addr_mask",
-        ] {
+        assert_eq!(
+            active(&p, i),
+            ["type", "code", "chksum", "id", "seq", "unused"]
+        );
+        assert_eq!(p.get(i, "unused").unwrap(), FieldValue::Bytes(vec![]));
+        for absent in ["gw", "ptr", "reserved", "length", "ts_ori", "addr_mask"] {
             assert_eq!(p.get(i, absent), None, "{absent} should be absent");
         }
     }
@@ -314,7 +329,7 @@ mod tests {
         let bytes = vec![0x05, 0x01, 0x00, 0x00, 10, 0, 0, 1];
         let p = Packet::dissect(bytes, ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
-        assert_eq!(active(&p, i), ["type", "code", "chksum", "gw"]);
+        assert_eq!(active(&p, i), ["type", "code", "chksum", "gw", "unused"]);
         assert_eq!(p.get(i, "gw").unwrap(), FieldValue::Ipv4([10, 0, 0, 1]));
         assert_eq!(p.get(i, "id"), None);
         assert_eq!(p.get(i, "seq"), None);
@@ -330,7 +345,16 @@ mod tests {
         let i = p.find_layer(ProtoId::Icmp).unwrap();
         assert_eq!(
             active(&p, i),
-            ["type", "code", "chksum", "reserved", "length", "nexthopmtu"]
+            [
+                "type",
+                "code",
+                "chksum",
+                "reserved",
+                "length",
+                "nexthopmtu",
+                "unused",
+                "extpad"
+            ]
         );
         assert_eq!(p.get(i, "length").unwrap(), FieldValue::Uint(5));
         assert_eq!(p.get(i, "nexthopmtu").unwrap(), FieldValue::Uint(1500));
@@ -346,7 +370,7 @@ mod tests {
         let i = p.find_layer(ProtoId::Icmp).unwrap();
         assert_eq!(
             active(&p, i),
-            ["type", "code", "chksum", "reserved", "length"]
+            ["type", "code", "chksum", "reserved", "length", "unused", "extpad"]
         );
         assert_eq!(p.get(i, "nexthopmtu"), None);
     }
@@ -356,7 +380,10 @@ mod tests {
         let bytes = vec![0x0c, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00];
         let p = Packet::dissect(bytes, ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
-        assert_eq!(active(&p, i), ["type", "code", "chksum", "ptr", "length"]);
+        assert_eq!(
+            active(&p, i),
+            ["type", "code", "chksum", "ptr", "length", "unused", "extpad"]
+        );
         assert_eq!(p.get(i, "ptr").unwrap(), FieldValue::Uint(20));
         assert_eq!(p.get(i, "reserved"), None);
     }
@@ -377,7 +404,7 @@ mod tests {
         assert_eq!(p.header(i).len(), 20);
         assert_eq!(
             active(&p, i),
-            ["type", "code", "chksum", "id", "seq", "ts_ori", "ts_rx", "ts_tx"]
+            ["type", "code", "chksum", "id", "seq", "ts_ori", "ts_rx", "ts_tx", "unused"]
         );
         assert_eq!(p.get(i, "id").unwrap(), FieldValue::Uint(7));
         assert_eq!(p.get(i, "seq").unwrap(), FieldValue::Uint(9));
@@ -420,7 +447,7 @@ mod tests {
         let p = Packet::dissect(bytes, ProtoId::Icmp);
         let i = p.find_layer(ProtoId::Icmp).unwrap();
         assert_eq!(p.get(i, "ext"), None);
-        assert_eq!(p.get(i, "extpad"), None);
+        assert_eq!(p.get(i, "extpad").unwrap(), FieldValue::Bytes(vec![]));
     }
 
     #[test]
