@@ -396,6 +396,10 @@ impl ProtoId {
     pub const DceRpc5Version: ProtoId = ProtoId(6509);
     pub const DceRpc5Auth3: ProtoId = ProtoId(6513);
     pub const NDRSerialization1Header: ProtoId = ProtoId(6526);
+    pub const MSCHAP2Response: ProtoId = ProtoId(6595);
+    pub const MSCHAP2Success: ProtoId = ProtoId(6596);
+    pub const MSCHAPError: ProtoId = ProtoId(6597);
+    pub const MSCHAPDomain: ProtoId = ProtoId(6598);
     pub const MobileIP: ProtoId = ProtoId(6600);
     pub const MobileIPRRQ: ProtoId = ProtoId(6601);
     pub const MobileIPRRP: ProtoId = ProtoId(6602);
@@ -855,6 +859,10 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::DceRpc5Version,
     ProtoId::DceRpc5Auth3,
     ProtoId::NDRSerialization1Header,
+    ProtoId::MSCHAP2Response,
+    ProtoId::MSCHAP2Success,
+    ProtoId::MSCHAPError,
+    ProtoId::MSCHAPDomain,
     ProtoId::MobileIP,
     ProtoId::MobileIPRRQ,
     ProtoId::MobileIPRRP,
@@ -1341,6 +1349,10 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::DceRpc5Version.0 as usize] = &dcerpc_dcerpc5version::DESC;
     t[ProtoId::DceRpc5Auth3.0 as usize] = &dcerpc_dcerpc5auth3::DESC;
     t[ProtoId::NDRSerialization1Header.0 as usize] = &dcerpc_ndrserialization1header::DESC;
+    t[ProtoId::MSCHAP2Response.0 as usize] = &radius_ms_chap2_response::DESC;
+    t[ProtoId::MSCHAP2Success.0 as usize] = &radius_ms_chap2_success::DESC;
+    t[ProtoId::MSCHAPError.0 as usize] = &radius_ms_chap_error::DESC;
+    t[ProtoId::MSCHAPDomain.0 as usize] = &radius_ms_chap_domain::DESC;
     t[ProtoId::MobileIP.0 as usize] = &mobileip_mobileip::DESC;
     t[ProtoId::MobileIPRRQ.0 as usize] = &mobileip_mobileiprrq::DESC;
     t[ProtoId::MobileIPRRP.0 as usize] = &mobileip_mobileiprrp::DESC;
