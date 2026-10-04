@@ -90,6 +90,7 @@ per-file blocks are authoritative.
 | `crates/wiry-core/src/layers/netflow9.rs` | `scapy/layers/netflow.py` | scapy 2.7.0 | 2026-09-18 |
 | `crates/wiry-core/src/layers/rtp.rs` | `scapy/layers/rtp.py` | scapy 2.7.0 | 2026-09-18 |
 | `crates/wiry-core/src/layers/sctp.rs` | `scapy/layers/sctp.py` | scapy 2.7.0 | 2026-09-18 |
+| `crates/wiry-core/src/layers/snmp.rs` | `scapy/layers/snmp.py` (field and class names) | master / `e2e35c0` | 2026-10-03 |
 | `crates/wiry-pcap/src/sys.rs` | `scapy/libs/winpcapy.py`, `scapy/libs/structures.py` | 2.7.0 / `7d69454` | 2026-09-18 |
 | `crates/wiry-pcap/src/lib.rs` | `scapy/libs/winpcapy.py`, `scapy/arch/libpcap.py` | 2.7.0 / `7d69454` | 2026-09-18 |
 | `crates/wiry-capture/src/pcap_backend.rs` | `scapy/interfaces.py` | 2.7.0 / `7d69454` | 2026-09-18 |
