@@ -54,7 +54,6 @@ def _frames(pkts: List[Any]) -> Any:
         links.add(_LINKTYPE_OF.get(names[0]) if names else None)
         frames.append((bytes(p), float(getattr(p, "time", 0) or 0),
                        int(getattr(p, "wirelen", 0) or 0)))
-    links.discard(None) if len(links) > 1 and None in links and len(links - {None}) == 1 else None
     if len(links) > 1 or None in links:
         raise ValueError(
             "this needs every packet in the list to start with the same link "
@@ -85,14 +84,17 @@ class PacketList:
     turns it into a Python list first.
     """
 
-    __slots__ = ("_rust", "_res", "listname", "stats")
+    __slots__ = ("_rust", "_res", "listname", "stats", "_meta", "_offs")
 
     def __init__(self, res: Any = None, name: str = "PacketList",
                  stats: Optional[list] = None):
+        self._meta: Optional[_NgMeta] = None
+        self._offs: Optional[List[int]] = None
         if isinstance(res, _b.PktList):
             self._rust, self._res = res, None
         elif isinstance(res, PacketList):
             self._rust, self._res = res._rust, res._res
+            self._meta = res._meta
         else:
             self._rust = None
             if res is None:
@@ -145,8 +147,14 @@ class PacketList:
 
     def _view(self, idx: List[int], name: str) -> "PacketList":
         if self._rust is not None:
-            return self.__class__(self._rust.view(idx), name=name, stats=self.stats)
+            return self._sharing(self._rust.view(idx), name)
         return self.__class__([self._res[i] for i in idx], name=name, stats=self.stats)
+
+    def _sharing(self, rust: Any, name: str) -> "PacketList":
+        """A view over part of this capture, keeping its pcapng annotations."""
+        out = self.__class__(rust, name=name, stats=self.stats)
+        out._meta = self._meta
+        return out
 
     def __getitem__(self, item: Any) -> Any:
         if _is_layer(item):
@@ -161,7 +169,12 @@ class PacketList:
         if self._rust is None:
             return self._res[item]
         rust = self._rust[item]
-        return Packet(_rust=rust, time=rust.time, wirelen=rust.wirelen)
+        pkt = Packet(_rust=rust, time=rust.time, wirelen=rust.wirelen)
+        if self._meta is not None:
+            if self._offs is None:
+                self._offs = [r[0] for r in self._rust.index()]
+            self._meta.apply(pkt, self._offs[item])
+        return pkt
 
     def __setitem__(self, item: Any, value: Any) -> None:
         self._own()[item] = value
@@ -265,7 +278,9 @@ class PacketList:
         from . import _as_layer_and_where
         from .columnar import filter_packets
         layer, where = _as_layer_and_where(layer, where)
-        return filter_packets(self, layer, where)
+        out = filter_packets(self, layer, where)
+        out._meta = self._meta
+        return out
 
     def filter_indices(self, layer: Any = None, where: Any = None) -> List[int]:
         from . import _as_layer_and_where
@@ -275,7 +290,7 @@ class PacketList:
 
     def head(self, n: int) -> "PacketList":
         if self._rust is not None:
-            return PacketList(self._rust.head(n))
+            return self._sharing(self._rust.head(n), self.listname)
         return self.__class__(self._res[:n], name=self.listname, stats=self.stats)
 
     def sprintf(self, fmt: str) -> List[str]:
@@ -672,6 +687,35 @@ class PacketList:
 
     def svgdump(self, filename: Optional[str] = None, **kargs: Any) -> None:
         self._document(filename, ".svg", "writeSVGfile", "svgreader", **kargs)
+
+
+class _NgMeta:
+    """A pcapng capture's per-packet annotations, read from the file the
+    first time a packet is minted from it. The bulk paths never ask, so a
+    capture that is only queried never pays for the walk."""
+
+    __slots__ = ("_rust", "_table")
+
+    def __init__(self, rust: Any):
+        self._rust = rust
+        self._table: Optional[Dict[int, tuple]] = None
+
+    def table(self) -> Dict[int, tuple]:
+        if self._table is None:
+            from .pcapio import pcapng_metadata
+
+            self._table = pcapng_metadata(self._rust.blob())
+            self._rust = None
+        return self._table
+
+    def annotated(self) -> bool:
+        return any(m[5] or m[6] is not None or m[7] is not None or m[8]
+                   for m in self.table().values())
+
+    def apply(self, pkt: Any, off: int) -> None:
+        from .pcapio import _annotate
+
+        _annotate(pkt, self.table().get(off))
 
 
 def _dot(s: Any) -> str:

@@ -1357,6 +1357,12 @@ impl PyPktList {
         }
     }
 
+    /// The whole buffer the index points into: for a list read from a file,
+    /// the file itself, which is where pcapng keeps per-packet options.
+    fn blob<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new_bound(py, &self.buf)
+    }
+
     /// A capture assembled from frames already in hand: `(octets, time,
     /// wirelen)` each, one link type for all. Times are kept to the
     /// nanosecond and clamped into what a capture record can hold.

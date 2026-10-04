@@ -405,15 +405,39 @@ class RawPcapNgReader(RawPcapReader):
                     direction=direction, process_information=dict(proc)))
 
 
+def _annotate(pkt: Any, meta: Optional[tuple]) -> None:
+    """What scapy's PcapNgReader sets on a packet from its record."""
+    if meta is None:
+        return
+    _, _, _, _, _, comments, ifname, direction, proc = meta
+    pkt.comments = comments
+    pkt.direction = direction
+    pkt.process_information = dict(proc)
+    if ifname is not None:
+        pkt.sniffed_on = ifname.decode("utf-8", "backslashreplace")
+
+
+def pcapng_metadata(blob: bytes) -> Dict[int, tuple]:
+    """Each record's annotations — interface name, comments, direction,
+    process — keyed by the offset of its data in ``blob``, a whole pcapng
+    file. The same walk the readers make."""
+    walker = RawPcapNgReader.__new__(RawPcapNgReader)
+    walker.endian = "<"
+    walker.interfaces = []
+    walker.default_options = {"tsresol": 1000000}
+    walker.process_information = []
+    walker._meta = {}
+    walker._walk(blob)
+    return walker._meta
+
+
 class PcapNgReader(RawPcapNgReader, PcapReader):
     alternative = PcapReader
 
     def read_packet(self, size: int = _MTU, **kwargs: Any) -> Any:
         i = self._next_index()
         pkt = PacketList(self._rust)[i]
-        meta = self._meta.get(self._index[i][0])
-        if meta is not None and meta[6] is not None:
-            pkt.sniffed_on = meta[6].decode("utf-8", "backslashreplace")
+        _annotate(pkt, self._meta.get(self._index[i][0]))
         return pkt
 
 

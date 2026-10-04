@@ -11,6 +11,10 @@ pub mod linktype {
     pub const NULL: u32 = 0;
     pub const ETHERNET: u32 = 1;
     pub const RAW: u32 = 101;
+    /// DLT_RAW as BSD numbered it before LINKTYPE_RAW existed: 12, or 14 on
+    /// OpenBSD. Files written with either still turn up.
+    pub const DLT_RAW: u32 = 12;
+    pub const DLT_RAW_OPENBSD: u32 = 14;
     /// DLT_NULL with the address family in network byte order.
     pub const LOOP: u32 = 108;
     pub const LINUX_SLL: u32 = 113;
@@ -28,7 +32,9 @@ pub fn link_to_proto(lt: u32) -> ProtoId {
         linktype::NULL | linktype::LOOP => ProtoId::Null,
         linktype::LINUX_SLL => ProtoId::LinuxSll,
         linktype::LINUX_SLL2 => ProtoId::LinuxSll2,
-        linktype::IPV4 | linktype::RAW => ProtoId::Ipv4,
+        linktype::IPV4 | linktype::RAW | linktype::DLT_RAW | linktype::DLT_RAW_OPENBSD => {
+            ProtoId::Ipv4
+        }
         linktype::IPV6 => ProtoId::Ipv6,
         linktype::IEEE802_11 => ProtoId::Dot11,
         linktype::IEEE802_11_RADIO => ProtoId::RadioTap,

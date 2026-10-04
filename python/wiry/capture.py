@@ -42,6 +42,7 @@ from typing import Any, Callable, Optional
 from . import Packet, PacketList, _as_path, expand
 from . import _wiry as _b
 from .columnar import _normalize_where
+from .error import Scapy_Exception
 from .error import log_runtime as _log
 
 CaptureUnavailable = _b.CaptureUnavailable
@@ -387,6 +388,29 @@ def _add_session(args: dict, session: Any, store: Any) -> None:
     args["wrap"], args["lfilter"] = wrap, keep
 
 
+class BadFilter(Scapy_Exception, ValueError):
+    """A BPF expression libpcap would not compile."""
+
+
+def _filter_errors(fn: Callable) -> Callable:
+    """scapy raises its own exception for a filter that does not compile;
+    the ValueError base keeps ``except ValueError`` callers working."""
+    import functools
+
+    @functools.wraps(fn)
+    def call(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except ValueError as exc:
+            if str(exc).startswith("invalid capture filter") and \
+                    not isinstance(exc, BadFilter):
+                raise BadFilter(str(exc)) from exc
+            raise
+
+    return call
+
+
+@_filter_errors
 def sniff(
     *,
     iface: Any = None,
@@ -666,7 +690,7 @@ class AsyncSniffer:
                     )
                 live_args = _live_args(**kwargs)
                 _add_session(live_args, session, kwargs.get("store", 1))
-                live = _b.LiveSniffer(**live_args)
+                live = _filter_errors(_b.LiveSniffer)(**live_args)
                 live.start()
                 self._live = live
                 self._started = True

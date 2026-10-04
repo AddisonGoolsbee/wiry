@@ -609,7 +609,7 @@ class Packet(metaclass=_PacketMeta):
     _name: str | None = None
 
     __slots__ = ("_stack", "_payload", "_rust", "_written", "time", "wirelen",
-                 "sent_time", "sniffed_on", "comment", "direction",
+                 "sent_time", "sniffed_on", "comments", "direction",
                  "process_information")
 
     def __init__(
@@ -628,11 +628,20 @@ class Packet(metaclass=_PacketMeta):
         self.wirelen = wirelen
         self.sent_time = None
         self.sniffed_on = None
-        self.comment = None
+        self.comments = None
         self.direction = None
         self.process_information = None
         if type(self) is Packet:
             self._adopt_class()
+
+    @property
+    def comment(self) -> Optional[bytes]:
+        """The first of pcapng's comments on this packet."""
+        return self.comments[0] if self.comments else None
+
+    @comment.setter
+    def comment(self, value: Optional[bytes]) -> None:
+        self.comments = None if value is None else [value]
 
     def _adopt_class(self) -> None:
         """Take the class of the outermost layer, as a scapy packet is an
@@ -1087,7 +1096,7 @@ class Packet(metaclass=_PacketMeta):
         raise AttributeError(f"no field {field!r} in {' / '.join(names)}")
 
     def __setattr__(self, field: str, value: Any) -> None:
-        if field in Packet.__slots__:
+        if field in Packet.__slots__ or field == "comment":
             object.__setattr__(self, field, value)
             return
         names = self.layers()
@@ -1158,25 +1167,31 @@ class Packet(metaclass=_PacketMeta):
         """A dissected packet travels as its octets and the layer to read them
         as; one still being built travels as its spec, so its generators
         survive the trip undrawn."""
+        meta = {k: getattr(self, k) for k in _META}
         if self._spec_live:
-            return (_from_stack, (self._stack, self._payload, self.time,
-                                  self.wirelen, self.sniffed_on))
+            return (_from_stack, (self._stack, self._payload, meta))
         names = self._rust.layer_names()
-        return (_from_bytes, (self._rust.to_bytes(), names[0] if names else "",
-                              self.time, self.wirelen, self.sniffed_on))
+        return (_from_bytes, (self._rust.to_bytes(), names[0] if names else "", meta))
 
 
-def _from_stack(stack, payload, time, wirelen, sniffed_on) -> Packet:
-    pkt = Packet(_stack=stack, _payload=payload, time=time, wirelen=wirelen)
-    pkt.sniffed_on = sniffed_on
+# What a packet carries besides its octets: when it was captured and sent,
+# its true length on the wire, and pcapng's per-packet annotations.
+_META = ("time", "wirelen", "sent_time", "sniffed_on", "comments", "direction",
+         "process_information")
+
+
+def _with_meta(pkt: Packet, meta: dict) -> Packet:
+    for k, v in meta.items():
+        setattr(pkt, k, v)
     return pkt
 
 
-def _from_bytes(data, first, time, wirelen, sniffed_on) -> Packet:
-    pkt = Packet(_rust=_b.dissect(data, first) if first else None,
-                 time=time, wirelen=wirelen)
-    pkt.sniffed_on = sniffed_on
-    return pkt
+def _from_stack(stack, payload, meta) -> Packet:
+    return _with_meta(Packet(_stack=stack, _payload=payload), meta)
+
+
+def _from_bytes(data, first, meta) -> Packet:
+    return _with_meta(Packet(_rust=_b.dissect(data, first) if first else None), meta)
 
 
 def _make_layer(name: str) -> type:
@@ -1342,11 +1357,21 @@ def rdpcap(path: Any, count: int = -1) -> PacketList:
     try:
         with _as_path(path) as real:
             got = _b.read_pcap(real)
+            fd = os.open(real, os.O_RDONLY)
+            try:
+                pcapng = os.read(fd, 4) == b"\x0a\x0d\x0d\x0a"
+            finally:
+                os.close(fd)
     except ValueError as exc:
         raise _BadCapture(str(exc)) from exc
     if count is not None and count >= 0:
         got = got.head(count)
-    return PacketList(got)
+    out = PacketList(got)
+    if pcapng:
+        from .plist import _NgMeta
+
+        out._meta = _NgMeta(got)
+    return out
 
 
 # A pcap file declares one link type for every record in it, so the writer has
@@ -1409,7 +1434,7 @@ class PcapWriter:
 
     __slots__ = (
         "_target", "_path", "_gz", "_pcapng", "_append", "_sync", "_nano",
-        "_snaplen", "_linktype", "_fixed", "_w", "_warned", "_closed",
+        "_snaplen", "_linktype", "_fixed", "_w", "_warned", "_closed", "_ng",
         "__weakref__",
     )
 
@@ -1444,6 +1469,7 @@ class PcapWriter:
         self._warned = False
         self._closed = False
         self._w: Any = None
+        self._ng: Any = None
         if self._fixed:
             self._open()
 
@@ -1473,7 +1499,8 @@ class PcapWriter:
         Writing nothing writes nothing, header included, and leaves the link
         type to whatever comes next.
         """
-        if isinstance(pkt, PacketList) and getattr(pkt, "_res", None) is None:
+        if isinstance(pkt, PacketList) and pkt._res is None and not (
+                self._pcapng and pkt._meta is not None and pkt._meta.annotated()):
             self._settle({pkt._list.dlt})
             if not len(pkt):
                 return
@@ -1483,13 +1510,49 @@ class PcapWriter:
         if isinstance(pkt, Packet) or _is_bytes(pkt):
             pkt = [pkt]
         else:
-            # A request/answer pair is two records, as scapy writes it.
-            pkt = [q for p in pkt for q in (p if isinstance(p, tuple) else (p,))]
+            pkt = [q for p in pkt for q in _pair_records(p)]
         if not pkt:
             return
         self._settle({lt for lt in map(_linktype_of, pkt) if lt is not None})
+        if self._ng is None and self._w is None and self._pcapng and \
+                not self._append and any(map(_annotated, pkt)):
+            self._start_annotated()
+        if self._ng is not None:
+            self._write_annotated(pkt)
+            return
         self._open().write_records([r for p in pkt for r in _records(p)])
         self._pass_through()
+
+    def _start_annotated(self) -> None:
+        """pcapng's per-packet comments, direction and interface go through
+        the block writer in `pcapio`, which emits them as options; the Rust
+        writer writes bare records. Chosen before anything is written, and
+        kept for the whole file."""
+        import io
+
+        from .pcapio import RawPcapNgWriter
+
+        buf = io.BytesIO()
+        w = RawPcapNgWriter(buf)
+        w.sync = False
+        w.linktype = self._linktype
+        w._write_header(None)
+        self._ng = (w, buf)
+        _OPEN_WRITERS.add(self)
+
+    def _write_annotated(self, pkts: list) -> None:
+        w, _ = self._ng
+        for p in pkts:
+            name = getattr(p, "sniffed_on", None)
+            for frame in _expand_frames(p):
+                w._write_packet(
+                    frame, linktype=_linktype_of(p) or self._linktype,
+                    sec=float(getattr(p, "time", 0) or 0),
+                    wirelen=int(getattr(p, "wirelen", 0) or 0) or None,
+                    ifname=None if name is None else str(name).encode(),
+                    direction=getattr(p, "direction", None),
+                    comments=getattr(p, "comments", None),
+                )
 
     def _pass_through(self) -> None:
         """A plain file object gets each write as it happens, as scapy's
@@ -1505,6 +1568,11 @@ class PcapWriter:
 
     def close(self) -> None:
         if self._closed:
+            return
+        if self._ng is not None:
+            self._closed = True
+            _OPEN_WRITERS.discard(self)
+            self._deliver(self._ng[1].getvalue())
             return
         writer = self._open()
         self._closed = True
@@ -1611,6 +1679,23 @@ def _record(pkt: Any) -> tuple:
         float(getattr(pkt, "time", 0.0) or 0.0),
         int(getattr(pkt, "wirelen", 0) or 0),
     )
+
+
+def _annotated(p: Any) -> bool:
+    """Whether a packet carries what only pcapng options can hold."""
+    return bool(getattr(p, "comments", None)) or \
+        getattr(p, "direction", None) is not None or \
+        getattr(p, "sniffed_on", None) is not None
+
+
+def _pair_records(p: Any) -> tuple:
+    """A request/answer pair is two records, as scapy writes it, the request
+    stamped with when it was sent."""
+    if not isinstance(p, tuple):
+        return (p,)
+    if p and getattr(p[0], "sent_time", None):
+        p[0].time = p[0].sent_time
+    return p
 
 
 def _records(pkt: Any) -> list:
