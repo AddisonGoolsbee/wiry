@@ -62,7 +62,9 @@ class ASN1F_badsequence(Exception):
 
 
 class ASN1F_element(object):
-    pass
+    isconditional = 0
+    ismayend = 0
+    ismutable = False
 
 
 ##########################

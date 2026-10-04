@@ -101,7 +101,7 @@ per-file blocks are authoritative.
 | `python/wiry/route.py` | `scapy/route.py`, `scapy/route6.py`, `scapy/arch/unix.py`, `scapy/arch/linux/rtnetlink.py`, `scapy/utils6.py` | 2.7.0 / `7d69454` | 2026-09-18 |
 | `python/wiry/stream.py` | `scapy/sessions.py` (the session protocol only) | 2.7.0 / `7d69454` | 2026-09-18 |
 | `python/wiry/volatile.py` | `scapy/utils.py` — `corrupt_bytes`, `corrupt_bits` | scapy 2.7.0 | 2026-09-18 |
-| `python/wiry/_pylayer.py` | `scapy/packet.py`, `scapy/base_classes.py` | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/_pylayer.py` | `scapy/packet.py`, `scapy/base_classes.py` (`SetGen`), `scapy/fields.py` (`RawVal`) | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/asn1/asn1.py` | `scapy/asn1/asn1.py`, `scapy/utils.py` (`Enum_metaclass`, `EnumElement`), `scapy/volatile.py` (`GeneralizedTime`, `IntAutoTime`, `RandOID`) | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/asn1/ber.py` | `scapy/asn1/ber.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/asn1/mib.py` | `scapy/asn1/mib.py`, `scapy/dadict.py` | master / `e2e35c0` | 2026-10-03 |
@@ -111,7 +111,7 @@ per-file blocks are authoritative.
 | `python/wiry/layers/x509.py` | `scapy/layers/x509.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/ldap.py` | `scapy/layers/ldap.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/_pyvolatile.py` | `scapy/volatile.py` | master / `e2e35c0` | 2026-10-04 |
-| `python/wiry/_pyfields.py` | `scapy/fields.py` (`MultipleTypeField`, `PacketField`, `Field`, `FieldLenField`, `StrLenField`) | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/_pyfields.py` | `scapy/fields.py`, `scapy/utils.py` (`EDecimal`, `lhex`, `mac2str`, `str2mac`, `strxor`), `scapy/base_classes.py` (`ScopedIP`, `Field_metaclass`), `scapy/utils6.py` (6to4 and Teredo helpers) | master / `e2e35c0` | 2026-10-03 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift

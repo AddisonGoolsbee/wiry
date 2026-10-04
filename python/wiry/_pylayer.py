@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
 # Derived from scapy: scapy/packet.py (Packet, NoPayload, Raw, Padding),
-#   scapy/base_classes.py (Packet_metaclass, SetGen)
+#   scapy/base_classes.py (Packet_metaclass, SetGen), scapy/fields.py (RawVal)
 #   scapy master, upstream commit e2e35c0
 #   Copyright (C) Philippe Biondi and the scapy contributors
 #
@@ -9,6 +9,9 @@
 #   2026-10-03 — transcribed the object model for layers whose contract is a
 #     tree of Python objects (ASN.1 first), as a subclass of wiry's Packet;
 #     dropped colour themes, canvas dumps and conf.layers registration.
+#   2026-10-04 — dissection, building and generator expansion follow scapy's
+#     field contract in full (conditional, may-end, mutable, RawVal); SetGen
+#     and RawVal came along.
 """Layers modelled in Python, the way scapy models every layer.
 
 A wiry packet is octets in Rust plus a table of spans. That is the wrong shape
@@ -24,6 +27,7 @@ import copy as _copy
 import itertools
 import json as _json
 import time as _time
+import types
 from typing import Any, Iterator, Optional
 
 from . import Packet, _PacketMeta, VolatileValue
@@ -43,6 +47,65 @@ def _fix(value: Any) -> Any:
     """One draw of a volatile value."""
     fix = getattr(value, "_fix", None)
     return fix() if fix is not None else value._draw()
+
+
+class RawVal:
+    """Octets inserted as they are, past the field that would encode them:
+    `IP(len=RawVal(b"##"))`."""
+
+    def __init__(self, val: Any = b""):
+        self.val = bytes_encode(val)
+
+    def __str__(self) -> str:
+        return str(self.val)
+
+    def __bytes__(self) -> bytes:
+        return self.val
+
+    def __len__(self) -> int:
+        return len(self.val)
+
+    def __repr__(self) -> str:
+        return "<RawVal [%r]>" % self.val
+
+
+def _is_gen(x: Any) -> bool:
+    """scapy's `Gen`: something a field value iterates over to make one
+    packet per element."""
+    from .volatile import Net
+    return isinstance(x, (PyPacket, Net, SetGen))
+
+
+def _get_values(value: Any) -> Any:
+    """A (start, stop[, step]) tuple of integers is the inclusive range."""
+    if (isinstance(value, tuple) and 2 <= len(value) <= 3
+            and all(hasattr(i, "__int__") for i in value)):
+        return range(*((int(value[0]), int(value[1]) + 1)
+                       + tuple(int(v) for v in value[2:])))
+    return value
+
+
+class SetGen:
+    def __init__(self, values: Any, _iterpacket: int = 1):
+        self._iterpacket = _iterpacket
+        if isinstance(values, list):
+            self.values = [_get_values(v) for v in values]
+        else:
+            self.values = [_get_values(values)]
+
+    def __iter__(self) -> Iterator[Any]:
+        for i in self.values:
+            if ((_is_gen(i) and (self._iterpacket or not isinstance(i, PyPacket)))
+                    or isinstance(i, (range, types.GeneratorType))):
+                yield from i
+            else:
+                yield i
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+    def __repr__(self) -> str:
+        return "<SetGen %r>" % self.values
 
 
 class PyField:
@@ -164,6 +227,11 @@ class PyPacketMeta(_PacketMeta):
         return type.__call__(cls, *args, **kw)
 
 
+def _FlagValue() -> type:
+    from ._pyfields import FlagValue
+    return FlagValue
+
+
 def _debug_dissector() -> bool:
     from .capture import conf
     return bool(conf.debug_dissector)
@@ -229,15 +297,18 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
             self.dissect(_pkt)
             if not _internal:
                 self.dissection_done(self)
+        # Declaration order, which a MultipleTypeField's condition relies on.
         for f in self.fields_desc:
             if f.name in fields:
-                self.fields[f.name] = self.get_field(f.name).any2i(
-                    self, fields.pop(f.name))
+                value = fields.pop(f.name)
+                self.fields[f.name] = value if isinstance(value, RawVal) else \
+                    self.get_field(f.name).any2i(self, value)
         for fname, value in fields.items():
             if fname not in self.deprecated_fields:
                 raise AttributeError(fname)
             fname = self.deprecated_fields[fname][0]
-            self.fields[fname] = self.get_field(fname).any2i(self, value)
+            self.fields[fname] = value if isinstance(value, RawVal) else \
+                self.get_field(fname).any2i(self, value)
         if isinstance(post_transform, list):
             self.post_transforms = post_transform
         elif post_transform is None:
@@ -248,7 +319,9 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
 
     def init_fields(self, for_dissect_only: bool = False) -> None:
         cached = PyPacket._class_cache.get(type(self))
-        if cached is None:
+        # A MultipleTypeField's default depends on the packet, so a class
+        # holding one is set up afresh every time, as scapy does.
+        if cached is None or cached is False:
             defaults, fieldtype, packetfields, refs = {}, {}, [], []
             for f in self.fields_desc:
                 defaults[f.name] = _copy.deepcopy(f.default)
@@ -258,7 +331,9 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
                 if isinstance(f.default, (list, dict, set, VolatileValue, Packet)):
                     refs.append(f.name)
             cached = (defaults, fieldtype, packetfields, refs)
-            PyPacket._class_cache[type(self)] = cached
+            if PyPacket._class_cache.get(type(self)) is not False:
+                multiple = any(hasattr(f, "flds") for f in self.fields_desc)
+                PyPacket._class_cache[type(self)] = False if multiple else cached
         defaults, fieldtype, packetfields, refs = cached
         self.default_fields = defaults
         self.fieldtype = fieldtype
@@ -296,14 +371,19 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
             fld, v = self.getfield_and_val(attr)
         except ValueError:
             return self.payload.__getattr__(attr)
-        return fld.i2h(self, v) if fld is not None else v
+        if fld is None or isinstance(v, RawVal):
+            return v
+        return fld.i2h(self, v)
 
     def setfieldval(self, attr: str, val: Any) -> None:
         if self.deprecated_fields and attr in self.deprecated_fields:
             attr = self.deprecated_fields[attr][0]
         if attr in self.default_fields:
             fld = self.get_field(attr)
-            self.fields[attr] = fld.any2i(self, val) if fld is not None else val
+            if isinstance(val, RawVal) or fld is None:
+                self.fields[attr] = val
+            else:
+                self.fields[attr] = fld.any2i(self, val)
             self.explicit = 0
             self.raw_packet_cache = None
             self.raw_packet_cache_fields = None
@@ -491,12 +571,49 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
         return len(bytes(self))
 
 
+    def _raw_packet_cache_field_value(self, fld: Any, val: Any,
+                                      copy: bool = False) -> Any:
+        """What, of a mutable field's value, tells a change from none."""
+        if fld.holds_packets:
+            if fld.islist:
+                if copy:
+                    return [(fld.do_copy(x.fields), x.payload.raw_packet_cache)
+                            for x in val]
+                return [(x.fields, x.payload.raw_packet_cache) for x in val]
+            if copy:
+                return (fld.do_copy(val.fields), val.payload.raw_packet_cache)
+            return (val.fields, val.payload.raw_packet_cache)
+        if fld.islist or getattr(fld, "ismutable", False):
+            return fld.do_copy(val) if copy else val
+        return None
+
     def self_build(self) -> bytes:
-        if self.raw_packet_cache is not None:
-            return self.raw_packet_cache
+        if self.raw_packet_cache is not None and \
+                self.raw_packet_cache_fields is not None:
+            for fname, fval in self.raw_packet_cache_fields.items():
+                fld, val = self.getfield_and_val(fname)
+                if self._raw_packet_cache_field_value(fld, val) != fval:
+                    self.raw_packet_cache = None
+                    self.raw_packet_cache_fields = None
+                    self.wirelen = None
+                    break
+            if self.raw_packet_cache is not None:
+                return self.raw_packet_cache
         p = b""
         for f in self.fields_desc:
-            p = f.addfield(self, p, self.getfieldval(f.name))
+            val = self.getfieldval(f.name)
+            if isinstance(val, RawVal):
+                p += bytes(val)
+                continue
+            try:
+                p = f.addfield(self, p, val)
+            except Exception as ex:
+                try:
+                    ex.args = ("While building field '%s': " % f.name
+                               + ex.args[0],) + ex.args[1:]
+                except (AttributeError, IndexError, TypeError):
+                    pass
+                raise ex
         return p
 
     def do_build_payload(self) -> bytes:
@@ -531,23 +648,23 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
         return self.build()
 
     def __iter__(self) -> Iterator["PyPacket"]:
-        """Every packet this one describes, with each volatile value drawn."""
-        def values(name: str) -> list:
-            elt = self.getfieldval(name)
-            if isinstance(elt, PyPacket):
-                return list(elt)
-            if isinstance(elt, list) and not self.get_field(name).islist:
-                return elt
-            return [elt]
-
+        """Every packet this one describes: one per element of each
+        generator field, with each volatile value drawn."""
         def loop(todo: list, done: dict) -> Iterator["PyPacket"]:
             if todo:
-                name = todo.pop()
-                for e in values(name):
-                    done[name] = e
+                eltname = todo.pop()
+                elt = self.getfieldval(eltname)
+                if not _is_gen(elt):
+                    if self.get_field(eltname).islist:
+                        elt = SetGen([elt])
+                    else:
+                        elt = SetGen(elt)
+                for e in elt:
+                    done[eltname] = e
                     yield from loop(todo[:], done)
                 return
-            payloads = [None] if isinstance(self.payload, NoPayload) else self.payload
+            payloads = SetGen([None]) if isinstance(self.payload, NoPayload) \
+                else self.payload
             for payl in payloads:
                 fixed = {
                     k: _fix(v) if isinstance(v, VolatileValue) else v
@@ -564,7 +681,6 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
             done = {}
         return loop(todo, done)
 
-
     def extract_padding(self, s: bytes) -> tuple:
         return s, None
 
@@ -576,8 +692,21 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
 
     def do_dissect(self, s: bytes) -> bytes:
         raw = s
+        self.raw_packet_cache_fields = {}
         for f in self.fields_desc:
-            s, self.fields[f.name] = f.getfield(self, s)
+            s, fval = f.getfield(self, s)
+            if f.isconditional and fval is None:
+                continue
+            # Kept to notice a change inside a mutable value later, which
+            # must drop raw_packet_cache.
+            if (f.islist or f.holds_packets or getattr(f, "ismutable", False)) \
+                    and fval is not None:
+                self.raw_packet_cache_fields[f.name] = \
+                    self._raw_packet_cache_field_value(f, fval, copy=True)
+            self.fields[f.name] = fval
+            if not s and (f.ismayend or (fval is not None and f.isconditional
+                                         and f.fld.ismayend)):
+                break
         self.raw_packet_cache = raw[:-len(s)] if s else raw
         self.explicit = 1
         return s
@@ -780,6 +909,8 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
     def __repr__(self) -> str:
         s = ""
         for f in self.fields_desc:
+            if f.isconditional and not f._evalcond(self):
+                continue
             for d in (self.fields, self.overloaded_fields):
                 if f.name in d:
                     v = d[f.name]
@@ -797,7 +928,7 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
         fields = list(self.fields_desc)
         while fields:
             f = fields.pop(0)
-            if hasattr(f, "_evalcond") and not f._evalcond(self):
+            if f.isconditional and not f._evalcond(self):
                 continue
             if hasattr(f, "fields") and isinstance(f.fields, list):
                 s += f"{label_lvl + lvl}  {f.name} =\n"
@@ -956,6 +1087,8 @@ class PyPacket(Packet, metaclass=PyPacketMeta):
             elif fld.islist and isinstance(fv, list):
                 cmds = [getattr(x, "command", lambda x=x: repr(x))() for x in fv]
                 fv = cmds if json else "[%s]" % ",".join(cmds)
+            elif isinstance(fv, _FlagValue()):
+                fv = int(fv)
             elif callable(getattr(fv, "command", None)):
                 fv = fv.command(json=json)
             elif json:
