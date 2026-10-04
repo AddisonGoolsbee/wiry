@@ -389,11 +389,6 @@ impl ProtoId {
     pub const MKASAKUseParamSet: ProtoId = ProtoId(6625);
     pub const MKADistributedCAKParamSet: ProtoId = ProtoId(6627);
     pub const MKAICVSet: ProtoId = ProtoId(6628);
-    pub const NTLMVersion: ProtoId = ProtoId(6633);
-    pub const LMRESPONSE: ProtoId = ProtoId(6638);
-    pub const LMv2RESPONSE: ProtoId = ProtoId(6639);
-    pub const NTLMRESPONSE: ProtoId = ProtoId(6640);
-    pub const NTLMSSPMESSAGESIGNATURE: ProtoId = ProtoId(6647);
     // protogen:ids end
 
     pub fn name(self) -> &'static str {
@@ -838,11 +833,6 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::MKASAKUseParamSet,
     ProtoId::MKADistributedCAKParamSet,
     ProtoId::MKAICVSet,
-    ProtoId::NTLMVersion,
-    ProtoId::LMRESPONSE,
-    ProtoId::LMv2RESPONSE,
-    ProtoId::NTLMRESPONSE,
-    ProtoId::NTLMSSPMESSAGESIGNATURE,
     // protogen:builtins end
 ];
 
@@ -1312,11 +1302,6 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::MKASAKUseParamSet.0 as usize] = &eap_mkasakuseparamset::DESC;
     t[ProtoId::MKADistributedCAKParamSet.0 as usize] = &eap_mkadistributedcakparamset::DESC;
     t[ProtoId::MKAICVSet.0 as usize] = &eap_mkaicvset::DESC;
-    t[ProtoId::NTLMVersion.0 as usize] = &ntlm_ntlm_version::DESC;
-    t[ProtoId::LMRESPONSE.0 as usize] = &ntlm_lm_response::DESC;
-    t[ProtoId::LMv2RESPONSE.0 as usize] = &ntlm_lmv2_response::DESC;
-    t[ProtoId::NTLMRESPONSE.0 as usize] = &ntlm_ntlm_response::DESC;
-    t[ProtoId::NTLMSSPMESSAGESIGNATURE.0 as usize] = &ntlm_ntlmssp_message_signature::DESC;
     // protogen:desc end
     t
 };
