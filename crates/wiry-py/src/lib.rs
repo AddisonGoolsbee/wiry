@@ -2195,6 +2195,19 @@ fn enum_names(name: &str) -> PyResult<Vec<(&'static str, NamePairs)>> {
     Ok(out)
 }
 
+/// Fields whose value is the octets divided by a fixed scale: scapy's
+/// `BCDFloatField`, 8.8 fixed point.
+#[pyfunction]
+fn scaled_fields(name: &str) -> PyResult<Vec<(&'static str, u32)>> {
+    let id = proto_by_name(name)?;
+    Ok(proto::desc(id)
+        .fields
+        .iter()
+        .filter(|f| wiry_core::render_tables::repr_of(name, f.name) == render::Repr::Bcd)
+        .map(|f| (f.name, 256))
+        .collect())
+}
+
 #[pyfunction]
 fn known_layers() -> Vec<&'static str> {
     proto::known_layers()
@@ -2380,6 +2393,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parsed_field, m)?)?;
     m.add_function(wrap_pyfunction!(flag_names, m)?)?;
     m.add_function(wrap_pyfunction!(enum_names, m)?)?;
+    m.add_function(wrap_pyfunction!(scaled_fields, m)?)?;
     m.add_function(wrap_pyfunction!(known_layers, m)?)?;
     m.add_function(wrap_pyfunction!(register_layer, m)?)?;
     m.add_function(wrap_pyfunction!(bind_layer, m)?)?;

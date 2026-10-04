@@ -509,3 +509,10 @@ def test_every_layer_survives_a_cut_at_every_offset(name):
                 if isinstance(value, int):
                     setattr(obj, field, value)
         bytes(again)
+
+
+def test_gre_over_udp_is_reached_on_its_port():
+    # RFC 8086 §3: destination port 4754.
+    pkt = Ether(bytes(Ether() / IP() / UDP() / GRE() / IP() / UDP()))
+    assert pkt.layers() == ["Ether", "IP", "UDP", "GRE", "IP", "UDP"]
+    assert pkt[UDP].dport == 4754

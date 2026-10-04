@@ -35,6 +35,7 @@ fn next(hdr: &[u8]) -> Next {
         ports::VXLAN => return Next::Proto(ProtoId::Vxlan),
         ports::GENEVE => return Next::Proto(ProtoId::Geneve),
         ports::GTP_U => return Next::Proto(ProtoId::GtpU),
+        ports::GRE_UDP => return Next::Proto(ProtoId::Gre),
         _ => {}
     }
     // RFC 6762 §18 and RFC 4795 §2: mDNS and LLMNR carry RFC 1035 messages, so
@@ -70,6 +71,7 @@ fn bind_next(hdr: &mut [u8], p: ProtoId) {
         ProtoId::Vxlan => ports::VXLAN,
         ProtoId::Geneve => ports::GENEVE,
         ProtoId::GtpU => ports::GTP_U,
+        ProtoId::Gre => ports::GRE_UDP,
         _ => match crate::layers::dispatch::by_udp_port_of(p) {
             Some(port) => port,
             None => return,

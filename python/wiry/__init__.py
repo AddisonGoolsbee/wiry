@@ -492,7 +492,8 @@ class _LayerView:
                 return FlagValue.from_str(
                     value, names, self._pkt, self._idx, field
                 )
-        return value
+        scale = _scale(self._name, field)
+        return value / scale if scale else value
 
     def raw_options(self) -> Any:
         """The unparsed option bytes, for layers whose options are parsed."""
@@ -605,10 +606,28 @@ def _enum_table(layer: str) -> dict[str, dict[int, str]]:
     return table
 
 
+_SCALES: dict[str, dict[str, int]] = {}
+
+
+def _scale(layer: str, field: str) -> int:
+    """The fixed-point scale a field's octets are read through, or 0."""
+    table = _SCALES.get(layer)
+    if table is None:
+        try:
+            table = dict(_b.scaled_fields(layer))
+        except ValueError:
+            table = {}
+        _SCALES[layer] = table
+    return table.get(field, 0)
+
+
 def _named(layer: str, field: str, value: Any) -> Any:
     """A name resolved to its value, so it is written in the same pass as the
     integers it may decide the layout for. A name this table does not know is
     left for the engine, which reports it."""
+    scale = _scale(layer, field)
+    if scale and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return int(scale * value)
     s2i = _S2I.get((layer, field))
     if s2i is None:
         s2i = {n: v for v, n in _enum_table(layer).get(field, {}).items()}
@@ -992,6 +1011,7 @@ class Packet(metaclass=_PacketMeta):
 
     def _set(self, layer: int, field: str, value: Any) -> None:
         if self._rust is not None:
+            value = _named(self.layers()[layer], field, value)
             self._written = True
             if isinstance(value, (bool, FlagValue)):
                 self._rust.set_field(layer, field, int(value))
