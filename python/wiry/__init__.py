@@ -420,14 +420,22 @@ class _LayerView:
         text = self._pkt._materialize().show(self._pkt._given(), self._idx)
         return _with_py_show(self._pkt, text, self._idx)
 
-    def show(self) -> None:
-        print(self.show_str(), end="")
+    def show(self, dump: bool = False) -> str | None:
+        # scapy prints the dump with print(), whose newline is the blank line
+        # that ends every show(); dump=True returns the text without it.
+        if dump:
+            return self.show_str()
+        print(self.show_str())
+        return None
 
     def show2_str(self) -> str:
         return _b.dissect(bytes(self), self._name).show()
 
-    def show2(self) -> None:
-        print(self.show2_str(), end="")
+    def show2(self, dump: bool = False) -> str | None:
+        if dump:
+            return self.show2_str()
+        print(self.show2_str())
+        return None
 
     def sprintf(self, fmt: str) -> str:
         from .report import sprintf
@@ -1388,9 +1396,9 @@ class Packet(metaclass=_PacketMeta):
         from .describe import from_hexcap
         return cls(from_hexcap(text))
 
-    def display(self) -> None:
+    def display(self, dump: bool = False) -> str | None:
         """Deprecated spelling of `show()`, kept because scripts use it."""
-        self.show()
+        return self.show(dump)
 
     def __getitem__(self, layer: Any) -> _LayerView:
         # pkt[IP:2] is the second IP layer; pkt[IP::{"ttl": 3}] filters on
@@ -1481,8 +1489,13 @@ class Packet(metaclass=_PacketMeta):
     def underlayer(self) -> None:
         return None
 
-    def show(self) -> None:
-        print(self.show_str(), end="")
+    def show(self, dump: bool = False) -> str | None:
+        # scapy prints the dump with print(), whose newline is the blank line
+        # that ends every show(); dump=True returns the text without it.
+        if dump:
+            return self.show_str()
+        print(self.show_str())
+        return None
 
     def _given(self) -> list[list[str]] | None:
         """What each layer of a packet still being built was assigned, which
@@ -1494,8 +1507,11 @@ class Packet(metaclass=_PacketMeta):
     def show_str(self) -> str:
         return _with_py_show(self, self._materialize().show(self._given()))
 
-    def show2(self) -> None:
-        print(self.show2_str(), end="")
+    def show2(self, dump: bool = False) -> str | None:
+        if dump:
+            return self.show2_str()
+        print(self.show2_str())
+        return None
 
     def show2_str(self) -> str:
         """As it will be sent: the lengths and checksums are the computed ones."""
