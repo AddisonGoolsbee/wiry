@@ -258,6 +258,10 @@ impl ProtoId {
     pub const HCILEMetaLongTermKeyRequest: ProtoId = ProtoId(2202);
     pub const HCIMonHdr: ProtoId = ProtoId(2205);
     pub const HCIMonPcapHdr: ProtoId = ProtoId(2206);
+    pub const MobileIP: ProtoId = ProtoId(6600);
+    pub const MobileIPRRQ: ProtoId = ProtoId(6601);
+    pub const MobileIPRRP: ProtoId = ProtoId(6602);
+    pub const MobileIPTunnelData: ProtoId = ProtoId(6603);
     // protogen:ids end
 
     pub fn name(self) -> &'static str {
@@ -318,7 +322,7 @@ pub struct ProtoDesc {
 
 /// Room for every scapy layer class converted by `dev/protogen/scapy2spec.py`,
 /// with the registry's ids above it still inside a `u16`.
-pub const BUILTIN_COUNT: u16 = 4096;
+pub const BUILTIN_COUNT: u16 = 8192;
 
 const _: () = assert!(BUILTIN_COUNT as usize + MAX_REGISTERED <= u16::MAX as usize + 1);
 
@@ -571,6 +575,10 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::HCILEMetaLongTermKeyRequest,
     ProtoId::HCIMonHdr,
     ProtoId::HCIMonPcapHdr,
+    ProtoId::MobileIP,
+    ProtoId::MobileIPRRQ,
+    ProtoId::MobileIPRRP,
+    ProtoId::MobileIPTunnelData,
     // protogen:builtins end
 ];
 
@@ -888,6 +896,10 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
         &bluetooth_hci_le_meta_long_term_key_request::DESC;
     t[ProtoId::HCIMonHdr.0 as usize] = &bluetooth_hci_mon_hdr::DESC;
     t[ProtoId::HCIMonPcapHdr.0 as usize] = &bluetooth_hci_mon_pcap_hdr::DESC;
+    t[ProtoId::MobileIP.0 as usize] = &mobileip_mobileip::DESC;
+    t[ProtoId::MobileIPRRQ.0 as usize] = &mobileip_mobileiprrq::DESC;
+    t[ProtoId::MobileIPRRP.0 as usize] = &mobileip_mobileiprrp::DESC;
+    t[ProtoId::MobileIPTunnelData.0 as usize] = &mobileip_mobileiptunneldata::DESC;
     // protogen:desc end
     t
 };

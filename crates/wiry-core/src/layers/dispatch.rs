@@ -68,8 +68,8 @@ pub fn by_ipproto_of(p: ProtoId) -> Option<u8> {
 }
 
 const UDP_PORT_VALUES: &[u16] = &[
-    69, 80, 123, 137, 161, 162, 443, 514, 520, 546, 547, 1645, 1646, 1812, 1813, 1985, 2055, 3784,
-    3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
+    69, 80, 123, 137, 161, 162, 434, 443, 514, 520, 546, 547, 1645, 1646, 1812, 1813, 1985, 2055,
+    3784, 3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
 ];
 
 static UDP_PORT_CLAIMED: [u64; 810] = port_bits(UDP_PORT_VALUES);
@@ -84,6 +84,7 @@ fn by_udp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
         123 => Some(ProtoId::Ntp),
         137 => Some(ProtoId::Nbns),
         161 | 162 => Some(ProtoId::Snmp),
+        434 => Some(ProtoId::MobileIP),
         514 => Some(ProtoId::Syslog),
         520 => Some(ProtoId::Rip),
         546 | 547 => Some(ProtoId::Dhcp6),
@@ -133,6 +134,7 @@ pub fn by_udp_port_of(p: ProtoId) -> Option<u16> {
         ProtoId::Quic => Some(443),
         ProtoId::Radius => Some(1812),
         ProtoId::Rip => Some(520),
+        ProtoId::MobileIP => Some(434),
         ProtoId::SFlow => Some(6343),
         ProtoId::Sip => Some(5060),
         ProtoId::Snmp => Some(161),
@@ -263,6 +265,7 @@ pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
         ProtoId::ATTHdr => by_a_t_t_hdr(hdr),
         ProtoId::HCIEventLEMeta => by_h_c_i_event_l_e_meta(hdr),
         ProtoId::HCIPHDRHdr => by_h_c_i_p_h_d_r_hdr(hdr),
+        ProtoId::MobileIP => by_mobile_i_p(hdr),
         ProtoId::PppoeDisc => by_pppoe_disc(hdr),
         ProtoId::SMHdr => by_s_m_hdr(hdr),
         _ => None,
@@ -315,6 +318,19 @@ fn by_h_c_i_event_l_e_meta(hdr: &[u8]) -> Option<ProtoId> {
 #[inline(never)]
 fn by_h_c_i_p_h_d_r_hdr(_hdr: &[u8]) -> Option<ProtoId> {
     Some(ProtoId::HCIHdr)
+}
+
+#[inline(never)]
+fn by_mobile_i_p(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_bits(hdr, 0, 8) {
+            1 => return Some(ProtoId::MobileIPRRQ),
+            3 => return Some(ProtoId::MobileIPRRP),
+            4 => return Some(ProtoId::MobileIPTunnelData),
+            _ => {}
+        }
+    }
+    None
 }
 
 #[inline(never)]
@@ -418,6 +434,15 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaLongTermKeyRequest {
         crate::field::write_bits(hdr, 0, 8, 5);
     }
+    if parent == ProtoId::MobileIP && child == ProtoId::MobileIPRRP {
+        crate::field::write_bits(hdr, 0, 8, 3);
+    }
+    if parent == ProtoId::MobileIP && child == ProtoId::MobileIPRRQ {
+        crate::field::write_bits(hdr, 0, 8, 1);
+    }
+    if parent == ProtoId::MobileIP && child == ProtoId::MobileIPTunnelData {
+        crate::field::write_bits(hdr, 0, 8, 4);
+    }
     if parent == ProtoId::PppoeDisc && child == ProtoId::PPPoEDTags {
         crate::field::write_bits(hdr, 4, 4, 1);
     }
@@ -514,6 +539,10 @@ mod tests {
         assert_eq!(
             crate::proto::field_of(ProtoId::HCIEventLEMeta, "event")
                 .map(|f| (f.bit_off, f.bit_len)),
+            Some((0, 8))
+        );
+        assert_eq!(
+            crate::proto::field_of(ProtoId::MobileIP, "type").map(|f| (f.bit_off, f.bit_len)),
             Some((0, 8))
         );
         assert_eq!(
