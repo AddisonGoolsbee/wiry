@@ -164,14 +164,13 @@ fn by_tcp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
         80 | 3128 | 8000 | 8008 | 8080 | 8888 => {
             crate::layers::http::looks_like(payload).then_some(ProtoId::Http)
         }
-        139 => crate::layers::nbtsession::looks_like(payload).then_some(ProtoId::NbtSession),
+        139 | 445 => crate::layers::nbtsession::looks_like(payload).then_some(ProtoId::NbtSession),
         143 => crate::layers::imap::looks_like(payload).then_some(ProtoId::Imap),
         179 => crate::layers::bgp::looks_like(payload).then_some(ProtoId::Bgp),
         389 | 3268 => crate::layers::ldap::looks_like(payload).then_some(ProtoId::Ldap),
         443 | 465 | 563 | 636 | 989 | 990 | 992 | 993 | 995 | 5061 | 8443 => {
             crate::layers::tls::looks_like(payload).then_some(ProtoId::Tls)
         }
-        445 => crate::layers::smb2::looks_like(payload).then_some(ProtoId::Smb2),
         502 => crate::layers::modbus::looks_like(payload).then_some(ProtoId::Modbus),
         1723 => Some(ProtoId::PPTP),
         1883 | 8883 => crate::layers::mqtt::looks_like(payload).then_some(ProtoId::Mqtt),
@@ -202,7 +201,6 @@ pub fn by_tcp_port_of(p: ProtoId) -> Option<u16> {
         ProtoId::NbtSession => Some(139),
         ProtoId::PPTP => Some(1723),
         ProtoId::Sip => Some(5060),
-        ProtoId::Smb2 => Some(445),
         ProtoId::Smtp => Some(25),
         ProtoId::Ssh => Some(22),
         ProtoId::Telnet => Some(23),

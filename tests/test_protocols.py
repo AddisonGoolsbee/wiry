@@ -520,7 +520,9 @@ def test_mqtt_reads_its_variable_length_remaining_length():
 def test_modbus_and_smb2_and_ldap_reach_their_layers():
     cases = [
         ("ModbusADU", 502, bytes([0, 1, 0, 0, 0, 6, 1, 3, 0, 0, 0, 1])),
-        ("SMB2_Header", 445, bytes([0xFE, 0x53, 0x4D, 0x42, 0x40, 0, 0, 0]) + bytes(56)),
+        # [MS-SMB2] §2.1: Direct TCP frames SMB2 the way NBTSession does.
+        ("NBTSession", 445, bytes([0, 0, 0, 64, 0xFE, 0x53, 0x4D, 0x42, 0x40, 0, 0, 0])
+         + bytes(56)),
         ("LDAP", 389, bytes([0x30, 0x0C, 0x02, 0x01, 0x01, 0x60, 0x07, 0x02,
                              0x01, 0x03, 0x04, 0x00, 0x80, 0x00])),
         ("BGPHeader", 179, bytes([0xFF] * 16) + bytes([0x00, 0x13, 0x04])),
@@ -533,11 +535,14 @@ def test_modbus_and_smb2_and_ldap_reach_their_layers():
 
 
 def test_smb2_reads_its_little_endian_fields():
-    """[MS-SMB2] §2.2.1.2."""
-    body = bytes([0xFE, 0x53, 0x4D, 0x42, 0x40, 0, 0, 0]) + bytes(56)
-    pkt = Ether(tcp_frame(body, dport=445))
-    assert pkt["SMB2_Header"].ProtocolId == 0xFE534D42
+    """[MS-SMB2] §2.2.1.2, under scapy's field names."""
+    smb = bytes([0xFE, 0x53, 0x4D, 0x42, 0x40, 0, 0, 0]) + bytes(8) + bytes([2]) + bytes(47)
+    pkt = Ether(tcp_frame(bytes([0, 0, 0, 64]) + smb, dport=445))
+    assert pkt.layers()[3:5] == ["NBTSession", "SMB2_Header"]
+    assert pkt["SMB2_Header"].Start == b"\xfeSMB"
     assert pkt["SMB2_Header"].StructureSize == 64
+    assert pkt["SMB2_Header"].Flags == 2
+    assert pkt["SMB2_Header"].AsyncId == 0
 
 
 def test_ldap_dissects_into_scapys_object_tree():
