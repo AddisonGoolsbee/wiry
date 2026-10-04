@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/dhcp.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — op names transcribed into the field table
+
 //! BOOTP header layout from RFC 951 §3, with the field interpretation of
 //! RFC 2131 §2 and figure 1: the 16-bit field at offset 10, unused in RFC 951,
 //! carries the BROADCAST flag. Hardware types from the IANA "Hardware Types"
@@ -5,8 +14,12 @@
 //! them is RFC 2131 §3 and RFC 1497.
 
 use crate::field::FieldDesc;
+use crate::names::Table;
 use crate::options::{Item, LenRule, OptDesc, OptTable, Shape};
 use crate::proto::{Next, ProtoDesc, ProtoId};
+
+/// scapy 2.7.0 `BOOTP.op`.
+static OPS: Table = &[(1, "BOOTREQUEST"), (2, "BOOTREPLY")];
 
 /// RFC 951 §3: `file` ends at 108 + 128.
 const BOOTP_LEN: usize = 236;
@@ -27,8 +40,8 @@ pub static FLAG_NAMES: &[&str] = &[
 ];
 
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("op", 0, 8, 1),
-    FieldDesc::uint("htype", 8, 8, 1),
+    FieldDesc::uint("op", 0, 8, 1).named(OPS),
+    FieldDesc::uint("htype", 8, 8, 1).named(crate::layers::arp::HWTYPES),
     FieldDesc::uint("hlen", 16, 8, 6),
     FieldDesc::uint("hops", 24, 8, 0),
     FieldDesc::uint("xid", 32, 32, 0),
@@ -177,6 +190,111 @@ pub static DHCP_OPTIONS: OptTable = OptTable {
         OptDesc::new("rebinding_time", 59, Shape::LooseUint(4)),
         OptDesc::new("client_id", 61, Shape::Bytes),
         OptDesc::new("relay_agent_information", 82, Shape::Bytes).nesting(&RELAY_OPTIONS),
+        // The rest of scapy 2.7.0's `DHCPOptions`, named as it names them.
+        OptDesc::new("time_zone", 2, Shape::LooseUint(4)),
+        OptDesc::new("time_server", 4, Shape::Ipv4List),
+        OptDesc::new("IEN_name_server", 5, Shape::Ipv4List),
+        OptDesc::new("log_server", 7, Shape::Ipv4List),
+        OptDesc::new("cookie_server", 8, Shape::Ipv4List),
+        OptDesc::new("lpr_server", 9, Shape::Ipv4List),
+        OptDesc::new("impress-servers", 10, Shape::Ipv4List),
+        OptDesc::new("resource-location-servers", 11, Shape::Ipv4List),
+        OptDesc::new("boot-size", 13, Shape::LooseUint(2)),
+        OptDesc::new("dump_path", 14, Shape::Bytes),
+        OptDesc::new("swap-server", 16, Shape::Ipv4List),
+        OptDesc::new("root_disk_path", 17, Shape::Bytes),
+        OptDesc::new("extensions-path", 18, Shape::Bytes),
+        OptDesc::new("ip-forwarding", 19, Shape::LooseUint(1)),
+        OptDesc::new("non-local-source-routing", 20, Shape::LooseUint(1)),
+        OptDesc::new("policy-filter", 21, Shape::Ipv4List),
+        OptDesc::new("max_dgram_reass_size", 22, Shape::LooseUint(2)),
+        OptDesc::new("default_ttl", 23, Shape::LooseUint(1)),
+        OptDesc::new("pmtu_timeout", 24, Shape::LooseUint(4)),
+        OptDesc::new("path-mtu-plateau-table", 25, Shape::LooseUint(2)),
+        OptDesc::new("interface-mtu", 26, Shape::LooseUint(2)),
+        OptDesc::new("all-subnets-local", 27, Shape::LooseUint(1)),
+        OptDesc::new("perform-mask-discovery", 29, Shape::LooseUint(1)),
+        OptDesc::new("mask-supplier", 30, Shape::LooseUint(1)),
+        OptDesc::new("router-discovery", 31, Shape::LooseUint(1)),
+        OptDesc::new("router-solicitation-address", 32, Shape::Ipv4List),
+        OptDesc::new("static-routes", 33, Shape::Ipv4List),
+        OptDesc::new("trailer-encapsulation", 34, Shape::LooseUint(1)),
+        OptDesc::new("arp_cache_timeout", 35, Shape::LooseUint(4)),
+        OptDesc::new("ieee802-3-encapsulation", 36, Shape::LooseUint(1)),
+        OptDesc::new("tcp_ttl", 37, Shape::LooseUint(1)),
+        OptDesc::new("tcp_keepalive_interval", 38, Shape::LooseUint(4)),
+        OptDesc::new("tcp_keepalive_garbage", 39, Shape::LooseUint(1)),
+        OptDesc::new("NIS_domain", 40, Shape::Bytes),
+        OptDesc::new("NIS_server", 41, Shape::Ipv4List),
+        OptDesc::new("NTP_server", 42, Shape::Ipv4List),
+        OptDesc::new("vendor_specific", 43, Shape::Bytes),
+        OptDesc::new("NetBIOS_server", 44, Shape::Ipv4List),
+        OptDesc::new("NetBIOS_dist_server", 45, Shape::Ipv4List),
+        OptDesc::new("NetBIOS_node_type", 46, Shape::LooseUint(1)),
+        OptDesc::new("netbios-scope", 47, Shape::Bytes),
+        OptDesc::new("font-servers", 48, Shape::Ipv4List),
+        OptDesc::new("x-display-manager", 49, Shape::Ipv4List),
+        OptDesc::new("error_message", 56, Shape::Bytes),
+        OptDesc::new("vendor_class_id", 60, Shape::Bytes),
+        OptDesc::new("nwip-domain-name", 62, Shape::Bytes),
+        OptDesc::new("NISplus_domain", 64, Shape::Bytes),
+        OptDesc::new("NISplus_server", 65, Shape::Ipv4List),
+        OptDesc::new("tftp_server_name", 66, Shape::Bytes),
+        OptDesc::new("boot-file-name", 67, Shape::Bytes),
+        OptDesc::new("mobile-ip-home-agent", 68, Shape::Ipv4List),
+        OptDesc::new("SMTP_server", 69, Shape::Ipv4List),
+        OptDesc::new("POP3_server", 70, Shape::Ipv4List),
+        OptDesc::new("NNTP_server", 71, Shape::Ipv4List),
+        OptDesc::new("WWW_server", 72, Shape::Ipv4List),
+        OptDesc::new("Finger_server", 73, Shape::Ipv4List),
+        OptDesc::new("IRC_server", 74, Shape::Ipv4List),
+        OptDesc::new("StreetTalk_server", 75, Shape::Ipv4List),
+        OptDesc::new("StreetTalk_Dir_Assistance", 76, Shape::Ipv4List),
+        OptDesc::new("user_class", 77, Shape::Bytes),
+        OptDesc::new("slp_service_agent", 78, Shape::Bytes),
+        OptDesc::new("slp_service_scope", 79, Shape::Bytes),
+        OptDesc::new("rapid_commit", 80, Shape::Bytes),
+        OptDesc::new("client_FQDN", 81, Shape::Bytes),
+        OptDesc::new("nds-server", 85, Shape::Ipv4List),
+        OptDesc::new("nds-tree-name", 86, Shape::Bytes),
+        OptDesc::new("nds-context", 87, Shape::Bytes),
+        OptDesc::new("bcms-controller-namesi", 88, Shape::Bytes),
+        OptDesc::new("bcms-controller-address", 89, Shape::Ipv4List),
+        OptDesc::new("client-last-transaction-time", 91, Shape::LooseUint(4)),
+        OptDesc::new("associated-ip", 92, Shape::Ipv4List),
+        OptDesc::new("pxe_client_architecture", 93, Shape::Bytes),
+        OptDesc::new("pxe_client_network_interface", 94, Shape::Bytes),
+        OptDesc::new("pxe_client_machine_identifier", 97, Shape::Bytes),
+        OptDesc::new("uap-servers", 98, Shape::Bytes),
+        OptDesc::new("pcode", 100, Shape::Bytes),
+        OptDesc::new("tcode", 101, Shape::Bytes),
+        OptDesc::new("ipv6-only-preferred", 108, Shape::LooseUint(4)),
+        OptDesc::new("netinfo-server-address", 112, Shape::Ipv4List),
+        OptDesc::new("netinfo-server-tag", 113, Shape::Bytes),
+        OptDesc::new("captive-portal", 114, Shape::Bytes),
+        OptDesc::new("auto-config", 116, Shape::LooseUint(1)),
+        OptDesc::new("name-service-search", 117, Shape::LooseUint(2)),
+        OptDesc::new("subnet-selection", 118, Shape::Ipv4List),
+        OptDesc::new("classless_static_routes", 121, Shape::Bytes),
+        OptDesc::new("vendor_class", 124, Shape::Bytes),
+        OptDesc::new("vendor_specific_information", 125, Shape::Bytes),
+        OptDesc::new("tftp_server_ip_address", 128, Shape::Ipv4List),
+        OptDesc::new("pana-agent", 136, Shape::Ipv4List),
+        OptDesc::new("v4-lost", 137, Shape::Bytes),
+        OptDesc::new("capwap-ac-v4", 138, Shape::Ipv4List),
+        OptDesc::new("sip_ua_service_domains", 141, Shape::Bytes),
+        OptDesc::new("forcerenew_nonce_capable", 145, Shape::Bytes),
+        OptDesc::new("rdnss-selection", 146, Shape::Bytes),
+        OptDesc::new("tftp_server_address", 150, Shape::Ipv4List),
+        OptDesc::new("v4-portparams", 159, Shape::Bytes),
+        OptDesc::new("v4-captive-portal", 160, Shape::Bytes),
+        OptDesc::new("mud-url", 161, Shape::Bytes),
+        OptDesc::new("pxelinux_magic", 208, Shape::Bytes),
+        OptDesc::new("pxelinux_configuration_file", 209, Shape::Bytes),
+        OptDesc::new("pxelinux_path_prefix", 210, Shape::Bytes),
+        OptDesc::new("pxelinux_reboot_time", 211, Shape::Bytes),
+        OptDesc::new("option-6rd", 212, Shape::Bytes),
+        OptDesc::new("v4-access-domain", 213, Shape::Bytes),
         OptDesc::new("end", END, Shape::Bare),
     ],
 };

@@ -30,10 +30,10 @@ from pathlib import Path
 import wiry
 
 # Names we deliberately do not provide: a scope boundary, not a defect.
-# `restart` is scapy's "exec myself again"; wiry's console does not offer one.
+# psdump and pdfdump draw each packet through Packet.canvas_dump, which wiry
+# does not have.
 OUT_OF_SCOPE = {
-    "load_contrib", "load_layer",
-    "pdfdump", "psdump", "restart", "tcpdump", "voip_play", "wireshark",
+    "load_contrib", "load_layer", "pdfdump", "psdump", "voip_play",
 }
 
 
@@ -139,6 +139,14 @@ def namespace():
     return ns
 
 
+def _checkout_of(path):
+    """The scapy checkout a campaign file sits in, wherever under `test/`."""
+    for parent in path.parents:
+        if (parent / "test").is_dir() and (parent / "scapy").is_dir():
+            return parent
+    return path.parents[3]
+
+
 def utscapy_tools(root):
     """The helpers UTscapy puts in every session (`import_UTscapy_tools`):
     test scaffolding, not scapy's API. `scapy_path` resolves against the
@@ -187,16 +195,19 @@ _PLATFORM = {
     "osx": sys.platform == "darwin",
     "bsd": sys.platform.startswith(("freebsd", "openbsd", "netbsd", "darwin")),
 }
-# External programs scapy shells out to, none of which we provide.
-_NEEDS_TOOL = {"tshark", "tcpdump", "wireshark", "netaccess", "vcan_socket",
-               "needs_root", "root", "manufdb"}
+# What a test needs from the host that this run may not have: a network, root,
+# a CAN socket. A program is needed only where it is not on PATH.
+_NEEDS_TOOL = {"netaccess", "vcan_socket", "needs_root", "root"}
+_PROGRAMS = {"tshark", "tcpdump", "wireshark"}
 
 
 def environment_block(kw):
+    import shutil
+
     for key, present in _PLATFORM.items():
         if key in kw and not present:
             return f"needs a {key} host"
-    tool = kw & _NEEDS_TOOL
+    tool = (kw & _NEEDS_TOOL) | {p for p in kw & _PROGRAMS if shutil.which(p) is None}
     if tool:
         return f"needs {sorted(tool)[0]}"
     return None
@@ -266,7 +277,7 @@ def run(path, verbose=False, limit=None):
     # One namespace per file: UTscapy runs a campaign as one session, and
     # later tests read what earlier ones defined.
     ns = namespace()
-    ns.update(utscapy_tools(Path(path).resolve().parents[3]))
+    ns.update(utscapy_tools(_checkout_of(Path(path).resolve())))
     shown = []
     ns["__display__"] = lambda v: shown.append(v) if v is not None else None
 

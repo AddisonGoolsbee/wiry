@@ -61,7 +61,7 @@ def test_literal_text_survives(pkt):
 
 def test_a_bare_field_searches_the_layers(pkt):
     assert pkt.sprintf("%ttl%") == "64"
-    assert pkt.sprintf("%dport%") == "80"
+    assert pkt.sprintf("%r,dport%") == "80"
 
 
 def test_an_occurrence_number_picks_the_layer():
@@ -75,14 +75,17 @@ def test_the_colon_spelling_names_a_field(pkt):
 
 def test_format_modifiers(pkt):
     assert pkt.sprintf("%02x,IP.ttl%") == "40"
-    assert pkt.sprintf("%#05x,TCP.sport%") == "0x4d2"
+    assert pkt.sprintf("%#05xr,TCP.sport%") == "0x4d2"
     assert pkt.sprintf("%-6s,IP.ttl%|") == "64    |"
-    assert pkt.sprintf("%05d,TCP.dport%") == "00080"
+    assert pkt.sprintf("%05dr,TCP.dport%") == "00080"
 
 
-def test_the_raw_flag_is_accepted_after_a_modifier(pkt):
-    assert pkt.sprintf("%#05xr,TCP.sport%") == pkt.sprintf("%#05x,TCP.sport%")
+def test_the_raw_flag_reads_an_enumerated_field_as_its_integer(pkt):
+    assert pkt.sprintf("%IP.proto% %r,IP.proto%") == "tcp 6"
     assert pkt.sprintf("%r,TCP.flags%") == "S"
+    # The name is a string, so an integer conversion needs the raw value.
+    with pytest.raises(ValueError):
+        pkt.sprintf("%05d,IP.proto%")
 
 
 def test_a_flags_field_formats_as_its_name_and_its_bits(pkt):
@@ -196,8 +199,9 @@ def test_bulk_sprintf_crosses_once(capture, monkeypatch):
 def test_show2_fills_in_what_building_computes():
     p = IP(src="1.2.3.4", dst="5.6.7.8") / TCP()
     built = p.show2_str()
-    assert "len        = 40" in built
-    assert "chksum     = 0" not in built
+    assert "len       = 40" in built
+    assert "chksum    = 0x0" not in built
+    assert "chksum    = None" in p.show_str()
 
 
 def test_show2_of_a_dissected_packet_is_its_show(capture):
@@ -347,9 +351,17 @@ def test_the_bulk_summary_agrees_with_the_per_packet_one(capture):
 
 def test_conversations_counts_the_edges(capture):
     dot = capture.conversations()
-    assert dot.startswith("digraph")
-    assert '"10.1.1.1" -> "10.1.1.2" [label="2"];' in dot
-    assert "10.4.4.1" not in dot
+    assert dot.startswith('digraph "conv" {\n')
+    assert '\t "10.1.1.1" -> "10.1.1.2" [label="2"]\n' in dot
+    assert '\t "10.4.4.1" -> "10.4.4.2" [label="1"]\n' in dot
+    assert '\t "2001:db8::1" -> "2001:db8::3" [label="1"]\n' in dot
+    assert dot.endswith("}\n")
+
+
+def test_the_bulk_conversations_agree_with_the_per_packet_ones(capture):
+    from wiry import PacketList
+
+    assert capture.conversations() == PacketList(list(capture)).conversations()
 
 
 def test_conversations_takes_a_custom_extractor(capture):
@@ -359,26 +371,45 @@ def test_conversations_takes_a_custom_extractor(capture):
     assert "ff:ff:ff:ff:ff:ff" in dot
 
 
+def test_conversations_quote_what_the_packet_carries():
+    from wiry import PacketList
+
+    dot = PacketList([IP()]).conversations(lambda p: ('a" [image="x"]', "b"))
+    assert '"a\\" [image=\\"x\\"]"' in dot
+
+
 def test_conversations_without_graphviz_says_so(capture, monkeypatch):
     import shutil
 
     monkeypatch.setattr(shutil, "which", lambda *a, **kw: None)
-    with pytest.raises(RuntimeError, match="not on PATH"):
+    with pytest.raises(OSError, match="not on PATH"):
         capture.conversations(target="/dev/null")
 
 
 def test_make_table_lays_out_rows_and_columns(capture):
     table = capture.make_table(
-        lambda p: (p.layers()[-1], len(p.layers()), "x"), lfilter=lambda p: True
+        lambda p: (p.layers()[-1], len(p.layers()), "x"), dump=True
     )
     lines = table.splitlines()
     assert lines[0].split() == sorted({p.layers()[-1] for p in capture})
     assert all(line.split()[0].isdigit() for line in lines[1:])
 
 
+def test_make_table_prints_unless_asked_for_the_text(capture, capsys):
+    assert capture.make_table(lambda p: ("c", "r", "z")) is None
+    assert capsys.readouterr().out == "  c \nr z \n"
+
+
 def test_make_table_takes_the_last_cell_for_a_repeated_coordinate(capture):
-    table = capture.make_table(lambda p: ("c", "r", p.layers()[-1]))
+    table = capture.make_table(lambda p: ("c", "r", p.layers()[-1]), dump=True)
     assert table.splitlines()[1].split() == ["r", capture[len(capture) - 1].layers()[-1]]
+
+
+def test_make_lined_and_tex_tables_frame_the_same_cells(capture):
+    lined = capture.make_lined_table(lambda p: ("c", "r", "z"), dump=True)
+    assert lined == "--+---+\n  | c | \n--+---+\nr | z | \n--+---+\n"
+    tex = capture.make_tex_table(lambda p: ("c", "r", "a_b"), dump=True)
+    assert tex == "\\hline\n & c \\\\\n\\hline\nr & a\\_b \\\\\n\\hline\n"
 
 
 def test_plot_without_matplotlib_says_how_to_install_it(capture, monkeypatch):

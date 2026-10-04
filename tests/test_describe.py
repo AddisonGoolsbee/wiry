@@ -88,46 +88,52 @@ def test_json_keeps_a_repeated_layer_name():
     assert sum(k.startswith("IP") for k in got) == 2
 
 
-def test_hexdiff_marks_the_rows_that_differ():
-    a = Ether() / IP() / TCP()
-    b = Ether() / IP(ttl=3) / TCP()
+def test_hexdiff_prints_one_row_for_a_row_both_sides_share():
+    row = hexdiff_str(b"ab", b"ab")
+    assert row == "0000 0000   61 62" + " " * 46 + "ab\n"
+
+
+def test_hexdiff_prints_each_side_of_a_row_that_differs():
+    # scapy's own expectation, test/regression.uts "Test hexdiff function".
+    assert hexdiff_str("abcde", "abCde") == (
+        "0000        61 62 63 64 65                                     abcde\n"
+        "     0000   61 62 43 64 65                                     abCde\n"
+    )
+
+
+def test_hexdiff_shows_an_insertion_as_a_gap_with_a_negative_offset():
+    assert hexdiff_str("add_common_", "_common_removed") == (
+        "0000        61 64 64 5F 63 6F 6D 6D  6F 6E 5F                  add_common_     \n"
+        "     -003            5F 63 6F 6D 6D  6F 6E 5F 72 65 6D 6F 76      _common_remov\n"
+        "     000d   65 64                                              ed\n"
+    )
+
+
+def test_hexdiff_of_packets_compares_their_octets():
+    a = IP(dst="127.0.0.1", src="127.0.0.1")
+    b = IP(dst="127.0.0.2", src="127.0.0.1")
     lines = hexdiff_str(a, b).splitlines()
-    assert any(line.startswith("|") for line in lines)
-    assert not all(line.startswith("|") for line in lines)
-
-
-def test_hexdiff_of_identical_packets_marks_nothing():
-    p = Ether() / IP() / TCP()
-    assert not any(l.startswith("|") for l in hexdiff_str(p, p).splitlines())
-
-
-def test_hexdiff_shows_an_inserted_run_as_a_gap_not_a_shift():
-    from wiry.describe import _aligned
-
-    a = b"abcdefghijklmnop" * 2
-    b = a[:8] + b"XY" + a[8:]
-    left, right = _aligned(a, b)
-    assert len(left) == len(right) == len(b)
-    assert left.count(None) == 2
-    assert right.count(None) == 0
-    assert len(hexdiff_str(a, b).splitlines()) == 3
-
-
-def test_hexdiff_takes_bytes_as_well_as_packets():
-    assert hexdiff_str(b"ab", b"ab").startswith("  0000  61 62")
+    assert [line[:9] for line in lines] == ["0000     ", "     0000", "0010     ", "     0010"]
 
 
 def test_hexdiff_of_empty_input_is_empty():
     assert hexdiff_str(b"", b"") == ""
 
 
-def test_hexdiff_of_a_large_packet_falls_back_to_offsets():
-    from wiry.describe import ALIGN_LIMIT
+def test_hexdiff_of_large_input_switches_to_difflib_and_stays_quick():
+    import time
 
-    a = bytes(ALIGN_LIMIT + 64)
-    out = hexdiff_str(a, a)
-    assert not any(l.startswith("|") for l in out.splitlines())
-    assert len(out.splitlines()) == (ALIGN_LIMIT + 64) // 16
+    a = bytes(range(256)) * 16
+    b = a[:100] + b"XY" + a[100:]
+    start = time.monotonic()
+    out = hexdiff_str(a, b)
+    assert time.monotonic() - start < 5
+    assert "58 59" in out
+
+
+def test_hexdiff_refuses_an_unknown_algorithm():
+    with pytest.raises(ValueError, match="Unknown algorithm"):
+        hexdiff_str(b"a", b"b", algo="levenshtein")
 
 
 def test_command_keeps_bytes_past_the_dissection_depth_bound():
@@ -149,10 +155,8 @@ def test_hexdiff_of_a_padded_pair_does_not_go_quadratic():
     # assertion after the call cannot.
     import threading
 
-    from wiry.describe import ALIGN_LIMIT
-
-    a = bytes(ALIGN_LIMIT)
-    b = bytes(ALIGN_LIMIT - 1) + b"\x01"
+    a = bytes(1 << 16)
+    b = bytes((1 << 16) - 1) + b"\x01"
     done = threading.Thread(target=hexdiff_str, args=(a, b), daemon=True)
     done.start()
     done.join(10.0)

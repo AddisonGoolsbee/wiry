@@ -19,12 +19,20 @@ len = 8
 name = "opcode"
 off = 8
 len = 8
+enum = { 0 = "Hello", 1 = "Coup", 2 = "Resign", 3 = "Advertise" }
 
 [[fields]]
 name = "state"
 off = 16
 len = 8
 default = 16
+[fields.enum]
+0 = "Initial"
+1 = "Learn"
+2 = "Listen"
+4 = "Speak"
+8 = "Standby"
+16 = "Active"
 
 [[fields]]
 name = "hellotime"
@@ -87,3 +95,8 @@ holdtime = 10
 priority = 120
 group = 0
 reserved = 0
+
+[provenance]
+source = "scapy/layers/hsrp.py"
+version = "scapy 2.7.0"
+changed = ["2026-10-03 — enumerated names of opcode, state transcribed"]

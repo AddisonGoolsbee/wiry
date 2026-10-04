@@ -17,6 +17,7 @@ name = "algo"
 off = 0
 len = 16
 kind = "le_uint"
+enum = { 0 = "open", 1 = "sharedkey" }
 
 [[fields]]
 name = "seqnum"
@@ -30,6 +31,18 @@ name = "status"
 off = 32
 len = 16
 kind = "le_uint"
+[fields.enum]
+0 = "success"
+1 = "failure"
+10 = "cannot-support-all-cap"
+11 = "inexist-asso"
+12 = "asso-denied"
+13 = "algo-unsupported"
+14 = "bad-seq-num"
+15 = "challenge-failure"
+16 = "timeout"
+17 = "AP-full"
+18 = "rate-unsupported"
 
 [[fields]]
 name = "options"
@@ -43,3 +56,8 @@ bytes = [0x00, 0x00, 0x01, 0x00, 0x00, 0x00]
 algo = 0
 seqnum = 1
 status = 0
+
+[provenance]
+source = "scapy/layers/dot11.py"
+version = "scapy 2.7.0"
+changed = ["2026-10-03 — enumerated names of algo, status transcribed"]

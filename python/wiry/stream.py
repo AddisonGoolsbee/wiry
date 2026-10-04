@@ -30,6 +30,7 @@ repeated in DEVIATIONS E25.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from itertools import islice
 from typing import Any, Iterator
 
 from . import PacketList, Packet
@@ -238,7 +239,11 @@ class Streams(Mapping):
         return [TCPStream(self._s, i) for i in range(len(self._s))]
 
     def __repr__(self) -> str:
-        return f"<Streams: {len(self._s)} streams>"
+        from .columnar import _head
+        return f"<Streams: {len(self._s)} streams {_head(list(islice(self._at, 6)))}>"
+
+    def _repr_pretty_(self, p: Any, cycle: bool) -> None:
+        p.text(repr(self))
 
 
 def streams(pl: Any) -> Streams:

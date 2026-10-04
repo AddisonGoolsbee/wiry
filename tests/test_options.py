@@ -35,9 +35,10 @@ def test_reads_a_realistic_syn_option_block():
     pkt = Ether(_tcp_with(opts))
     assert pkt[TCP].options == [
         ("MSS", 1460),
-        ("SAckOK", None),
+        ("SAckOK", b""),
         ("NOP", None),
         ("WScale", 7),
+        ("EOL", None),
     ]
 
 
@@ -72,20 +73,22 @@ def test_a_layer_without_an_option_region_reports_none_shaped_result():
         _ = pkt[Ether].options
 
 
+# Padding to a whole word is EOL octets, and the first reads back as an
+# option, as scapy reads it; a region that fills its words has none.
 @pytest.mark.parametrize(
-    "opts",
+    "opts, padded",
     [
-        [("MSS", 1460)],
-        [("MSS", 1460), ("SAckOK", None)],
-        [("MSS", 1460), ("SAckOK", None), ("NOP", None), ("WScale", 7)],
-        [("Timestamp", (111, 222))],
-        [("WScale", 7)],
+        ([("MSS", 1460)], False),
+        ([("MSS", 1460), ("SAckOK", b"")], True),
+        ([("MSS", 1460), ("SAckOK", b""), ("NOP", None), ("WScale", 7)], True),
+        ([("Timestamp", (111, 222))], True),
+        ([("WScale", 7)], True),
     ],
 )
-def test_written_options_read_back_identically(opts):
+def test_written_options_read_back_identically(opts, padded):
     pkt = Ether() / IP(dst="10.0.0.1") / TCP(dport=443, options=opts)
     back = Ether(bytes(pkt))
-    assert back[TCP].options == opts
+    assert back[TCP].options == opts + [("EOL", None)] * padded
 
 
 def test_writing_options_updates_the_data_offset():
@@ -173,7 +176,7 @@ def test_bootp_option_field_is_the_magic_cookie():
     assert pkt[DHCP].raw_options() == bytes([255])
 
 
-# RFC 2132 §9.13: option 60 is unnamed here, so it is labelled with its code.
+# RFC 2132 §9.13: option 60, the vendor class identifier.
 DHCP_WITH_VENDOR_CLASS = bytes(
     [53, 1, 3, 60, 8]
 ) + b"MSFT 5.0" + bytes([55, 3, 1, 3, 6, 255])
@@ -181,7 +184,7 @@ DHCP_WITH_VENDOR_CLASS = bytes(
 
 def test_a_parsed_option_list_encodes_back_to_the_same_bytes():
     pkt = UDP(_dhcp_frame(DHCP_WITH_VENDOR_CLASS))
-    assert ("60", b"MSFT 5.0") in pkt[DHCP].options
+    assert ("vendor_class_id", b"MSFT 5.0") in pkt[DHCP].options
     assert bytes(DHCP(options=pkt[DHCP].options)) == DHCP_WITH_VENDOR_CLASS
 
 

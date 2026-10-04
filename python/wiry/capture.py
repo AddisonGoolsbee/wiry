@@ -1,12 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Derived from scapy: scapy/sendrecv.py (the socket loop of AsyncSniffer._run)
+#   scapy 2.7.0, upstream commit 7d69454
+#   Copyright (C) Philippe Biondi <phil@secdev.org>
+#   Copyright (C) the scapy contributors
+#
+# Changed by the wiry authors:
+#   2026-10-03 — sniff(opened_socket=) reads any SuperSocket with scapy's loop,
+#                and sniff(offline=) takes packets as well as captures.
+
 """Live capture and injection, plus the offline driver for ``sniff``.
 
 Import cost is zero until one of these names is touched: ``wiry`` exports
 them through its module ``__getattr__``.
 
-``sniff`` runs one state machine whatever feeds it. Filters are ANDed cheapest
-first: ``filter=`` (BPF, in the kernel's own bytecode) rejects a packet for
-nothing, ``where=`` (a wiry extension, evaluated in Rust) rejects one before
-it ever becomes a Python object, and only survivors reach ``lfilter=``.
+``sniff`` runs one state machine over an interface or a capture. Filters are
+ANDed cheapest first: ``filter=`` (BPF, in the kernel's own bytecode) rejects a
+packet for nothing, ``where=`` (a wiry extension, evaluated in Rust) rejects
+one before it ever becomes a Python object, and only survivors reach
+``lfilter=``. A socket handed in as ``opened_socket=`` is read one ``recv`` at a
+time in Python instead, because that is what a socket object offers.
 
 Everything except ``sniff(offline=...)`` needs libpcap, which is loaded when a
 capture is first asked for rather than linked at build time. Where it is absent
@@ -21,6 +34,7 @@ import atexit
 import math
 import os
 import threading
+import time
 import warnings
 import weakref
 from typing import Any, Callable, Optional
@@ -28,6 +42,8 @@ from typing import Any, Callable, Optional
 from . import Packet, PacketList, _as_path, expand
 from . import _wiry as _b
 from .columnar import _normalize_where
+from .error import Scapy_Exception
+from .error import log_runtime as _log
 
 CaptureUnavailable = _b.CaptureUnavailable
 
@@ -92,16 +108,204 @@ def _printing(prn: Optional[Callable], quiet: bool) -> Optional[Callable]:
     return show
 
 
+class _MixedLinks(Exception):
+    """Packets one capture cannot hold: they start with different link
+    layers, or with a layer no link type names."""
+
+    def __init__(self, pkts: list):
+        super().__init__()
+        self.pkts = pkts
+
+
 def _offline_source(offline: Any) -> Any:
-    if isinstance(offline, PacketList):
-        return offline._list
-    if isinstance(offline, (str, os.PathLike)):
+    """A capture buffer for whatever ``offline=`` was given: a path, a binary
+    file object, a ``PacketList``, or packets, which are written into one so
+    that the same machine and the same BPF read them."""
+    if isinstance(offline, PacketList) and offline._rust is not None:
+        return offline._rust
+    if isinstance(offline, (str, os.PathLike)) or hasattr(offline, "read"):
         with _as_path(offline) as real:
             return _b.read_pcap(real)
-    raise NotImplementedError(
-        "offline= takes a capture file path or a PacketList; for a list of "
-        "packets, write it with wrpcap() first"
-    )
+    from .supersocket import IterSocket
+
+    pkts = []
+    sock = IterSocket(offline)
+    while True:
+        try:
+            pkts.append(sock.recv())
+        except EOFError:
+            break
+    links = {_link_of(p) for p in pkts}
+    unnamed = any(isinstance(p, Packet) and _link_of(p) == _RAW_LINK
+                  and p.layers()[:1] != ["Raw"] for p in pkts)
+    if len(links) > 1 or unnamed:
+        raise _MixedLinks(pkts)
+    return _capture_of(pkts)
+
+
+# Layer name -> the link type a capture of it declares; the rest are written
+# as DLT_USER0 and read back as Raw, so their octets still round-trip.
+_LINK_OF = {
+    "Ether": 1, "Loopback": 0, "IP": 228, "IPv6": 229, "CookedLinux": 113,
+    "CookedLinuxV2": 276, "Dot11": 105, "RadioTap": 127,
+}
+
+_RAW_LINK = 147
+
+
+def _link_of(pkt: Any) -> int:
+    if isinstance(pkt, Packet):
+        names = pkt.layers()
+        if names:
+            return _LINK_OF.get(names[0], _RAW_LINK)
+    return _RAW_LINK
+
+
+def _capture_of(pkts: list) -> Any:
+    """Python packets that share one link type, as a capture buffer."""
+    link = _link_of(pkts[0]) if pkts else 1
+    return _b.PktList.from_frames([
+        (_octets(p), float(getattr(p, "time", 0.0) or 0.0),
+         int(getattr(p, "wirelen", 0) or 0))
+        for p in pkts
+    ], link)
+
+
+def _socket_map(opened_socket: Any) -> dict:
+    """scapy's three spellings: one socket, a list, or ``{socket: label}``."""
+    if isinstance(opened_socket, dict):
+        return dict(opened_socket)
+    if isinstance(opened_socket, (list, tuple)):
+        return {s: f"socket{i}" for i, s in enumerate(opened_socket)}
+    return {opened_socket: "socket0"}
+
+
+def _sniff_sockets(
+    socks: dict,
+    *,
+    count: int = 0,
+    store: int = 1,
+    prn: Optional[Callable] = None,
+    lfilter: Optional[Callable] = None,
+    timeout: Optional[float] = None,
+    stop_filter: Optional[Callable] = None,
+    quiet: bool = False,
+    session: Any = None,
+    started_callback: Optional[Callable] = None,
+    stop_event: Optional[threading.Event] = None,
+) -> PacketList:
+    """``sniff`` over socket objects, as scapy reads them.
+
+    A packet goes session, then ``lfilter``, then ``prn``, then the stop
+    checks, which is the order the Rust machine applies to a capture, and
+    ``count`` counts survivors there as here. A socket that raises
+    ``EOFError`` is closed and dropped; one that fails otherwise is closed,
+    reported on ``scapy.runtime`` and dropped, and the rest are still read.
+    """
+    from .stream import as_session, bulk_hook
+
+    session = as_session(session)
+    if bulk_hook(session) is not None:
+        raise NotImplementedError(
+            "session= that reassembles needs the whole capture at once; "
+            "sniff the socket to a PacketList, then pass it to offline="
+        )
+    show = _printing(prn, quiet)
+    live = dict(socks)
+    first = next(iter(live))
+    wait = getattr(first, "select", None) or _select_objects()
+    deadline = None
+    if timeout is not None and math.isfinite(float(timeout)):
+        deadline = time.monotonic() + float(timeout)
+    out: list = []
+    seen = 0
+    if started_callback is not None:
+        started_callback()
+    try:
+        while live:
+            if stop_event is not None and stop_event.is_set():
+                break
+            remain = None
+            if deadline is not None:
+                remain = deadline - time.monotonic()
+                if remain <= 0:
+                    break
+            if stop_event is not None:
+                remain = _POLL_SLICE if remain is None else min(remain, _POLL_SLICE)
+            done = False
+            for s in wait(list(live), remain):
+                if s not in live:
+                    continue
+                try:
+                    pkt = s.recv()
+                except EOFError:
+                    _quietly_close(s)
+                    del live[s]
+                    continue
+                except Exception as exc:
+                    _quietly_close(s)
+                    del live[s]
+                    _log.warning("Socket %s failed with '%s'. It was closed.",
+                                 s, exc)
+                    # scapy's threshold: 1 is for dissection, 2 for sockets.
+                    if conf.debug_dissector >= 2:
+                        raise
+                    continue
+                if pkt is None:
+                    continue
+                try:
+                    pkt.sniffed_on = live[s]
+                except AttributeError:
+                    pass
+                if session is not None:
+                    pkt = _run_session(session, pkt)
+                    if pkt is None:
+                        continue
+                if lfilter is not None and not lfilter(pkt):
+                    continue
+                seen += 1
+                if store:
+                    out.append(pkt)
+                if show is not None:
+                    show(pkt)
+                if (stop_filter is not None and stop_filter(pkt)) or \
+                        0 < count <= seen:
+                    done = True
+                    break
+            if done:
+                break
+    except KeyboardInterrupt:
+        pass
+    return PacketList(out)
+
+
+# How often a sniff that can be stopped from outside looks at its stop flag.
+_POLL_SLICE = 0.05
+
+
+def _select_objects() -> Callable:
+    from .supersocket import select_objects
+    return select_objects
+
+
+def _quietly_close(sock: Any) -> None:
+    try:
+        sock.close()
+    except Exception:
+        pass
+
+
+def _run_session(session: Any, pkt: Any) -> Any:
+    try:
+        return session.process(pkt)
+    except Exception as exc:
+        if conf.debug_dissector:
+            raise
+        warnings.warn(
+            f"{type(session).__name__}.process failed with {exc!r}; "
+            "passing the packet through", RuntimeWarning, stacklevel=3,
+        )
+        return pkt
 
 
 def _live_args(
@@ -187,6 +391,29 @@ def _add_session(args: dict, session: Any, store: Any) -> None:
     args["wrap"], args["lfilter"] = wrap, keep
 
 
+class BadFilter(Scapy_Exception, ValueError):
+    """A BPF expression libpcap would not compile."""
+
+
+def _filter_errors(fn: Callable) -> Callable:
+    """scapy raises its own exception for a filter that does not compile;
+    the ValueError base keeps ``except ValueError`` callers working."""
+    import functools
+
+    @functools.wraps(fn)
+    def call(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except ValueError as exc:
+            if str(exc).startswith("invalid capture filter") and \
+                    not isinstance(exc, BadFilter):
+                raise BadFilter(str(exc)) from exc
+            raise
+
+    return call
+
+
+@_filter_errors
 def sniff(
     *,
     iface: Any = None,
@@ -204,6 +431,7 @@ def sniff(
     where: Any = None,
     session: Any = None,
     opened_socket: Any = None,
+    started_callback: Optional[Callable] = None,
 ) -> PacketList:
     """Capture packets, or replay a capture file through the same machine.
 
@@ -225,19 +453,27 @@ def sniff(
     rather than a Python loop, and that needs every packet in hand, so those
     are offline only.
 
-    ``opened_socket=`` is refused: one state machine drives every source here,
-    it lives in Rust, and reading a Python socket through it would mean a
-    second one that could disagree. ``Automaton(recvsock=...)`` is the surface
-    that listens on a socket object.
+    ``offline=`` takes a capture path, a binary file object, a ``PacketList``,
+    or packets: a packet, a template, or a list of packets or of bytes, which
+    are written into a capture buffer first so the same machine reads them.
+
+    ``opened_socket=`` takes a socket object, a list of them, or a dict
+    mapping each to the label ``sniffed_on`` will carry, and reads them one
+    ``recv`` at a time, as scapy does. ``filter=`` is not applied to those,
+    as scapy does not apply it; ``where=`` is a query over a capture buffer
+    and is refused there. ``started_callback`` runs once the source is ready,
+    which on an interface would be before Rust opens the handle, so there it
+    is refused.
     """
     from .stream import as_session, bulk_hook
 
     if opened_socket is not None:
-        raise NotImplementedError(
-            "sniff(opened_socket=) is not supported: the sniff state machine "
-            "is one implementation in Rust and a socket handed in from Python "
-            "cannot feed it. Read the socket directly, or drive it with an "
-            "Automaton, whose recvsock= takes exactly such an object"
+        return _sniff_opened(
+            opened_socket, iface=iface, count=count, store=store, prn=prn,
+            filter=filter, lfilter=lfilter, timeout=timeout,
+            stop_filter=stop_filter, offline=offline, quiet=quiet,
+            promisc=promisc, where=where, session=session,
+            started_callback=started_callback,
         )
 
     session = as_session(session)
@@ -248,6 +484,13 @@ def sniff(
                 "session= needs the whole capture at once and so works with "
                 "offline= only; sniff to a PacketList, then pass it back in"
             )
+        if started_callback is not None:
+            raise NotImplementedError(
+                "started_callback= cannot be honoured on an interface: the "
+                "handle is opened inside the Rust capture loop, so a callback "
+                "run before it would let what it provokes go uncaptured. "
+                "Use AsyncSniffer and start sending once it is running"
+            )
         _b.capture_check()
         args = _live_args(
             iface=iface, count=count, store=store, prn=prn, filter=filter,
@@ -255,8 +498,25 @@ def sniff(
             quiet=quiet, promisc=promisc, snaplen=snaplen, where=where,
         )
         _add_session(args, session, store)
-        return PacketList(_b.sniff_live(**args))
-    src = _offline_source(offline)
+        return PacketList(_b.sniff_live(**args), "Sniffed")
+    try:
+        src = _offline_source(offline)
+    except _MixedLinks as mixed:
+        if bulk is not None or filter is not None or where is not None:
+            raise NotImplementedError(
+                "these packets start with different link layers, or with one "
+                "no link type names, so no one capture holds them, and "
+                "session=, filter= and where= all run over a capture. Sniff "
+                "them without, or keep the link layers alike"
+            ) from None
+        from .supersocket import IterSocket
+
+        return _sniff_opened(
+            IterSocket(mixed.pkts), iface=None, count=count, store=store,
+            prn=prn, filter=None, lfilter=lfilter, timeout=timeout,
+            stop_filter=stop_filter, offline=None, quiet=quiet, promisc=None,
+            where=None, session=session, started_callback=started_callback,
+        )
     if bulk is not None:
         # The capture filter runs first, as libpcap's would, so a session never
         # reassembles a stream the caller filtered out.
@@ -282,7 +542,63 @@ def sniff(
     )
     if bulk is None:
         _add_session(offline_args, session, store)
-    return PacketList(src.sniff_offline(**offline_args))
+    if started_callback is not None:
+        started_callback()
+    return PacketList(src.sniff_offline(**offline_args), "Sniffed")
+
+
+def _sniff_opened(opened_socket: Any, *, iface: Any, count: int, store: int,
+                  prn: Any, filter: Any, lfilter: Any, timeout: Any,
+                  stop_filter: Any, offline: Any, quiet: bool, promisc: Any,
+                  where: Any, session: Any, started_callback: Any,
+                  stop_event: Optional[threading.Event] = None) -> PacketList:
+    """The socket half of ``sniff``. As scapy does, an ``iface`` or
+    ``offline`` given alongside is read as one more socket."""
+    if where is not None:
+        raise NotImplementedError(
+            "where= is a query over a capture buffer, and packets read from a "
+            "socket object are not in one; use lfilter="
+        )
+    socks = _socket_map(opened_socket)
+    if offline is not None:
+        from .supersocket import IterSocket
+
+        try:
+            source = PacketList(_offline_source(offline))
+        except _MixedLinks as mixed:
+            source = mixed.pkts
+        socks[IterSocket(source)] = None
+    opened = []
+    if iface is not None:
+        listener = conf.l2listen(iface=iface, filter=filter, promisc=promisc)
+        opened.append(listener)
+        socks[listener] = str(iface)
+    try:
+        return _sniff_sockets(
+            socks, count=int(count), store=store, prn=prn, lfilter=lfilter,
+            timeout=timeout, stop_filter=stop_filter, quiet=quiet,
+            session=session, started_callback=started_callback,
+            stop_event=stop_event,
+        )
+    finally:
+        for s in opened:
+            _quietly_close(s)
+
+
+def _opened_defaults(args: dict) -> dict:
+    """``sniff``'s keywords for the socket path, defaults filled; an unknown
+    one is a ``TypeError`` here as it is there."""
+    known = dict(
+        iface=None, count=0, store=1, prn=None, filter=None, lfilter=None,
+        timeout=None, stop_filter=None, offline=None, quiet=False,
+        promisc=None, where=None, session=None, started_callback=None,
+    )
+    extra = set(args) - set(known) - {"snaplen"}
+    if extra:
+        raise TypeError(f"sniff() got an unexpected keyword argument "
+                        f"{sorted(extra)[0]!r}")
+    known.update((k, v) for k, v in args.items() if k != "snaplen")
+    return known
 
 
 _RUNNING: "weakref.WeakSet[AsyncSniffer]" = weakref.WeakSet()
@@ -356,8 +672,14 @@ class AsyncSniffer:
 
     def _run(self) -> None:
         args = dict(self.args)
-        args["stop_filter"] = self._stopping(args.get("stop_filter"))
         try:
+            if args.get("opened_socket") is not None:
+                self._results = _sniff_opened(
+                    args.pop("opened_socket"), stop_event=self._stop,
+                    **_opened_defaults(args),
+                )
+                return
+            args["stop_filter"] = self._stopping(args.get("stop_filter"))
             self._results = sniff(**args)
         except BaseException as exc:  # re-raised out of join()
             self._exc = exc
@@ -378,7 +700,8 @@ class AsyncSniffer:
                 )
             self._results = None
             self._exc = None
-            if self.args.get("offline") is None:
+            if (self.args.get("offline") is None
+                    and self.args.get("opened_socket") is None):
                 from .stream import as_session, bulk_hook
 
                 _b.capture_check()
@@ -391,7 +714,7 @@ class AsyncSniffer:
                     )
                 live_args = _live_args(**kwargs)
                 _add_session(live_args, session, kwargs.get("store", 1))
-                live = _b.LiveSniffer(**live_args)
+                live = _filter_errors(_b.LiveSniffer)(**live_args)
                 live.start()
                 self._live = live
                 self._started = True
@@ -573,15 +896,32 @@ def _passes(count: Optional[int]) -> int:
     return 1 if count is None else int(count)
 
 
-def _refuse_unsupported(realtime: Any, socket: Any) -> None:
-    if socket is not None:
-        raise NotImplementedError(
-            "socket= is not supported: there is no socket object to hand in"
-        )
+def _refuse_unsupported(realtime: Any) -> None:
     if realtime:
         raise NotImplementedError(
             "realtime= is not supported; inter= paces the send instead"
         )
+
+
+def _send_on(sock: Any, x: Any, count: Optional[int], loop: int, gap: float,
+             verbose: Optional[int], return_packets: bool) -> Any:
+    """``socket=``: every packet goes through that socket's ``send``, which
+    is a Python call per packet, the socket being a Python object."""
+    pkts = _as_list(x)
+    sent = 0
+    n = 0
+    try:
+        while loop or n < _passes(count):
+            for p in pkts:
+                sock.send(p)
+                sent += 1
+                if gap:
+                    time.sleep(gap)
+            n += 1
+    except KeyboardInterrupt:
+        pass
+    _report(sent, verbose)
+    return pkts if return_packets else None
 
 
 def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
@@ -593,9 +933,11 @@ def send(x: Any, inter: float = 0, loop: int = 0, count: Optional[int] = None,
     IPv4 only: the raw socket writes datagrams with the header included, and
     IPv6 needs a second address family. ``loop`` repeats until interrupted.
     """
-    _b.capture_check()
-    _refuse_unsupported(realtime, socket)
+    _refuse_unsupported(realtime)
     gap = _pause(inter)
+    if socket is not None:
+        return _send_on(socket, x, count, loop, gap, verbose, return_packets)
+    _b.capture_check()
     _, ip = _local_addrs(_iface_name(iface))
     if isinstance(x, Packet):
         x = _with_src(x, None, ip)
@@ -623,9 +965,11 @@ def sendp(x: Any, inter: float = 0, loop: int = 0, iface: Any = None,
     The whole list is serialised here and crosses into Rust once; the repeat
     and the ``inter`` pacing happen there. ``loop`` repeats until interrupted.
     """
-    _b.capture_check()
-    _refuse_unsupported(realtime, socket)
+    _refuse_unsupported(realtime)
     gap = _pause(inter)
+    if socket is not None:
+        return _send_on(socket, x, count, loop, gap, verbose, return_packets)
+    _b.capture_check()
     name = _iface_name(iface)
     mac, ip = _local_addrs(name)
     if isinstance(x, Packet):
@@ -791,8 +1135,10 @@ class _Conf:
                  "debug_dissector", "recv_poll_rate", "route_autoload",
                  "route6_autoload", "interactive", "histfile", "startup_file",
                  "session", "_iface", "_route", "_route6",
-                 "_l3socket", "_l2socket", "_l2listen", "_loopback",
-                 "_asn1_codec", "ASN1_default_long_size", "_mib")
+                 "_l3socket", "_l2socket", "_l2listen", "_loopback", "_prog",
+                 "warning_threshold", "temp_files", "auto_crop_tables",
+                 "_stats", "_manufdb", "_asn1_codec", "ASN1_default_long_size",
+                 "_mib")
 
     def __init__(self) -> None:
         self.verb = 2
@@ -826,6 +1172,111 @@ class _Conf:
         # shortest form that fits.
         self.ASN1_default_long_size = 0
         self._mib: Any = None
+        self._prog: Any = None
+        # Seconds within which a third warning from one call site is dropped.
+        self.warning_threshold = 5
+        # What get_temp_file() made; scapy_delete_temp_files() removes them.
+        self.temp_files: list = []
+        # Whether pretty_list() crops a table to the terminal's width.
+        self.auto_crop_tables = True
+        self._stats: Optional[list] = None
+        self._manufdb: Any = None
+
+    @property
+    def version(self) -> str:
+        return _b.__version__
+
+    @property
+    def stats_classic_protocols(self) -> list:
+        """The layers a PacketList's repr counts, in priority order."""
+        if self._stats is None:
+            from . import ICMP, TCP, UDP
+
+            self._stats = [TCP, UDP, ICMP]
+        return self._stats
+
+    @stats_classic_protocols.setter
+    def stats_classic_protocols(self, value: Any) -> None:
+        self._stats = list(value)
+
+    @property
+    def raw_layer(self) -> Any:
+        from . import Raw
+
+        return Raw
+
+    @property
+    def padding_layer(self) -> Any:
+        from . import Padding
+
+        return Padding
+
+    @property
+    def manufdb(self) -> Any:
+        """The OUI database, loaded on first use: Wireshark's ``manuf`` where
+        the host has one, wiry's bundled copy where it does not."""
+        if self._manufdb is None:
+            from . import data
+
+            self._manufdb = data.MANUFDB
+        return self._manufdb
+
+    @manufdb.setter
+    def manufdb(self, value: Any) -> None:
+        self._manufdb = value
+
+    @property
+    def protocols(self) -> Any:
+        from . import data
+
+        return data.IP_PROTOS
+
+    @property
+    def ethertypes(self) -> Any:
+        from . import data
+
+        return data.ETHER_TYPES
+
+    @property
+    def services_tcp(self) -> Any:
+        from . import data
+
+        return data.TCP_SERVICES
+
+    @property
+    def services_udp(self) -> Any:
+        from . import data
+
+        return data.UDP_SERVICES
+
+    @property
+    def services_sctp(self) -> Any:
+        from . import data
+
+        return data.SCTP_SERVICES
+
+    @property
+    def logLevel(self) -> int:
+        from .error import log_scapy
+
+        return log_scapy.level
+
+    @logLevel.setter
+    def logLevel(self, value: int) -> None:
+        from .error import log_scapy
+
+        log_scapy.setLevel(value)
+
+    @property
+    def prog(self) -> Any:
+        """Where the external programs are: tcpdump, tshark, tcpreplay and
+        the rest. None of them is a dependency; each wrapper says which one is
+        missing when it is."""
+        if self._prog is None:
+            from .external import ProgPath
+
+            self._prog = ProgPath()
+        return self._prog
 
     @property
     def iface(self) -> str:
@@ -888,9 +1339,8 @@ class _Conf:
         """The class a state machine opens to send layer-3 datagrams.
 
         Set it to swap in your own; set it to ``None`` to go back to wiry's.
-        The send path of ``send()`` and ``sr()`` opens its own socket in Rust
-        and does not read this, which is why ``send(socket=...)`` is still
-        refused (E17)."""
+        ``send()`` and ``sr()`` open their own socket in Rust and do not read
+        this; ``send(socket=...)`` is how to send through a socket object."""
         from .supersocket import L3Socket
 
         return self._l3socket or L3Socket

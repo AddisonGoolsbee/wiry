@@ -6,13 +6,14 @@
 //! layer starts at the TCI and is 4 bytes long: TCI plus inner EtherType.
 
 use crate::field::FieldDesc;
+use crate::names::Host;
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("prio", 0, 3, 0),
     FieldDesc::uint("dei", 3, 1, 0),
     FieldDesc::uint("vlan", 4, 12, 1),
-    FieldDesc::uint("type", 16, 16, 0),
+    FieldDesc::uint("type", 16, 16, 0).host_named(Host::EtherTypes),
 ];
 
 fn header_len(_: &[u8]) -> usize {

@@ -15,7 +15,7 @@ import re
 import sys
 from typing import Any, Iterator, Optional, Sequence
 
-from . import _b, _layer_name
+from . import _b, _enum_table, _layer_name
 
 __all__ = ["ls", "lsc", "explore", "commands", "field_table", "FieldInfo"]
 
@@ -27,16 +27,24 @@ class FieldInfo:
     to the end of the header it is in.
     """
 
-    __slots__ = ("name", "bits", "kind", "computed", "conditional", "flags")
+    __slots__ = ("name", "bits", "kind", "computed", "conditional", "flags",
+                 "layer", "i2s")
 
     def __init__(self, name: str, bits: int, kind: str, computed: bool,
-                 conditional: bool, flags: Optional[tuple]):
+                 conditional: bool, flags: Optional[tuple], layer: str = "",
+                 i2s: Optional[dict] = None):
         self.name = name
+        self.layer = layer
         self.bits = bits
         self.kind = kind
         self.computed = computed
         self.conditional = conditional
         self.flags = flags
+        self.i2s = i2s or {}
+
+    @property
+    def s2i(self) -> dict:
+        return {v: k for k, v in self.i2s.items()}
 
     @property
     def type(self) -> str:
@@ -54,6 +62,15 @@ class FieldInfo:
         if self.conditional:
             extra.append("Cond")
         return f"{self.kind} ({', '.join(extra)})" if extra else self.kind
+
+    @property
+    def owners(self) -> list:
+        """The layer classes declaring this field, as scapy's ``Field.owners``
+        lists them; ``PacketList.replace`` is what reads it."""
+        import wiry
+
+        cls = wiry._LAYERS.get(self.layer)
+        return [cls] if cls is not None else []
 
     def __repr__(self) -> str:
         return f"<Field {self.name}: {self.type}>"
@@ -76,9 +93,11 @@ def field_table(layer: Any) -> list[FieldInfo]:
     name = _layer_name(layer)
     table = _TABLES.get(name)
     if table is None:
+        enums = _enum_table(name)
         table = [
             FieldInfo(f, bits, kind, computed, cond,
-                      tuple(_b.flag_names(name, f) or ()) or None)
+                      tuple(_b.flag_names(name, f) or ()) or None, name,
+                      enums.get(f))
             for f, bits, kind, computed, cond in _b.field_specs(name)
         ]
         _TABLES[name] = table

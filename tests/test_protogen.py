@@ -124,3 +124,39 @@ def test_a_field_past_a_fixed_header_is_refused():
         assert "past the" in r.stderr
     finally:
         bad.unlink()
+
+
+def _protogen():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("protogen", GEN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_an_enum_is_emitted_sorted_and_a_shared_table_by_name():
+    pg = _protogen()
+    fd = {"name": "type", "off": 0, "len": 8,
+          "enum": {"8": "echo-request", "0": "echo-reply", "0x03": "dest-unreach"}}
+    pg.validate_enum("x.toml", fd)
+    assert pg.render_field(fd).endswith(
+        '.named(&[(0, "echo-reply"), (3, "dest-unreach"), (8, "echo-request")]),'
+    )
+    fd = {"name": "code", "off": 0, "len": 16, "enum": "ETHER_TYPES"}
+    pg.validate_enum("x.toml", fd)
+    assert pg.render_field(fd).endswith(".host_named(crate::names::Host::EtherTypes),")
+
+
+@pytest.mark.parametrize("fd, why", [
+    ({"name": "t", "off": 0, "len": 4, "enum": {"16": "big"}}, "does not fit"),
+    ({"name": "t", "off": 0, "len": 8, "enum": {"x": "nope"}}, "not an integer"),
+    ({"name": "t", "off": 0, "len": 8, "enum": {"1": "a", "0x1": "b"}}, "twice"),
+    ({"name": "t", "off": 0, "len": 8, "enum": "NO_SUCH"}, "shared table"),
+    ({"name": "t", "off": 0, "len": 32, "kind": "ipv4", "enum": {"1": "a"}},
+     "not an integer field"),
+])
+def test_a_malformed_enum_is_refused(fd, why):
+    pg = _protogen()
+    with pytest.raises(pg.SpecError, match=why):
+        pg.validate_enum("x.toml", fd)

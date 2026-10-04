@@ -19,7 +19,7 @@ use crate::proto::fixed_len;
 /// declares. Destination Options (§4.6) is the same layout under another
 /// protocol number.
 static OPT_FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("nh", 0, 8, 59),
+    FieldDesc::uint("nh", 0, 8, 59).named(crate::layers::ipv6::NH),
     FieldDesc::computed_uint("len", 8, 8),
     FieldDesc::var_bytes("options", 16),
 ];
@@ -109,7 +109,7 @@ pub static DEST_OPT_DESC: ProtoDesc = ProtoDesc {
 /// RFC 8200 §4.4. Past Segments Left the layout is routing-type specific; the
 /// names here are Type 0's, the only one the RFC itself lays out.
 static ROUTING_FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("nh", 0, 8, 59),
+    FieldDesc::uint("nh", 0, 8, 59).named(crate::layers::ipv6::NH),
     FieldDesc::computed_uint("len", 8, 8),
     FieldDesc::uint("type", 16, 8, 0),
     FieldDesc::uint("segleft", 24, 8, 0),
@@ -135,7 +135,7 @@ pub static ROUTING_DESC: ProtoDesc = ProtoDesc {
 
 /// RFC 8200 §4.5: a fixed 8 octets.
 static FRAGMENT_FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("nh", 0, 8, 59),
+    FieldDesc::uint("nh", 0, 8, 59).named(crate::layers::ipv6::NH),
     FieldDesc::uint("res1", 8, 8, 0),
     FieldDesc::uint("offset", 16, 13, 0),
     FieldDesc::uint("res2", 29, 2, 0),

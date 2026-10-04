@@ -1,9 +1,56 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Derived from scapy: scapy/layers/l2.py
+//   scapy 2.7.0
+//   Copyright (C) Philippe Biondi and the scapy contributors
+//
+// Changed by the wiry authors:
+//   2026-10-03 — hwtype and op names transcribed into the field table
+
 //! ARP packet format from RFC 826. Hardware type values from the IANA "Address
 //! Resolution Protocol (ARP) Parameters" registry; ptype shares the EtherType
 //! space.
 
 use crate::field::FieldDesc;
+use crate::names::{Host, Table};
 use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
+
+/// scapy 2.7.0 `HARDWARE_TYPES` and `ARP.op`.
+pub static HWTYPES: Table = &[
+    (1, "Ethernet (10Mb)"),
+    (2, "Ethernet (3Mb)"),
+    (3, "AX.25"),
+    (4, "Proteon ProNET Token Ring"),
+    (5, "Chaos"),
+    (6, "IEEE 802 Networks"),
+    (7, "ARCNET"),
+    (8, "Hyperchannel"),
+    (9, "Lanstar"),
+    (10, "Autonet Short Address"),
+    (11, "LocalTalk"),
+    (12, "LocalNet"),
+    (13, "Ultra link"),
+    (14, "SMDS"),
+    (15, "Frame relay"),
+    (16, "ATM"),
+    (17, "HDLC"),
+    (18, "Fibre Channel"),
+    (19, "ATM"),
+    (20, "Serial Line"),
+    (21, "ATM"),
+];
+
+static OPS: Table = &[
+    (1, "who-has"),
+    (2, "is-at"),
+    (3, "RARP-req"),
+    (4, "RARP-rep"),
+    (5, "Dyn-RARP-req"),
+    (6, "Dyn-RAR-rep"),
+    (7, "Dyn-RARP-err"),
+    (8, "InARP-req"),
+    (9, "InARP-rep"),
+];
 
 /// IANA ARP Parameters: 1 = Ethernet (10Mb).
 pub const HWTYPE_ETHER: u64 = 1;
@@ -14,11 +61,11 @@ pub const OP_IS_AT: u64 = 2;
 /// The address fields are sized by hwlen/plen, so these offsets hold only for
 /// the IPv4-over-Ethernet case (hwlen 6, plen 4).
 pub static FIELDS: &[FieldDesc] = &[
-    FieldDesc::uint("hwtype", 0, 16, HWTYPE_ETHER),
-    FieldDesc::uint("ptype", 16, 16, ethertype::IPV4 as u64),
+    FieldDesc::uint("hwtype", 0, 16, HWTYPE_ETHER).named(HWTYPES),
+    FieldDesc::uint("ptype", 16, 16, ethertype::IPV4 as u64).host_named(Host::EtherTypes),
     FieldDesc::uint("hwlen", 32, 8, 6),
     FieldDesc::uint("plen", 40, 8, 4),
-    FieldDesc::uint("op", 48, 16, OP_WHO_HAS),
+    FieldDesc::uint("op", 48, 16, OP_WHO_HAS).named(OPS),
     FieldDesc::mac("hwsrc", 64),
     FieldDesc::ipv4("psrc", 112, 0),
     FieldDesc::mac("hwdst", 144),

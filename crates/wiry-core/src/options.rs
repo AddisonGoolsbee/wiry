@@ -171,8 +171,7 @@ pub enum LenRule {
 pub struct OptTable {
     pub proto: &'static str,
     pub rule: LenRule,
-    /// The code that closes the region. `WithHeader` stops before it;
-    /// `PayloadOnly` emits it first, since RFC 2132 §3.2 End is an option.
+    /// The code that closes the region. The walk emits it and stops.
     pub end: Option<u8>,
     pub opts: &'static [OptDesc],
 }
@@ -237,7 +236,12 @@ impl OptTable {
         while i < data.len() && guard < 512 {
             guard += 1;
             let code = data[i];
-            if self.rule == LenRule::WithHeader && Some(code) == self.end {
+            // The end code is itself an option, as scapy lists it; what
+            // follows it is padding and is not decoded.
+            if Some(code) == self.end {
+                if self.is_bare(code) {
+                    out.push((code, &data[i..i]));
+                }
                 break;
             }
             if self.is_bare(code) {

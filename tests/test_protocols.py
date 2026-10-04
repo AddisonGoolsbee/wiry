@@ -86,7 +86,7 @@ def test_an_802_3_length_field_reaches_llc_and_stp():
     assert pkt.layers()[:3] == ["Ether", "LLC", "STP"]
     assert pkt["LLC"].dsap == 0x42
     assert pkt["STP"].rootmac == "00:11:22:33:44:55"
-    assert pkt["STP"].hellotime == 0x0200
+    assert pkt["STP"].hellotime == 2.0
     assert bytes(pkt) == frame
 
 

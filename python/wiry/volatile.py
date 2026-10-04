@@ -331,6 +331,12 @@ def as_generator(value: Any, kind: str = "") -> Any:
         return value
     if isinstance(value, (list, tuple)):
         return value
+    # A unit-step range is the inclusive pair scapy's tuple form spells, so a
+    # large one stays lazy.
+    if isinstance(value, range):
+        if value.step == 1 and len(value):
+            return (value.start, value.stop - 1)
+        return list(value)
     if isinstance(value, str) and "/" in value:
         if kind == "ipv4":
             return _net_or_none(Net, value)

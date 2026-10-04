@@ -352,8 +352,9 @@ def test_filtering_on_an_inner_layer_selects_in_the_engine(tmp_path):
     got = cap.filter([("VXLAN", "vni", 1)])
     assert len(got) == 1
     assert got[0].haslayer(VXLAN)
+    # The TCP summary names the IP layer directly under it, not the outer one.
     assert [p.summary() for p in cap.filter([("GRE", "proto", 0x0800)])] == [
-        "Ether / IP / GRE / IP / TCP"
+        "Ether / IP / GRE / IP / TCP 127.0.0.1:ftp_data > 192.168.0.2:https S"
     ]
 
 
@@ -508,3 +509,10 @@ def test_every_layer_survives_a_cut_at_every_offset(name):
                 if isinstance(value, int):
                     setattr(obj, field, value)
         bytes(again)
+
+
+def test_gre_over_udp_is_reached_on_its_port():
+    # RFC 8086 §3: destination port 4754.
+    pkt = Ether(bytes(Ether() / IP() / UDP() / GRE() / IP() / UDP()))
+    assert pkt.layers() == ["Ether", "IP", "UDP", "GRE", "IP", "UDP"]
+    assert pkt[UDP].dport == 4754

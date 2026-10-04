@@ -18,6 +18,7 @@ name = "op"
 off = 0
 len = 16
 default = 1
+enum = { 1 = "RRQ", 2 = "WRQ", 3 = "DATA", 4 = "ACK", 5 = "ERROR", 6 = "OACK" }
 
 [[fields]]
 name = "block"
@@ -45,3 +46,8 @@ source = "RFC 1350 §5 read request for \"a\" in octet mode."
 bytes = [0x00, 0x01, 0x61, 0x00, 0x6f, 0x63, 0x74, 0x65, 0x74, 0x00]
 [vector.fields]
 op = 1
+
+[provenance]
+source = "scapy/layers/tftp.py"
+version = "scapy 2.7.0"
+changed = ["2026-10-03 — enumerated names of op transcribed"]

@@ -10,6 +10,7 @@ use wiry_core::frag;
 use wiry_core::layers::{bootp, dns, ipv4, tcp};
 use wiry_core::packet::Packet;
 use wiry_core::proto::{desc, ProtoId};
+use wiry_core::render;
 use wiry_core::stream;
 use wiry_core::{parse, pcap, pcapng, show};
 
@@ -122,8 +123,9 @@ fn exercise(pkt: &mut Packet, what: &str) {
         }
         let _ = pkt.options(i);
     }
-    let _ = show::summary(pkt);
-    let _ = show::show(pkt);
+    let _ = render::summary(pkt);
+    let _ = render::show(pkt);
+    let _ = render::repr_packet(pkt);
     let _ = show::session_key(pkt.raw_bytes(), pkt.layers());
     let _ = pkt.to_bytes();
     check_spans(pkt, what);
@@ -1212,7 +1214,7 @@ fn a_hostile_stream_cannot_outgrow_what_it_sent() {
                         stream::reframe(src, ProtoId::Ether, m.skip, &part[..part.len().min(room)])
                     {
                         let mut p = Packet::dissect(f, ProtoId::Ether);
-                        let _ = show::show(&p);
+                        let _ = render::show(&p);
                         let _ = p.to_bytes();
                     }
                 }

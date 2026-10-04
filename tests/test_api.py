@@ -238,15 +238,23 @@ def test_getlayer_returns_the_outermost_match():
     assert Ether(bytes(pkt)).getlayer(Dot1Q).vlan == 10
 
 
-def test_summary_joins_the_layer_names(pkt):
-    assert pkt.summary() == "Ether / IP / TCP"
-    assert Ether(bytes(pkt)).summary() == "Ether / IP / TCP"
-    assert repr(pkt) == "<Ether / IP / TCP>"
+def test_summary_and_repr_read_as_scapys(pkt):
+    # Port 1234 is named from the host's /etc/services, so only 80 is pinned.
+    line = pkt.summary()
+    assert line.startswith("Ether / IP / TCP 10.0.0.1:") and line.endswith(" > 10.0.0.2:http SA")
+    assert Ether(bytes(pkt)).summary() == line
+    assert str(pkt) == line
+    r = repr(pkt)
+    assert r.startswith(
+        "<Ether  dst=00:11:22:33:44:55 src=66:77:88:99:aa:bb type=IPv4 "
+        "|<IP  frag=0 ttl=33 proto=tcp src=10.0.0.1 dst=10.0.0.2 |<TCP  sport="
+    )
+    assert r.endswith(" dport=http flags=SA |>>>")
 
 
 def test_show_str_lists_every_header_and_field(pkt):
     text = pkt.show_str()
-    for header in ("###[ Ether ]###", "###[ IP ]###", "###[ TCP ]###"):
+    for header in ("###[ Ethernet ]###", "###[ IP ]###", "###[ TCP ]###"):
         assert header in text
     for field in ("dst", "src", "ttl", "proto", "chksum", "sport", "dport", "window"):
         assert field in text
@@ -264,10 +272,11 @@ def test_show_prints_what_show_str_returns(pkt):
 def test_hexdump_str_formats_offset_hex_and_text():
     lines = hexdump_str(Ether() / IP()).splitlines()
     assert len(lines) == 3
-    assert lines[0].startswith("0000  ff ff ff ff ff ff")
+    assert lines[0].startswith("0000  FF FF FF FF FF FF")
     assert lines[1].startswith("0010  ")
-    assert lines[0].endswith("..............E.")
-    assert all(len(line) == len(lines[0]) for line in lines[:2])
+    assert lines[0].endswith(" ..............E.")
+    assert all(len(line) == 6 + 48 + 1 + 16 for line in lines[:2])
+    assert lines[2] == "0020  00 01" + " " * 44 + ".."
 
 
 def test_hexdump_str_accepts_raw_bytes_and_a_width():
@@ -275,13 +284,25 @@ def test_hexdump_str_accepts_raw_bytes_and_a_width():
     assert text == "0000  41 42 43 44  ABCD\n0004  45 46 47 48  EFGH\n"
 
 
+def test_hexdump_dump_returns_the_text_without_a_trailing_newline():
+    assert wiry.hexdump(b"AB", dump=True) == "0000  41 42" + " " * 44 + "AB"
+
+
 def test_hexdump_prints(capsys):
     wiry.hexdump(b"AB")
     assert capsys.readouterr().out == hexdump_str(b"AB")
 
 
-def test_layer_view_repr(pkt):
-    assert repr(pkt[IP]) == "<IP layer 1>"
+def test_a_layer_reads_as_the_packet_from_it_on(pkt):
+    ip = pkt[IP]
+    assert repr(ip).startswith("<IP  frag=0 ttl=33 proto=tcp src=10.0.0.1 dst=10.0.0.2 |<TCP ")
+    assert isinstance(ip, IP) and isinstance(pkt.payload, IP)
+    assert isinstance(pkt.payload.payload, TCP)
+    assert not pkt.payload.payload.payload and len(pkt.payload.payload.payload) == 0
+    assert bytes(ip) == bytes(pkt)[14:]
+    assert ip.summary() == pkt.summary().split(" / ", 1)[1]
+    assert ip[TCP].dport == 80
+    assert type(Ether(bytes(pkt))) is Ether
 
 
 def test_known_layers_matches_the_exported_classes():

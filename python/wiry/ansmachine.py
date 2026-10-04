@@ -8,6 +8,9 @@
 # Changed by the wiry authors:
 #   2026-09-18 — ported onto wiry's sniff/sendp and given an offline= route so
 #                a machine's replies can be checked from canned packets.
+#   2026-10-03 — function names published in the defining module, sniff and
+#                send as patchable module globals, and opened_socket/socket
+#                taken as options, as scapy's are.
 
 """Answering machines: listen for a request, build a reply, send it.
 
@@ -23,8 +26,12 @@ from __future__ import annotations
 
 import abc
 import socket
+import sys
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# Module globals rather than imports at the call, so a test can patch them here.
+from .capture import AsyncSniffer, sendp, sniff
 
 __all__ = ["AnsweringMachine", "AnsweringMachineTCP", "AnsweringMachineUDP"]
 
@@ -46,6 +53,9 @@ class ReferenceAM(abc.ABCMeta):
             func.__name__ = func.__qualname__ = obj.function_name
             func.__doc__ = obj.__doc__ or obj.parse_options.__doc__
             globals()[obj.function_name] = func
+            home = sys.modules.get(obj.__module__)
+            if home is not None:
+                setattr(home, obj.function_name, func)
         return obj
 
 
@@ -62,10 +72,10 @@ class AnsweringMachine(metaclass=ReferenceAM):
     filter: Optional[str] = None
     sniff_options: Dict[str, Any] = {"store": 0}
     sniff_options_list = ["store", "iface", "count", "promisc", "filter",
-                          "type", "prn", "stop_filter", "offline", "where",
-                          "timeout", "quiet"]
+                          "type", "prn", "stop_filter", "opened_socket",
+                          "offline", "where", "timeout", "quiet"]
     send_options: Dict[str, Any] = {"verbose": 0}
-    send_options_list = ["iface", "inter", "loop", "verbose"]
+    send_options_list = ["iface", "inter", "loop", "verbose", "socket"]
     send_function: Any = None
 
     def __init__(self, **kargs: Any):
@@ -143,10 +153,7 @@ class AnsweringMachine(metaclass=ReferenceAM):
         if send_function:
             send_function(reply)
             return
-        send = self.send_function
-        if send is None:
-            from .capture import sendp
-            send = sendp
+        send = self.send_function or sendp
         send(reply, **self.optsend)
 
     def print_reply(self, req: Any, reply: Any) -> None:
@@ -165,7 +172,12 @@ class AnsweringMachine(metaclass=ReferenceAM):
             reply = self.make_reply(pkt)
         if not reply:
             return
-        self.send_reply(reply, send_function=send_function)
+        # Called with one argument when there is no override, as scapy does:
+        # scripts replace send_reply with a one-argument function.
+        if send_function:
+            self.send_reply(reply, send_function=send_function)
+        else:
+            self.send_reply(reply)
         if self.verbose:
             self.print_reply(pkt, reply)
 
@@ -203,13 +215,9 @@ class AnsweringMachine(metaclass=ReferenceAM):
                 print("Interrupted by user")
 
     def sniff(self) -> None:
-        from .capture import sniff
-
         sniff(**self.optsniff)
 
     def sniff_bg(self) -> None:
-        from .capture import AsyncSniffer
-
         self.sniffer = AsyncSniffer(**self.optsniff)
         self.sniffer.start()
 
@@ -240,12 +248,7 @@ class AnsweringMachineTCP(AnsweringMachine):
             sock.close()
 
     def sniff(self) -> None:
-        """Accept clients and answer each one on its own thread.
-
-        This reads the client socket directly rather than going through
-        ``sniff``: the source is a stream, not an interface, and wiry's capture
-        backend does not take a socket handed in from Python.
-        """
+        """Accept clients and answer each one on its own thread."""
         from .capture import conf, get_if_addr
         from .supersocket import StreamSocket
 
