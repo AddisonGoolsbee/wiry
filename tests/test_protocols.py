@@ -268,7 +268,7 @@ def test_dhcpv6_options_decode_from_their_16_bit_codes():
     assert [n for n, _ in pkt["DHCP6"].options] == ["elapsedtime"]
 
 
-def test_snmp_decodes_its_ber_message_into_named_items():
+def test_snmp_dissects_into_scapys_object_tree():
     """RFC 1157 §4.1 over ITU-T X.690 §8."""
     msg = bytes([
         0x30, 0x26, 0x02, 0x01, 0x00, 0x04, 0x06, 0x70,
@@ -280,12 +280,13 @@ def test_snmp_decodes_its_ber_message_into_named_items():
     frame = udp_frame(msg, dport=161)
     pkt = Ether(frame)
     assert pkt.layers()[:4] == ["Ether", "IP", "UDP", "SNMP"]
-    got = dict(pkt["SNMP"].vars)
-    assert got["version"] == 0
-    assert got["community"] == "public"
-    assert got["PDU"] == "get_request"
-    assert got["request_id"] == 1
-    assert got["1.3.6.1.2.1.1.1.0"] == ""
+    snmp = pkt[B.SNMP]
+    assert snmp.version.val == 0
+    assert snmp.community.val == b"public"
+    assert isinstance(snmp.PDU, B.SNMPget)
+    assert snmp.PDU.id.val == 1
+    assert pkt[B.SNMPvarbind].oid.val == "1.3.6.1.2.1.1.1.0"
+    assert isinstance(pkt[B.SNMPvarbind].value, B.ASN1_NULL)
     assert bytes(pkt) == frame
 
 
@@ -538,13 +539,15 @@ def test_smb2_reads_its_little_endian_fields():
     assert pkt["SMB2_Header"].StructureSize == 64
 
 
-def test_ldap_names_its_protocol_operation():
+def test_ldap_dissects_into_scapys_object_tree():
     """RFC 4511 §4.2."""
     body = bytes([0x30, 0x0C, 0x02, 0x01, 0x01, 0x60, 0x07, 0x02,
                   0x01, 0x03, 0x04, 0x00, 0x80, 0x00])
-    got = dict(Ether(tcp_frame(body, dport=389))["LDAP"].vars)
-    assert got["messageID"] == 1
-    assert got["protocolOp"] == "bindRequest"
+    ldap = Ether(tcp_frame(body, dport=389))[B.LDAP]
+    assert ldap.messageID.val == 1
+    assert isinstance(ldap.protocolOp, B.LDAP_BindRequest)
+    assert ldap.protocolOp.version.val == 3
+    assert ldap.protocolOp.authentication.val == b""
 
 
 def test_nbt_session_service_carries_smb2():
@@ -631,6 +634,9 @@ def test_writing_a_field_on_a_dissected_new_layer_keeps_the_frame_size():
 def test_writing_every_uint_field_of_every_new_layer_never_resizes():
     """The write half of the engine carries the same contract as the read half."""
     for name in NEW_LAYERS:
+        # A Python-modelled layer's fields are objects, not header slots.
+        if name in B._PY_MODELLED:
+            continue
         raw = bytes(getattr(B, name)())
         if not raw:
             continue

@@ -8,12 +8,19 @@ SEQUENCE of a version INTEGER, a community OCTET STRING and a context-tagged
 PDU, and the PDU is a SEQUENCE of request-id, error-status, error-index and a
 SEQUENCE of variable bindings, each an OID and its value. Encoding rules are
 ITU-T X.690 §8. The message has no fixed offsets at all, so there is no field
-table: the whole message is decoded into a named item list (DEVIATIONS T2).
+table: the whole message is decoded into an item list named as scapy's object
+tree names it, which is what the bulk paths read. `pkt[SNMP]` is that tree,
+modelled in Python (python/wiry/layers/snmp.py).
 """
 min_len = 2
 header_len = "rest"
 next = "end"
 parse_options = "hand"
+
+[provenance]
+source = "scapy/layers/snmp.py"
+version = "scapy master, upstream commit e2e35c0"
+changed = ["2026-10-03 — the item list takes scapy's field and PDU class names (version, community, PDU, id, error, error_index, the v1 trap and GetBulk fields, varbindlist) and its value types, so the bulk path and pkt[SNMP] agree"]
 
 [[fields]]
 name = "vars"

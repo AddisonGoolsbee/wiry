@@ -5,6 +5,8 @@ pub enum ItemValue {
     /// Present with no payload (NOP, SAckOK, End of List).
     Flag,
     Uint(u64),
+    /// A negative ASN.1 INTEGER; the non-negative ones are `Uint`.
+    Int(i64),
     Pair(u64, u64),
     /// RFC 2018 §3 SACK blocks.
     Pairs(Vec<(u64, u64)>),
@@ -348,6 +350,7 @@ fn payload(shape: Shape, v: &ItemValue) -> Vec<u8> {
     match v {
         ItemValue::Flag => Vec::new(),
         ItemValue::Uint(n) => be_bytes(*n, shape.width()),
+        ItemValue::Int(n) => be_bytes(*n as u64, shape.width()),
         ItemValue::Pair(a, b) => {
             let mut out = be_bytes(*a, 4);
             out.extend_from_slice(&be_bytes(*b, 4));

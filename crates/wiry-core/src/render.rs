@@ -241,6 +241,7 @@ fn value_repr(v: &crate::options::ItemValue) -> String {
     match v {
         ItemValue::Flag => "None".to_string(),
         ItemValue::Uint(n) => n.to_string(),
+        ItemValue::Int(n) => n.to_string(),
         ItemValue::Pair(a, b) => format!("({a}, {b})"),
         ItemValue::Bytes(b) => py_bytes(b),
         ItemValue::Text(s) => py_str(s),

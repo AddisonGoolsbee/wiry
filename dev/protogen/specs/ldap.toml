@@ -7,13 +7,20 @@ RFC 4511 §4.1.1: an LDAPMessage is a BER SEQUENCE of a messageID INTEGER, a
 context-tagged protocolOp choice (0 bindRequest, 1 bindResponse, 3 searchRequest,
 4 searchResEntry, 5 searchResDone, and the rest of §4.2 onwards) and optional
 controls. Encoding rules are ITU-T X.690 §8. There are no fixed offsets, so the
-message is decoded into a named item list (DEVIATIONS T2).
+message is decoded into a named item list for the bulk paths: the messageID,
+the operation, and its first arguments. `pkt[LDAP]` is the whole message as
+scapy models it, in Python (python/wiry/layers/ldap.py).
 """
 min_len = 2
 header_len = "hand"
 build_len = 0
 next = "raw"
 parse_options = "hand"
+
+[provenance]
+source = "scapy/layers/ldap.py"
+version = "scapy master, upstream commit e2e35c0"
+changed = ["2026-10-03 — the operation takes the name of scapy's class for it, so the bulk path and pkt[LDAP] agree on what a message is"]
 
 [[fields]]
 name = "vars"

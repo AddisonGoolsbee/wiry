@@ -58,10 +58,12 @@ _DISCOVER = ("ls", "lsc", "explore", "field_table", "FieldInfo")
 
 _CONSOLE = ("interact", "save_session", "load_session")
 
+from ._pynames import EXPORTS as _PY_EXPORTS, PY_MODELLED as _PY_MODELLED  # noqa: E402
+
 _EAGER = (
     "Packet", "PacketList", "SndRcvList", "QueryAnswer", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
     "PcapReader", "PcapWriter", "PcapNgWriter", "raw", "known_layers",
-    "bind_layers",
+    "bind_layers", "bind_bottom_up", "bind_top_down",
     "VolatileValue", "RandNum", "RandByte", "RandShort", "RandInt", "RandLong",
     "RandIP", "RandIP6", "RandMAC", "RandString", "RandBin", "RandChoice",
     "RandEnumKeys", "Net", "Net6", "fuzz", "corrupt_bytes", "corrupt_bits",
@@ -99,7 +101,7 @@ _LAZY = {
     "tools": _TOOLS, "supersocket": _SOCKETS,
     "automaton": _AUTOMATON, "ansmachine": _ANSMACHINE, "route": _ROUTE,
     "sendrecv": _SENDRECV, "answering": _ANSWERING, "config": _CONFIG,
-    "arch": _ARCH,
+    "arch": _ARCH, **_PY_EXPORTS,
 }
 
 _HOME = {name: mod for mod, names in _LAZY.items() for name in names}
@@ -133,6 +135,8 @@ def _to_bytes(x: Any, what: str = "value") -> bytes:
     if isinstance(x, str):
         return x.encode("latin-1")
     if _is_bytes(x):
+        return bytes(x)
+    if _is_py(x):
         return bytes(x)
     raise TypeError(f"{what} must be bytes or str, not {type(x).__name__}")
 
@@ -393,9 +397,8 @@ class _LayerView:
 
     @property
     def payload(self) -> Any:
-        names = self._pkt.layers()
-        if self._idx + 1 < len(names):
-            return _LayerView(self._pkt, self._idx + 1, names[self._idx + 1])
+        if self._idx + 1 < len(self._pkt.layers()):
+            return self._pkt.getlayer(self._idx + 1)
         return NoPayload()
 
     @property
@@ -441,16 +444,25 @@ class _LayerView:
         return len(bytes(self))
 
     def show_str(self) -> str:
-        return self._pkt._materialize().show(self._pkt._given(), self._idx)
+        text = self._pkt._materialize().show(self._pkt._given(), self._idx)
+        return _with_py_show(self._pkt, text, self._idx)
 
-    def show(self) -> None:
-        print(self.show_str(), end="")
+    def show(self, dump: bool = False) -> str | None:
+        # scapy prints the dump with print(), whose newline is the blank line
+        # that ends every show(); dump=True returns the text without it.
+        if dump:
+            return self.show_str()
+        print(self.show_str())
+        return None
 
     def show2_str(self) -> str:
         return _b.dissect(bytes(self), self._name).show()
 
-    def show2(self) -> None:
-        print(self.show2_str(), end="")
+    def show2(self, dump: bool = False) -> str | None:
+        if dump:
+            return self.show2_str()
+        print(self.show2_str())
+        return None
 
     def sprintf(self, fmt: str) -> str:
         from .report import sprintf
@@ -604,6 +616,8 @@ _FIELD_KINDS: dict[str, dict[str, str]] = {}
 def _is_plain_field(lname: str, key: str, value: Any) -> bool:
     """Whether the build path writes this into a fixed slot; the rest are
     option regions and payloads."""
+    if _is_py(value):
+        return key != "load" or lname not in _OPAQUE
     if key == _PARSED_FIELD.get(lname, "options") and not _is_bytes(value):
         return False
     if key == "load" and lname in _OPAQUE:
@@ -712,6 +726,56 @@ def _expand_frames(pkt: Any) -> list:
     return _all_of(tmpl, True) if tmpl is not None else [pkt._serialize(args)]
 
 
+def _is_py(x: Any) -> bool:
+    """Whether `x` is a Python-modelled layer; nothing can be until the
+    module defining them has been imported."""
+    mod = sys.modules.get(__name__ + "._pylayer")
+    return mod is not None and isinstance(x, mod.PyPacket)
+
+
+def _is_py_class(x: Any) -> bool:
+    mod = sys.modules.get(__name__ + "._pylayer")
+    return mod is not None and isinstance(x, type) and issubclass(x, mod.PyPacket)
+
+
+def _py_model(wire: str) -> Any:
+    """The Python class modelling the Rust layer `wire`, if it has one."""
+    home = _PY_MODELLED.get(wire)
+    if home is None:
+        return None
+    import importlib
+    return getattr(importlib.import_module("." + home, __name__), wire)
+
+
+def _bound_py(rust: Any, i: int, lower: str) -> Any:
+    """The Python class `bind_bottom_up` put above layer `i`, if any."""
+    for low, fval, cls in _PY_BOUND:
+        if low != lower:
+            continue
+        try:
+            if all(rust.get_field(i, k) == v for k, v in fval.items()):
+                return cls
+        except KeyError:
+            continue
+    return None
+
+
+def _held(obj: Any) -> "Packet":
+    """A one-layer packet carrying a Python-modelled layer: under the Rust
+    layer it models, which keeps that layer's binding (UDP port 161 for
+    SNMP), or as Raw octets where it models none."""
+    wire = type(obj).__name__ if type(obj).__name__ in _PY_MODELLED else None
+    if wire is None:
+        wire = getattr(type(obj), "_name", None)
+        wire = wire if wire in _PY_MODELLED else "Raw"
+    field = "load" if wire == "Raw" else _PARSED_FIELD.get(wire, "load")
+    return Packet(_stack=[(wire, {field: obj})])
+
+
+def _copy_fields(fields: dict) -> dict:
+    return {k: v.copy() if _is_py(v) else v for k, v in fields.items()}
+
+
 def _float_padding(stack: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
     """Padding is assembled after every other payload, wherever it was stacked,
     so that it lands at the end of the frame the way a pad does on the wire."""
@@ -809,7 +873,7 @@ class Packet(metaclass=_PacketMeta):
 
     __slots__ = ("_stack", "_payload", "_rust", "_written", "time", "wirelen",
                  "sent_time", "sniffed_on", "comments", "direction",
-                 "process_information")
+                 "process_information", "_py", "_original")
 
     def __init__(
         self,
@@ -834,6 +898,8 @@ class Packet(metaclass=_PacketMeta):
         self.wirelen = wirelen
         self.sent_time = None
         self.sniffed_on = None
+        self._py = None
+        self._original = None
         self.comments = None
         self.direction = None
         self.process_information = None
@@ -873,6 +939,20 @@ class Packet(metaclass=_PacketMeta):
             else:
                 return NotImplemented
 
+        # Above a Python-modelled layer everything is that layer's payload,
+        # as it is in scapy.
+        if self._py_top() is not None:
+            clone = self.copy()
+            clone._py_top()[1].add_payload(other.copy() if _is_py(other) else other)
+            return clone
+        if _is_py(other):
+            bound = _PY_OVERLOAD.get(type(other))
+            if bound is not None and self._spec_live and self._stack[-1][0] == bound[0]:
+                self = self.copy()
+                for k, v in bound[1].items():
+                    self._stack[-1][1].setdefault(k, v)
+            other = _held(other.copy())
+
         mine = self._rust is None or self._spec_live
         theirs = other._rust is None or other._spec_live
         if mine and theirs:
@@ -908,7 +988,7 @@ class Packet(metaclass=_PacketMeta):
     def _spec(self) -> list[tuple[str, dict]]:
         """The layer stack as (name, fields) pairs, dissecting if needed."""
         if self._stack:
-            return [(n, dict(f)) for n, f in self._stack]
+            return [(n, _copy_fields(f)) for n, f in self._stack]
         if self._rust is not None:
             return [(n, {}) for n in self._rust.layer_names()]
         return []
@@ -921,6 +1001,9 @@ class Packet(metaclass=_PacketMeta):
         for i, (lname, fields) in enumerate(self._stack):
             for k, v in fields.items():
                 if not _is_plain_field(lname, k, v):
+                    continue
+                if _is_py(v):
+                    raws.append((i, k, bytes(v)))
                     continue
                 v = _named(lname, k, v)
                 spec = gen_spec(v, _field_kind(lname, k))
@@ -960,6 +1043,8 @@ class Packet(metaclass=_PacketMeta):
                     out.append((i, None, _to_bytes(blob, f"{lname}.{var[0]}")))
                 continue
             v = fields.get(_PARSED_FIELD.get(lname, "options"))
+            if _is_py(v):
+                continue
             if v is None or _is_bytes(v):
                 if _is_bytes(v) and v:
                     out.append((i, None, bytes(v)))
@@ -1018,10 +1103,92 @@ class Packet(metaclass=_PacketMeta):
             if tmpl is not None:
                 return tmpl.packet(0)
             names, ints, strs, raws, _ = args
-            self._rust = _b.build_packet(
+            rust = _b.build_packet(
                 names, ints, strs, raws, self._payload, self._opt_blobs()
             )
+            # Not cached: the Python layer it was built from stays mutable.
+            if self._py_top() is not None:
+                return rust
+            self._rust = rust
+        elif type(self._py) is tuple:
+            self._sync_py()
         return self._rust
+
+    def _py_top(self) -> Any:
+        """(index, object) of the Python-modelled layer this chain ends in.
+
+        A dissected packet decodes it from the Rust layer on first ask and
+        keeps it; one that fails to decode stays the Rust layer, as scapy
+        leaves an undecodable payload Raw."""
+        if self._spec_live:
+            for i, (_, fields) in enumerate(self._stack):
+                for v in fields.values():
+                    if _is_py(v):
+                        return i, v
+            return None
+        # An int records that nothing decoded while that many Python
+        # bindings existed; importing a layer module adds some.
+        if self._py is None or (type(self._py) is int and self._py != len(_PY_BOUND)):
+            self._py = self._decode_py() or len(_PY_BOUND)
+        return self._py[:2] if type(self._py) is tuple else None
+
+    def _decode_py(self) -> Any:
+        rust = self._rust
+        if rust is None:
+            return None
+        names = rust.layer_names()
+        for i, n in enumerate(names):
+            cls = _py_model(n) if n in _PY_MODELLED else None
+            if cls is None and n == "Raw" and i:
+                cls = _bound_py(rust, i - 1, names[i - 1])
+            if cls is None:
+                continue
+            data = rust.payload(i - 1) if i else rust.to_bytes()
+            try:
+                obj = cls(data)
+            except Exception:
+                from .capture import conf
+                if conf.debug_dissector:
+                    raise
+                return None
+            # Compared against the object's own encoding, not the octets it
+            # came from, so reading a non-canonical message never rewrites it.
+            return i, obj, bytes(obj)
+        return None
+
+    def _keep_original(self) -> None:
+        if self._original is None and not self._stack and self._rust is not None:
+            self._original = self._rust.to_bytes()
+
+    @property
+    def original(self) -> bytes:
+        """The octets this packet was dissected from, before any change."""
+        if self._original is not None:
+            return self._original
+        if self._rust is not None and not self._stack:
+            return self._rust.to_bytes()
+        return b""
+
+    def clear_cache(self) -> None:
+        """Re-encode a Python-modelled layer from its fields on the next build;
+        the Rust layers have no cache, their octets being the packet."""
+        top = self._py_top()
+        if top is not None:
+            top[1].clear_cache()
+
+    def _sync_py(self) -> None:
+        """Write a changed Python layer back into the octets."""
+        i, obj, built = self._py
+        now = bytes(obj)
+        if now == built:
+            return
+        self._keep_original()
+        if i:
+            self._rust.set_payload(i - 1, now)
+        else:
+            self._rust = _b.dissect(now, self._rust.layer_names()[0])
+        self._py = (i, obj, now)
+        self._written = True
 
     @property
     def _spec_live(self) -> bool:
@@ -1046,6 +1213,7 @@ class Packet(metaclass=_PacketMeta):
 
     def _set(self, layer: int, field: str, value: Any) -> None:
         if self._rust is not None:
+            self._keep_original()
             value = _named(self.layers()[layer], field, value)
             self._written = True
             if isinstance(value, (bool, FlagValue)):
@@ -1082,6 +1250,9 @@ class Packet(metaclass=_PacketMeta):
         return [n for n, _ in self._stack]
 
     def haslayer(self, layer: Any) -> bool:
+        if self._wants_py(layer):
+            top = self._py_top()
+            return top is not None and bool(top[1].haslayer(layer))
         name = _layer_name(layer)
         if self._rust is not None:
             return self._rust.haslayer(name)
@@ -1095,7 +1266,13 @@ class Packet(metaclass=_PacketMeta):
             if not -len(names) <= layer < len(names):
                 return None
             layer %= len(names)
+            top = self._py_top()
+            if top is not None and layer >= top[0]:
+                return top[1].getlayer(layer - top[0])
             return _LayerView(self, layer, names[layer])
+        if self._wants_py(layer, names):
+            top = self._py_top()
+            return None if top is None else top[1].getlayer(layer, nb, **flt)
         name = _layer_name(layer)
         if nb == 1 and not flt:
             return _LayerView(self, names.index(name), name) if name in names else None
@@ -1114,6 +1291,19 @@ class Packet(metaclass=_PacketMeta):
     def __contains__(self, layer: Any) -> bool:
         return self.haslayer(layer)
 
+    def _wants_py(self, layer: Any, names: Any = None) -> bool:
+        """Whether `layer` names something only the Python model can answer:
+        a Python class, the Rust layer it models, or a name no Rust layer in
+        this chain has."""
+        if _is_py_class(layer):
+            return True
+        if not isinstance(layer, str):
+            return False
+        if layer in _PY_MODELLED:
+            return True
+        if layer in (names if names is not None else self.layers()):
+            return False
+        return self._py_top() is not None
     @property
     def name(self) -> str:
         """The outermost layer's name, which is what a packet answers to."""
@@ -1151,7 +1341,11 @@ class Packet(metaclass=_PacketMeta):
 
     def iterpayloads(self) -> Iterator[Any]:
         """Each layer of the chain in turn, outermost first."""
+        top = self._py_top()
         for i, n in enumerate(self.layers()):
+            if top is not None and i == top[0]:
+                yield from top[1].iterpayloads()
+                return
             yield _LayerView(self, i, n)
 
     def firstlayer(self) -> Any:
@@ -1160,7 +1354,8 @@ class Packet(metaclass=_PacketMeta):
 
     def lastlayer(self) -> Any:
         """The top layer: the one carrying the payload."""
-        return self.getlayer(-1)
+        top = self._py_top()
+        return top[1].lastlayer() if top is not None else self.getlayer(-1)
 
     def get_field(self, field: str) -> Any:
         """The declaration of a field, wherever in the chain it lives."""
@@ -1236,9 +1431,9 @@ class Packet(metaclass=_PacketMeta):
         from .describe import from_hexcap
         return cls(from_hexcap(text))
 
-    def display(self) -> None:
+    def display(self, dump: bool = False) -> str | None:
         """Deprecated spelling of `show()`, kept because scripts use it."""
-        self.show()
+        return self.show(dump)
 
     def __getitem__(self, layer: Any) -> _LayerView:
         # pkt[IP:2] is the second IP layer; pkt[IP::{"ttl": 3}] filters on
@@ -1270,9 +1465,10 @@ class Packet(metaclass=_PacketMeta):
     def copy(self) -> "Packet":
         """An independent packet carrying the same layers and values."""
         if self._rust is not None:
-            return Packet(_rust=self._rust.copy(), time=self.time, wirelen=self.wirelen)
+            return Packet(_rust=self._materialize().copy(), time=self.time,
+                          wirelen=self.wirelen)
         return Packet(
-            _stack=[(n, dict(f)) for n, f in self._stack],
+            _stack=[(n, _copy_fields(f)) for n, f in self._stack],
             _payload=self._payload,
             time=self.time,
             wirelen=self.wirelen,
@@ -1293,6 +1489,12 @@ class Packet(metaclass=_PacketMeta):
         for i, n in enumerate(names):
             if field in _b.layer_fields(n):
                 return getattr(_LayerView(self, i, n), field)
+        top = self._py_top()
+        if top is not None:
+            try:
+                return getattr(top[1], field)
+            except AttributeError:
+                pass
         raise AttributeError(f"no field {field!r} in {' / '.join(names)}")
 
     def __setattr__(self, field: str, value: Any) -> None:
@@ -1304,23 +1506,31 @@ class Packet(metaclass=_PacketMeta):
             if field in _b.layer_fields(n):
                 self._set(i, field, value)
                 return
+        top = self._py_top()
+        if top is not None:
+            top[1].setfieldval(field, value)
+            return
         raise AttributeError(f"no field {field!r} in {' / '.join(names)}")
 
     @property
     def payload(self) -> Any:
         """The next layer and everything above it, or `NoPayload` after the
         last one."""
-        names = self.layers()
-        if len(names) > 1:
-            return _LayerView(self, 1, names[1])
+        if len(self.layers()) > 1:
+            return self.getlayer(1)
         return NoPayload()
 
     @property
     def underlayer(self) -> None:
         return None
 
-    def show(self) -> None:
-        print(self.show_str(), end="")
+    def show(self, dump: bool = False) -> str | None:
+        # scapy prints the dump with print(), whose newline is the blank line
+        # that ends every show(); dump=True returns the text without it.
+        if dump:
+            return self.show_str()
+        print(self.show_str())
+        return None
 
     def _given(self) -> list[list[str]] | None:
         """What each layer of a packet still being built was assigned, which
@@ -1330,10 +1540,13 @@ class Packet(metaclass=_PacketMeta):
         return [list(fields) for _, fields in self._stack]
 
     def show_str(self) -> str:
-        return self._materialize().show(self._given())
+        return _with_py_show(self, self._materialize().show(self._given()))
 
-    def show2(self) -> None:
-        print(self.show2_str(), end="")
+    def show2(self, dump: bool = False) -> str | None:
+        if dump:
+            return self.show2_str()
+        print(self.show2_str())
+        return None
 
     def show2_str(self) -> str:
         """As it will be sent: the lengths and checksums are the computed ones."""
@@ -1440,6 +1653,40 @@ class Packet(metaclass=_PacketMeta):
         return (_from_bytes, (self._rust.to_bytes(), names[0] if names else "", meta))
 
 
+def _with_py_show(pkt: Packet, text: str, idx: int = 0) -> str:
+    """A Rust `show()` from layer `idx` on, with a Python-modelled layer in
+    the chain drawn by its own `show()` in place of the Rust one."""
+    top = pkt._py_top()
+    if top is None or top[0] < idx:
+        return text
+    head, lvl = _show_head(text, top[0] - idx)
+    return head + top[1].show(dump=True, lvl=lvl)
+
+
+def _show_head(text: str, upto: int) -> tuple:
+    """The part of a Rust `show()` before layer `upto`, and the indent that
+    layer's fields would have had."""
+    starts = [i for i, line in enumerate(text.splitlines(keepends=True))
+              if line.lstrip().startswith("###[")]
+    lines = text.splitlines(keepends=True)
+    if upto >= len(starts):
+        return text, ""
+
+    def indent(layer: int) -> int:
+        for line in lines[starts[layer] + 1:]:
+            if line.lstrip().startswith("###["):
+                break
+            return max(len(line) - len(line.lstrip()) - 2, 0)
+        return 0
+
+    lvl = 0
+    if upto >= 1:
+        lvl = indent(upto - 1)
+        if upto >= 2:
+            lvl += lvl - indent(upto - 2)
+    return "".join(lines[:starts[upto]]), " " * lvl
+
+
 # What a packet carries besides its octets: when it was captured and sent,
 # its true length on the wire, and pcapng's per-packet annotations.
 _META = ("time", "wirelen", "sent_time", "sniffed_on", "comments", "direction",
@@ -1506,8 +1753,9 @@ def _register(name: str, cls: type) -> None:
 
 for _n in _b.known_layers():
     _LAYERS[_n] = _make_layer(_n)
-    globals()[_n] = _LAYERS[_n]
-    __all__.append(_n)
+    if _n not in _PY_MODELLED:
+        globals()[_n] = _LAYERS[_n]
+        __all__.append(_n)
     _FLAG_FIELDS.update(f for f in _b.layer_fields(_n) if _b.flag_names(_n, f))
     _PARSED_FIELD[_n] = _b.parsed_field(_n)
 
@@ -1525,9 +1773,46 @@ _RUNTIME_BINDS: list[tuple[str, str, list]] = []
 def bind_layers(lower: Any, upper: Any, **conds: Any) -> None:
     """Make dissection reach `upper` from `lower` when every named field of
     `lower` holds the given value, and stacking write those values back."""
+    if _is_py_class(upper):
+        bind_top_down(lower, upper, **conds)
+        bind_bottom_up(lower, upper, **conds)
+        return
     low, up = _layer_name(lower), _layer_name(upper)
     _b.bind_layer(low, up, list(conds.items()))
     _RUNTIME_BINDS.append((low, up, list(conds.items())))
+
+
+# Python-modelled layers reached from a Rust layer, as (lower layer name,
+# field values, class): a dissected packet decodes the Raw payload of such a
+# lower layer as that class on first ask. Kept in Python, so the bulk paths
+# see that payload as Raw.
+_PY_BOUND: list = []
+
+# Python-modelled class -> (lower layer name, field values written into that
+# layer when the class is stacked on it, unless set already).
+_PY_OVERLOAD: dict = {}
+
+
+def bind_bottom_up(lower: Any, upper: Any, **fval: Any) -> None:
+    """Dissection only: reach `upper` from `lower` when `fval` holds."""
+    if not _is_py_class(upper):
+        raise NotImplementedError(
+            "a binding between Rust layers goes both ways; use bind_layers")
+    if _is_py_class(lower):
+        lower.payload_guess = lower.payload_guess[:] + [(fval, upper)]
+    else:
+        _PY_BOUND.append((_layer_name(lower), dict(fval), upper))
+
+
+def bind_top_down(lower: Any, upper: Any, **fval: Any) -> None:
+    """Building only: stacking `upper` on `lower` writes `fval` into it."""
+    if not _is_py_class(upper):
+        raise NotImplementedError(
+            "a binding between Rust layers goes both ways; use bind_layers")
+    if _is_py_class(lower):
+        upper._overload_fields = {**upper._overload_fields, lower: fval}
+    else:
+        _PY_OVERLOAD[upper] = (_layer_name(lower), dict(fval))
 
 
 _GZIP_MAGIC = b"\x1f\x8b"

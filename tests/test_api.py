@@ -262,11 +262,14 @@ def test_show_str_lists_every_header_and_field(pkt):
     assert text.endswith("\n")
 
 
-def test_show_prints_what_show_str_returns(pkt):
+def test_show_prints_the_dump_and_then_print_s_own_newline(pkt):
+    """scapy's show() is print(dump); the newline print adds is the blank line
+    every show() ends with, and dump=True returns the text without it."""
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         pkt.show()
-    assert out.getvalue() == pkt.show_str()
+    assert out.getvalue() == pkt.show_str() + "\n"
+    assert pkt.show(dump=True) == pkt.show_str()
 
 
 def test_hexdump_str_formats_offset_hex_and_text():
@@ -606,4 +609,5 @@ def test_display_is_show(pkt):
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         pkt.display()
-    assert out.getvalue() == pkt.show_str()
+    assert out.getvalue() == pkt.show_str() + "\n"
+    assert pkt.display(dump=True) == pkt.show_str()

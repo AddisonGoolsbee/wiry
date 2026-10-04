@@ -1137,7 +1137,8 @@ class _Conf:
                  "session", "_iface", "_route", "_route6",
                  "_l3socket", "_l2socket", "_l2listen", "_loopback", "_prog",
                  "warning_threshold", "temp_files", "auto_crop_tables",
-                 "_stats", "_manufdb")
+                 "_stats", "_manufdb", "_asn1_codec", "ASN1_default_long_size",
+                 "_mib")
 
     def __init__(self) -> None:
         self.verb = 2
@@ -1166,6 +1167,11 @@ class _Conf:
         self._l2socket: Any = None
         self._l2listen: Any = None
         self._loopback: Optional[str] = None
+        self._asn1_codec: Any = None
+        # Octets of every long-form BER length the encoder writes; 0 is the
+        # shortest form that fits.
+        self.ASN1_default_long_size = 0
+        self._mib: Any = None
         self._prog: Any = None
         # Seconds within which a third warning from one call site is dropped.
         self.warning_threshold = 5
@@ -1364,6 +1370,30 @@ class _Conf:
     @l2listen.setter
     def l2listen(self, value: Any) -> None:
         self._l2listen = value
+
+    @property
+    def ASN1_default_codec(self) -> Any:
+        """The codec `bytes()` of a bare ASN.1 value encodes with."""
+        if self._asn1_codec is None:
+            from .asn1.asn1 import ASN1_Codecs
+
+            self._asn1_codec = ASN1_Codecs.BER
+        return self._asn1_codec
+
+    @ASN1_default_codec.setter
+    def ASN1_default_codec(self, value: Any) -> None:
+        self._asn1_codec = value
+
+    @property
+    def mib(self) -> Any:
+        """OID names, as `ASN1_OID` prints them."""
+        if self._mib is None:
+            from .asn1 import mib  # noqa: F401  (assigns conf.mib)
+        return self._mib
+
+    @mib.setter
+    def mib(self, value: Any) -> None:
+        self._mib = value
 
     # scapy's own spelling of the same three.
     L3socket = l3socket

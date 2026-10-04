@@ -213,6 +213,7 @@ fn options_to_py(py: Python<'_>, items: &[Item]) -> PyResult<Py<PyList>> {
             ItemValue::Flag if it.name.as_ref() == "SAckOK" => PyBytes::new_bound(py, b"").into(),
             ItemValue::Flag => py.None(),
             ItemValue::Uint(n) => n.into_py(py),
+            ItemValue::Int(n) => n.into_py(py),
             ItemValue::Pair(a, b) => (*a, *b).into_py(py),
             ItemValue::Bytes(b) => PyBytes::new_bound(py, b).into(),
             ItemValue::Text(s) => s.into_py(py),
