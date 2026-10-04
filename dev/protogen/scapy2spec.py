@@ -25,6 +25,11 @@ spec is decoded in Python the way the engine decodes it and compared with
 scapy's own dissection of a few hundred inputs, and with scapy's default build.
 A spec that disagrees with scapy anywhere is refused, not emitted.
 
+A partial class is emitted when `hand/<module>.toml` says hand-written code
+closes every gap it has (`covers`), with the spec keys that name those hooks;
+the same file can withhold a clean class (`emit = false`). Regeneration keeps
+both, so the overlay rather than the spec is what to edit.
+
 wiry derives from scapy under GPL-2.0-only; each emitted spec carries a
 `[provenance]` block, and `NOTICE` records the converter itself.
 """

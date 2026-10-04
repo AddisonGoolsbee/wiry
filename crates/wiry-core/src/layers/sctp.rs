@@ -184,7 +184,8 @@ fn next(hdr: &[u8]) -> Next {
 }
 
 /// What follows a chunk layer `hlen` octets long: scapy's
-/// `_SCTPChunkGuessPayload`, which leaves fewer than four octets as padding.
+/// `_SCTPChunkGuessPayload`. Fewer than four octets, which scapy calls
+/// padding, stay `Raw`.
 pub fn next_chunk(hdr: &[u8], hlen: usize) -> Next {
     match hdr.get(hlen..) {
         Some(rest) if rest.len() >= 4 => chunk_layer(rest[0]).map_or(Next::Raw, Next::Proto),
@@ -308,17 +309,16 @@ mod tests {
         assert_eq!(causes[0].name, "protocol-violation");
     }
 
-    /// A chunk with no parameter space of its own keeps its octets, so a
-    /// cumulative TSN is not re-cut as a TLV that happens to fit.
+    /// A chunk with a layer of its own is that layer, as scapy chains it, so
+    /// its cumulative TSN is a field rather than a TLV re-cut from the octets.
     #[test]
-    fn a_chunk_without_parameters_keeps_its_bytes() {
+    fn a_shutdown_chunk_is_its_own_layer() {
         let mut data = vector()[..12].to_vec();
         data.extend_from_slice(&[7, 0, 0, 8, 0, 0, 0, 9]);
         let p = Packet::dissect(data, ProtoId::Sctp);
-        let l = p.find_layer(ProtoId::Sctp).unwrap();
-        let items = p.options(l).unwrap();
-        assert_eq!(items[0].name, "SHUTDOWN");
-        assert_eq!(items[0].value, ItemValue::Bytes(vec![0, 0, 0, 9]));
+        let names: Vec<_> = p.layers().iter().map(|s| s.proto).collect();
+        assert_eq!(names, vec![ProtoId::Sctp, ProtoId::SCTPChunkShutdown]);
+        assert_eq!(p.get(1, "cumul_tsn_ack").unwrap(), FieldValue::Uint(9));
     }
     // protogen:tests end
 }

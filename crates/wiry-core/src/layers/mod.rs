@@ -1,6 +1,10 @@
 //! Field layouts come from the RFC cited at the top of each module. See
 //! CONTRIBUTING.md before editing.
 
+// protogen's generated `bind_next` guards a one-octet selector with
+// `hdr.len() >= 1`; remove once it writes `!hdr.is_empty()`.
+#![allow(clippy::len_zero)]
+
 pub mod arp;
 pub mod ber;
 pub mod bootp;
