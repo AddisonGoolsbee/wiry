@@ -1563,9 +1563,67 @@ def source_path(mod) -> str:
     return "scapy/" + mod.__name__.split(".", 1)[1].replace(".", "/") + ".py"
 
 
+HAND = Path(__file__).resolve().parent / "hand"
+# What an overlay may set besides `covers` and `parents`: the hooks protogen
+# reads from a spec's top level.
+OVERLAY_KEYS = ("header_len", "content_len", "parse_options", "bind_next", "set_hlen",
+                "min_len", "build_len")
+
+
+def load_overlay(short: str) -> dict:
+    """`hand/<module>.toml`: per class, which gaps hand-written hooks close and
+    the spec keys that name those hooks. A partial class is emitted only when
+    every gap it has is listed in `covers`."""
+    import tomllib
+
+    p = HAND / f"{short}.toml"
+    return tomllib.loads(p.read_text()) if p.exists() else {}
+
+
+def covered(r: dict) -> bool:
+    ov = r.get("overlay") or {}
+    return bool(ov) and {g["code"] for g in r["partial"]} <= set(ov.get("covers", []))
+
+
+def apply_overlay(lines: list[str], ov: dict) -> list[str]:
+    head = next(i for i, ln in enumerate(lines) if ln.startswith("[")) if any(
+        ln.startswith("[") for ln in lines) else len(lines)
+    for k in OVERLAY_KEYS:
+        if k not in ov:
+            continue
+        new = f"{k} = {toml_val(ov[k])}"
+        at = next((i for i in range(head) if lines[i].startswith(f"{k} = ")), None)
+        if at is None:
+            at = next(i for i in range(head) if lines[i].startswith("build_len = ")) + 1
+            lines.insert(at, new)
+            head += 1
+        else:
+            lines[at] = new
+    if ov.get("drop_parents"):
+        out, skip = [], False
+        for ln in lines:
+            if ln.startswith("["):
+                skip = ln == "[[parents]]"
+            if not skip:
+                out.append(ln)
+        lines = out
+    extra = []
+    for p in ov.get("parents", []):
+        extra.append("[[parents]]")
+        extra += [f"{k} = {toml_val(v)}" for k, v in p.items()]
+        extra.append("")
+    if extra:
+        at = lines.index("[provenance]")
+        lines[at:at] = extra
+    return lines
+
+
 def emit(res: dict, mod) -> str:
     lay: Layout = res["layout"]
     cls = lay.cls
+    ov = res.get("overlay") or {}
+    if "next" in ov:
+        res["next"] = ov["next"]
     refs = rfcs(cls, mod)
     cite = (f"{source_path(mod)}, class {cls.__name__} ({SCAPY_VERSION}), converted by "
             "dev/protogen/scapy2spec.py from the field objects scapy builds at run time.")
@@ -1647,10 +1705,11 @@ def emit(res: dict, mod) -> str:
         "[provenance]",
         f"source = {toml_str(source_path(mod))}",
         f"version = {toml_str(SCAPY_VERSION)}",
-        f"changed = [{toml_str(TODAY + ' — field table, defaults, enum names and bindings of ' + cls.__name__ + ' converted mechanically from the field objects by dev/protogen/scapy2spec.py')}]",
+        f"changed = [{toml_str(TODAY + ' — field table, defaults, enum names and bindings of ' + cls.__name__ + ' converted mechanically from the field objects by dev/protogen/scapy2spec.py')}"
+        + "".join(f", {toml_str(c)}" for c in ov.get("changed", [])) + "]",
         "",
     ]
-    return "\n".join(lines)
+    return "\n".join(apply_overlay(lines, ov) if ov else lines)
 
 
 def wrap(s: str, width: int = 78) -> str:
@@ -2069,10 +2128,13 @@ def main(argv: list[str]) -> int:
             continue
         if base is not None:
             base += len(rs)
-        emit_set = {r["class"] for r in rs if r["status"] == "clean"
-                    or (a.emit == "partial" and r["status"] == "partial")}
-        bindings({r["class"]: r for r in rs}, wl, classes_of(mod), emit_set)
         short = m.split(".", 2)[2].replace(".", "_")
+        overlay = load_overlay(short)
+        for r in rs:
+            r["overlay"] = overlay.get(r["class"], {})
+        emit_set = {r["class"] for r in rs if r["status"] == "clean"
+                    or (r["status"] == "partial" and (a.emit == "partial" or covered(r)))}
+        bindings({r["class"]: r for r in rs}, wl, classes_of(mod), emit_set)
         if not a.report_only:
             d = OUT / short
             for old in d.glob("*.toml") if d.exists() else []:

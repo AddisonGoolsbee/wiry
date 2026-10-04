@@ -795,7 +795,12 @@ def _layer_init(name: str):
             if name in _OPAQUE:
                 kw.setdefault("load", _to_bytes(_data))
             else:
-                Packet.__init__(self, _rust=_b.dissect(_to_bytes(_data), name))
+                rust = _b.dissect(_to_bytes(_data), name)
+                Packet.__init__(self, _rust=rust)
+                # scapy's dispatch_hook: the bytes named a subclass.
+                first = rust.layer_names()[:1]
+                if first and first[0] not in (name, "Raw", "Padding"):
+                    self._adopt_class()
                 return
         Packet.__init__(self, _stack=[(name, dict(kw))])
 

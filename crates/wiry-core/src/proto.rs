@@ -136,6 +136,7 @@ impl ProtoId {
     pub const HDLC: ProtoId = ProtoId(1104);
     pub const DIRPPP: ProtoId = ProtoId(1105);
     pub const PPPECPOptionOUI: ProtoId = ProtoId(1115);
+    pub const PPPLCP: ProtoId = ProtoId(1117);
     pub const PPPLCPMRUOption: ProtoId = ProtoId(1119);
     pub const PPPLCPACCMOption: ProtoId = ProtoId(1120);
     pub const PPPLCPQualityProtocolOption: ProtoId = ProtoId(1122);
@@ -258,6 +259,22 @@ impl ProtoId {
     pub const HCILEMetaLongTermKeyRequest: ProtoId = ProtoId(2202);
     pub const HCIMonHdr: ProtoId = ProtoId(2205);
     pub const HCIMonPcapHdr: ProtoId = ProtoId(2206);
+    pub const PPTP: ProtoId = ProtoId(6230);
+    pub const PPTPStartControlConnectionRequest: ProtoId = ProtoId(6231);
+    pub const PPTPStartControlConnectionReply: ProtoId = ProtoId(6232);
+    pub const PPTPStopControlConnectionRequest: ProtoId = ProtoId(6233);
+    pub const PPTPStopControlConnectionReply: ProtoId = ProtoId(6234);
+    pub const PPTPEchoRequest: ProtoId = ProtoId(6235);
+    pub const PPTPEchoReply: ProtoId = ProtoId(6236);
+    pub const PPTPOutgoingCallRequest: ProtoId = ProtoId(6237);
+    pub const PPTPOutgoingCallReply: ProtoId = ProtoId(6238);
+    pub const PPTPIncomingCallRequest: ProtoId = ProtoId(6239);
+    pub const PPTPIncomingCallReply: ProtoId = ProtoId(6240);
+    pub const PPTPIncomingCallConnected: ProtoId = ProtoId(6241);
+    pub const PPTPCallClearRequest: ProtoId = ProtoId(6242);
+    pub const PPTPCallDisconnectNotify: ProtoId = ProtoId(6243);
+    pub const PPTPWANErrorNotify: ProtoId = ProtoId(6244);
+    pub const PPTPSetLinkInfo: ProtoId = ProtoId(6245);
     pub const MobileIP: ProtoId = ProtoId(6600);
     pub const MobileIPRRQ: ProtoId = ProtoId(6601);
     pub const MobileIPRRP: ProtoId = ProtoId(6602);
@@ -453,6 +470,7 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::HDLC,
     ProtoId::DIRPPP,
     ProtoId::PPPECPOptionOUI,
+    ProtoId::PPPLCP,
     ProtoId::PPPLCPMRUOption,
     ProtoId::PPPLCPACCMOption,
     ProtoId::PPPLCPQualityProtocolOption,
@@ -575,6 +593,22 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::HCILEMetaLongTermKeyRequest,
     ProtoId::HCIMonHdr,
     ProtoId::HCIMonPcapHdr,
+    ProtoId::PPTP,
+    ProtoId::PPTPStartControlConnectionRequest,
+    ProtoId::PPTPStartControlConnectionReply,
+    ProtoId::PPTPStopControlConnectionRequest,
+    ProtoId::PPTPStopControlConnectionReply,
+    ProtoId::PPTPEchoRequest,
+    ProtoId::PPTPEchoReply,
+    ProtoId::PPTPOutgoingCallRequest,
+    ProtoId::PPTPOutgoingCallReply,
+    ProtoId::PPTPIncomingCallRequest,
+    ProtoId::PPTPIncomingCallReply,
+    ProtoId::PPTPIncomingCallConnected,
+    ProtoId::PPTPCallClearRequest,
+    ProtoId::PPTPCallDisconnectNotify,
+    ProtoId::PPTPWANErrorNotify,
+    ProtoId::PPTPSetLinkInfo,
     ProtoId::MobileIP,
     ProtoId::MobileIPRRQ,
     ProtoId::MobileIPRRP,
@@ -728,6 +762,7 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::HDLC.0 as usize] = &ppp_hdlc::DESC;
     t[ProtoId::DIRPPP.0 as usize] = &ppp_dir_ppp::DESC;
     t[ProtoId::PPPECPOptionOUI.0 as usize] = &ppp_ppp_ecp_option_oui::DESC;
+    t[ProtoId::PPPLCP.0 as usize] = &ppp_ppp_lcp::DESC;
     t[ProtoId::PPPLCPMRUOption.0 as usize] = &ppp_ppp_lcp_mru_option::DESC;
     t[ProtoId::PPPLCPACCMOption.0 as usize] = &ppp_ppp_lcp_accm_option::DESC;
     t[ProtoId::PPPLCPQualityProtocolOption.0 as usize] = &ppp_ppp_lcp_quality_protocol_option::DESC;
@@ -896,6 +931,26 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
         &bluetooth_hci_le_meta_long_term_key_request::DESC;
     t[ProtoId::HCIMonHdr.0 as usize] = &bluetooth_hci_mon_hdr::DESC;
     t[ProtoId::HCIMonPcapHdr.0 as usize] = &bluetooth_hci_mon_pcap_hdr::DESC;
+    t[ProtoId::PPTP.0 as usize] = &pptp_pptp::DESC;
+    t[ProtoId::PPTPStartControlConnectionRequest.0 as usize] =
+        &pptp_pptpstartcontrolconnectionrequest::DESC;
+    t[ProtoId::PPTPStartControlConnectionReply.0 as usize] =
+        &pptp_pptpstartcontrolconnectionreply::DESC;
+    t[ProtoId::PPTPStopControlConnectionRequest.0 as usize] =
+        &pptp_pptpstopcontrolconnectionrequest::DESC;
+    t[ProtoId::PPTPStopControlConnectionReply.0 as usize] =
+        &pptp_pptpstopcontrolconnectionreply::DESC;
+    t[ProtoId::PPTPEchoRequest.0 as usize] = &pptp_pptpechorequest::DESC;
+    t[ProtoId::PPTPEchoReply.0 as usize] = &pptp_pptpechoreply::DESC;
+    t[ProtoId::PPTPOutgoingCallRequest.0 as usize] = &pptp_pptpoutgoingcallrequest::DESC;
+    t[ProtoId::PPTPOutgoingCallReply.0 as usize] = &pptp_pptpoutgoingcallreply::DESC;
+    t[ProtoId::PPTPIncomingCallRequest.0 as usize] = &pptp_pptpincomingcallrequest::DESC;
+    t[ProtoId::PPTPIncomingCallReply.0 as usize] = &pptp_pptpincomingcallreply::DESC;
+    t[ProtoId::PPTPIncomingCallConnected.0 as usize] = &pptp_pptpincomingcallconnected::DESC;
+    t[ProtoId::PPTPCallClearRequest.0 as usize] = &pptp_pptpcallclearrequest::DESC;
+    t[ProtoId::PPTPCallDisconnectNotify.0 as usize] = &pptp_pptpcalldisconnectnotify::DESC;
+    t[ProtoId::PPTPWANErrorNotify.0 as usize] = &pptp_pptpwanerrornotify::DESC;
+    t[ProtoId::PPTPSetLinkInfo.0 as usize] = &pptp_pptpsetlinkinfo::DESC;
     t[ProtoId::MobileIP.0 as usize] = &mobileip_mobileip::DESC;
     t[ProtoId::MobileIPRRQ.0 as usize] = &mobileip_mobileiprrq::DESC;
     t[ProtoId::MobileIPRRP.0 as usize] = &mobileip_mobileiprrp::DESC;
