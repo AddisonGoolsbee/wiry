@@ -55,6 +55,68 @@ _DISCOVER = ("ls", "lsc", "explore", "field_table", "FieldInfo")
 
 _CONSOLE = ("interact", "save_session", "load_session")
 
+# scapy's ASN.1 surface, by the module that defines each name.
+_ASN1 = {
+    "asn1.asn1": (
+        "ASN1_Error", "ASN1_Encoding_Error", "ASN1_Decoding_Error",
+        "ASN1_BadTag_Decoding_Error", "ASN1Codec", "ASN1_Codecs", "ASN1Tag",
+        "ASN1_Class", "ASN1_Class_UNIVERSAL", "ASN1_Object",
+        "ASN1_DECODING_ERROR", "ASN1_force", "ASN1_BADTAG", "ASN1_INTEGER",
+        "ASN1_BOOLEAN", "ASN1_BIT_STRING", "ASN1_STRING", "ASN1_NULL",
+        "ASN1_OID", "ASN1_ENUMERATED", "ASN1_UTF8_STRING",
+        "ASN1_NUMERIC_STRING", "ASN1_PRINTABLE_STRING", "ASN1_T61_STRING",
+        "ASN1_VIDEOTEX_STRING", "ASN1_IA5_STRING", "ASN1_GENERAL_STRING",
+        "ASN1_GENERALIZED_TIME", "ASN1_UTC_TIME", "ASN1_ISO646_STRING",
+        "ASN1_UNIVERSAL_STRING", "ASN1_BMP_STRING", "ASN1_SEQUENCE",
+        "ASN1_SET", "ASN1_IPADDRESS", "ASN1_COUNTER32", "ASN1_COUNTER64",
+        "ASN1_GAUGE32", "ASN1_TIME_TICKS", "RandASN1Object", "RandOID",
+        "GeneralizedTime", "IntAutoTime",
+    ),
+    "asn1.ber": (
+        "BER_Exception", "BER_Encoding_Error", "BER_Decoding_Error",
+        "BER_BadTag_Decoding_Error", "BER_len_enc", "BER_len_dec",
+        "BER_num_enc", "BER_num_dec", "BER_id_dec", "BER_id_enc",
+        "BER_tagging_dec", "BER_tagging_enc", "BERcodec_Object",
+        "BERcodec_INTEGER", "BERcodec_BOOLEAN", "BERcodec_BIT_STRING",
+        "BERcodec_STRING", "BERcodec_NULL", "BERcodec_OID",
+        "BERcodec_ENUMERATED", "BERcodec_UTF8_STRING",
+        "BERcodec_NUMERIC_STRING", "BERcodec_PRINTABLE_STRING",
+        "BERcodec_T61_STRING", "BERcodec_VIDEOTEX_STRING",
+        "BERcodec_IA5_STRING", "BERcodec_GENERAL_STRING",
+        "BERcodec_UTC_TIME", "BERcodec_GENERALIZED_TIME",
+        "BERcodec_ISO646_STRING", "BERcodec_UNIVERSAL_STRING",
+        "BERcodec_BMP_STRING", "BERcodec_SEQUENCE", "BERcodec_SET",
+        "BERcodec_IPADDRESS", "BERcodec_COUNTER32", "BERcodec_COUNTER64",
+        "BERcodec_GAUGE32", "BERcodec_TIME_TICKS",
+    ),
+    "asn1.mib": ("MIBDict", "load_mib"),
+    "asn1fields": (
+        "ASN1F_badsequence", "ASN1F_element", "ASN1F_field", "ASN1F_BOOLEAN",
+        "ASN1F_INTEGER", "ASN1F_enum_INTEGER", "ASN1F_BIT_STRING",
+        "ASN1F_STRING", "ASN1F_NULL", "ASN1F_OID", "ASN1F_ENUMERATED",
+        "ASN1F_UTF8_STRING", "ASN1F_NUMERIC_STRING", "ASN1F_PRINTABLE_STRING",
+        "ASN1F_T61_STRING", "ASN1F_VIDEOTEX_STRING", "ASN1F_IA5_STRING",
+        "ASN1F_GENERAL_STRING", "ASN1F_UTC_TIME", "ASN1F_GENERALIZED_TIME",
+        "ASN1F_ISO646_STRING", "ASN1F_UNIVERSAL_STRING", "ASN1F_BMP_STRING",
+        "ASN1F_SEQUENCE", "ASN1F_SET", "ASN1F_SEQUENCE_OF", "ASN1F_SET_OF",
+        "ASN1F_IPADDRESS", "ASN1F_TIME_TICKS", "ASN1F_optional", "ASN1F_omit",
+        "ASN1F_CHOICE", "ASN1F_PACKET", "ASN1F_BIT_STRING_ENCAPS",
+        "ASN1F_FLAGS", "ASN1F_STRING_PacketField", "ASN1F_STRING_ENCAPS",
+    ),
+    "asn1packet": ("ASN1_Packet",),
+    "layers.snmp": (
+        "SNMP", "SNMPvarbind", "SNMPget", "SNMPnext", "SNMPresponse",
+        "SNMPset", "SNMPtrapv1", "SNMPbulk", "SNMPinform", "SNMPtrapv2",
+        "ASN1_Class_SNMP", "snmpget", "snmpwalk",
+    ),
+}
+_ASN1_HOME = {n: m for m, names in _ASN1.items() for n in names}
+
+# Rust layers whose scapy contract is a tree of Python objects. The Rust layer
+# stays in the dissection chain, so a capture of them is found, counted and
+# filtered without Python; the name exported is the Python model.
+_PY_MODELLED = {"SNMP": "layers.snmp"}
+
 _EAGER = (
     "Packet", "PacketList", "FlagValue", "rdpcap", "wrpcap", "wrpcapng",
     "PcapReader", "PcapWriter", "PcapNgWriter", "raw", "hexdump",
@@ -70,6 +132,7 @@ _EAGER = (
 __all__ = list(
     _EAGER + _COLUMNAR + _FRAG + _STREAM + _DESCRIBE + _CAPTURE + _TOOLS
     + _SOCKETS + _AUTOMATON + _ANSMACHINE + _ROUTE + _DISCOVER + _CONSOLE
+    + tuple(_ASN1_HOME)
 )
 
 
@@ -110,6 +173,9 @@ def __getattr__(name: str) -> Any:
     if name in _ROUTE:
         from . import route
         return getattr(route, name)
+    if name in _ASN1_HOME:
+        import importlib
+        return getattr(importlib.import_module("." + _ASN1_HOME[name], __name__), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -129,6 +195,8 @@ def _to_bytes(x: Any, what: str = "value") -> bytes:
     if isinstance(x, str):
         return x.encode("latin-1")
     if _is_bytes(x):
+        return bytes(x)
+    if _is_py(x):
         return bytes(x)
     raise TypeError(f"{what} must be bytes or str, not {type(x).__name__}")
 
@@ -451,6 +519,8 @@ _FIELD_KINDS: dict[str, dict[str, str]] = {}
 def _is_plain_field(lname: str, key: str, value: Any) -> bool:
     """Whether the build path writes this into a fixed slot; the rest are
     option regions and payloads."""
+    if _is_py(value):
+        return key != "load" or lname not in _OPAQUE
     if key == _PARSED_FIELD.get(lname, "options") and not _is_bytes(value):
         return False
     if key == "load" and lname in _OPAQUE:
@@ -507,6 +577,43 @@ def _expand_frames(pkt: Any) -> list:
     args = pkt._build_args()
     tmpl = pkt.template(args)
     return _all_of(tmpl, True) if tmpl is not None else [pkt._serialize(args)]
+
+
+def _is_py(x: Any) -> bool:
+    """Whether `x` is a Python-modelled layer; nothing can be until the
+    module defining them has been imported."""
+    mod = sys.modules.get(__name__ + "._pylayer")
+    return mod is not None and isinstance(x, mod.PyPacket)
+
+
+def _is_py_class(x: Any) -> bool:
+    mod = sys.modules.get(__name__ + "._pylayer")
+    return mod is not None and isinstance(x, type) and issubclass(x, mod.PyPacket)
+
+
+def _py_model(wire: str) -> Any:
+    """The Python class modelling the Rust layer `wire`, if it has one."""
+    home = _PY_MODELLED.get(wire)
+    if home is None:
+        return None
+    import importlib
+    return getattr(importlib.import_module("." + home, __name__), wire)
+
+
+def _held(obj: Any) -> "Packet":
+    """A one-layer packet carrying a Python-modelled layer: under the Rust
+    layer it models, which keeps that layer's binding (UDP port 161 for
+    SNMP), or as Raw octets where it models none."""
+    wire = type(obj).__name__ if type(obj).__name__ in _PY_MODELLED else None
+    if wire is None:
+        wire = getattr(type(obj), "_name", None)
+        wire = wire if wire in _PY_MODELLED else "Raw"
+    field = "load" if wire == "Raw" else _PARSED_FIELD.get(wire, "load")
+    return Packet(_stack=[(wire, {field: obj})])
+
+
+def _copy_fields(fields: dict) -> dict:
+    return {k: v.copy() if _is_py(v) else v for k, v in fields.items()}
 
 
 def _float_padding(stack: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
@@ -605,7 +712,7 @@ class Packet(metaclass=_PacketMeta):
     _name: str | None = None
 
     __slots__ = ("_stack", "_payload", "_rust", "_written", "time", "wirelen",
-                 "sent_time", "sniffed_on")
+                 "sent_time", "sniffed_on", "_py")
 
     def __init__(
         self,
@@ -623,6 +730,7 @@ class Packet(metaclass=_PacketMeta):
         self.wirelen = wirelen
         self.sent_time = None
         self.sniffed_on = None
+        self._py = None
 
     def __truediv__(self, other: "Packet") -> "Packet":
         """Stack another layer beneath this one."""
@@ -631,6 +739,15 @@ class Packet(metaclass=_PacketMeta):
                 other = Raw(load=_to_bytes(other))
             else:
                 return NotImplemented
+
+        # Above a Python-modelled layer everything is that layer's payload,
+        # as it is in scapy.
+        if self._py_top() is not None:
+            clone = self.copy()
+            clone._py_top()[1].add_payload(other.copy() if _is_py(other) else other)
+            return clone
+        if _is_py(other):
+            other = _held(other.copy())
 
         # A materialised packet cannot be turned back into a field spec:
         # variable-length header content does not survive the build path, so
@@ -659,7 +776,7 @@ class Packet(metaclass=_PacketMeta):
     def _spec(self) -> list[tuple[str, dict]]:
         """The layer stack as (name, fields) pairs, dissecting if needed."""
         if self._stack:
-            return [(n, dict(f)) for n, f in self._stack]
+            return [(n, _copy_fields(f)) for n, f in self._stack]
         if self._rust is not None:
             return [(n, {}) for n in self._rust.layer_names()]
         return []
@@ -672,6 +789,9 @@ class Packet(metaclass=_PacketMeta):
         for i, (lname, fields) in enumerate(self._stack):
             for k, v in fields.items():
                 if not _is_plain_field(lname, k, v):
+                    continue
+                if _is_py(v):
+                    raws.append((i, k, bytes(v)))
                     continue
                 spec = gen_spec(v, _field_kind(lname, k))
                 if spec is not None:
@@ -710,6 +830,8 @@ class Packet(metaclass=_PacketMeta):
                     out.append((i, None, _to_bytes(blob, f"{lname}.{var[0]}")))
                 continue
             v = fields.get(_PARSED_FIELD.get(lname, "options"))
+            if _is_py(v):
+                continue
             if v is None or _is_bytes(v):
                 if _is_bytes(v) and v:
                     out.append((i, None, bytes(v)))
@@ -768,10 +890,66 @@ class Packet(metaclass=_PacketMeta):
             if tmpl is not None:
                 return tmpl.packet(0)
             names, ints, strs, raws, _ = args
-            self._rust = _b.build_packet(
+            rust = _b.build_packet(
                 names, ints, strs, raws, self._payload, self._opt_blobs()
             )
+            # Not cached: the Python layer it was built from stays mutable.
+            if self._py_top() is not None:
+                return rust
+            self._rust = rust
+        elif self._py:
+            self._sync_py()
         return self._rust
+
+    def _py_top(self) -> Any:
+        """(index, object) of the Python-modelled layer this chain ends in.
+
+        A dissected packet decodes it from the Rust layer on first ask and
+        keeps it; one that fails to decode stays the Rust layer, as scapy
+        leaves an undecodable payload Raw."""
+        if self._spec_live:
+            for i, (_, fields) in enumerate(self._stack):
+                for v in fields.values():
+                    if _is_py(v):
+                        return i, v
+            return None
+        if self._py is None:
+            self._py = self._decode_py() or False
+        return self._py[:2] if self._py else None
+
+    def _decode_py(self) -> Any:
+        rust = self._rust
+        if rust is None:
+            return None
+        names = rust.layer_names()
+        for i, n in enumerate(names):
+            if n not in _PY_MODELLED:
+                continue
+            data = rust.payload(i - 1) if i else rust.to_bytes()
+            try:
+                obj = _py_model(n)(data)
+            except Exception:
+                from .capture import conf
+                if conf.debug_dissector:
+                    raise
+                return None
+            # Compared against the object's own encoding, not the octets it
+            # came from, so reading a non-canonical message never rewrites it.
+            return i, obj, bytes(obj)
+        return None
+
+    def _sync_py(self) -> None:
+        """Write a changed Python layer back into the octets."""
+        i, obj, built = self._py
+        now = bytes(obj)
+        if now == built:
+            return
+        if i:
+            self._rust.set_payload(i - 1, now)
+        else:
+            self._rust = _b.dissect(now, self._rust.layer_names()[0])
+        self._py = (i, obj, now)
+        self._written = True
 
     @property
     def _spec_live(self) -> bool:
@@ -831,6 +1009,9 @@ class Packet(metaclass=_PacketMeta):
         return [n for n, _ in self._stack]
 
     def haslayer(self, layer: Any) -> bool:
+        if self._wants_py(layer):
+            top = self._py_top()
+            return top is not None and bool(top[1].haslayer(layer))
         name = _layer_name(layer)
         if self._rust is not None:
             return self._rust.haslayer(name)
@@ -844,7 +1025,13 @@ class Packet(metaclass=_PacketMeta):
             if not -len(names) <= layer < len(names):
                 return None
             layer %= len(names)
+            top = self._py_top()
+            if top is not None and layer >= top[0]:
+                return top[1].getlayer(layer - top[0])
             return _LayerView(self, layer, names[layer])
+        if self._wants_py(layer, names):
+            top = self._py_top()
+            return None if top is None else top[1].getlayer(layer, nb, **flt)
         name = _layer_name(layer)
         if nb == 1 and not flt:
             return _LayerView(self, names.index(name), name) if name in names else None
@@ -863,6 +1050,19 @@ class Packet(metaclass=_PacketMeta):
     def __contains__(self, layer: Any) -> bool:
         return self.haslayer(layer)
 
+    def _wants_py(self, layer: Any, names: Any = None) -> bool:
+        """Whether `layer` names something only the Python model can answer:
+        a Python class, the Rust layer it models, or a name no Rust layer in
+        this chain has."""
+        if _is_py_class(layer):
+            return True
+        if not isinstance(layer, str):
+            return False
+        if layer in _PY_MODELLED:
+            return True
+        if layer in (names if names is not None else self.layers()):
+            return False
+        return self._py_top() is not None
     @property
     def name(self) -> str:
         """The outermost layer's name, which is what a packet answers to."""
@@ -900,7 +1100,11 @@ class Packet(metaclass=_PacketMeta):
 
     def iterpayloads(self) -> Iterator[Any]:
         """Each layer of the chain in turn, outermost first."""
+        top = self._py_top()
         for i, n in enumerate(self.layers()):
+            if top is not None and i == top[0]:
+                yield from top[1].iterpayloads()
+                return
             yield _LayerView(self, i, n)
 
     def firstlayer(self) -> Any:
@@ -909,7 +1113,8 @@ class Packet(metaclass=_PacketMeta):
 
     def lastlayer(self) -> Any:
         """The top layer: the one carrying the payload."""
-        return self.getlayer(-1)
+        top = self._py_top()
+        return top[1].lastlayer() if top is not None else self.getlayer(-1)
 
     def get_field(self, field: str) -> Any:
         """The declaration of a field, wherever in the chain it lives."""
@@ -1019,9 +1224,10 @@ class Packet(metaclass=_PacketMeta):
     def copy(self) -> "Packet":
         """An independent packet carrying the same layers and values."""
         if self._rust is not None:
-            return Packet(_rust=self._rust.copy(), time=self.time, wirelen=self.wirelen)
+            return Packet(_rust=self._materialize().copy(), time=self.time,
+                          wirelen=self.wirelen)
         return Packet(
-            _stack=[(n, dict(f)) for n, f in self._stack],
+            _stack=[(n, _copy_fields(f)) for n, f in self._stack],
             _payload=self._payload,
             time=self.time,
             wirelen=self.wirelen,
@@ -1050,6 +1256,12 @@ class Packet(metaclass=_PacketMeta):
                     if flags is not None:
                         return FlagValue.from_str(value, flags, self, i, field)
                 return value
+        top = self._py_top()
+        if top is not None:
+            try:
+                return getattr(top[1], field)
+            except AttributeError:
+                pass
         raise AttributeError(f"no field {field!r} in {' / '.join(names)}")
 
     def __setattr__(self, field: str, value: Any) -> None:
@@ -1061,6 +1273,10 @@ class Packet(metaclass=_PacketMeta):
             if field in _b.layer_fields(n):
                 self._set(i, field, value)
                 return
+        top = self._py_top()
+        if top is not None:
+            top[1].setfieldval(field, value)
+            return
         raise AttributeError(f"no field {field!r} in {' / '.join(names)}")
 
     @property
@@ -1073,7 +1289,12 @@ class Packet(metaclass=_PacketMeta):
         print(self.show_str(), end="")
 
     def show_str(self) -> str:
-        return self._materialize().show()
+        text = self._materialize().show()
+        top = self._py_top()
+        if top is None:
+            return text
+        head, lvl = _show_head(text, top[0])
+        return head + top[1].show(dump=True, lvl=lvl)
 
     def show2(self) -> None:
         print(self.show2_str(), end="")
@@ -1132,6 +1353,30 @@ class Packet(metaclass=_PacketMeta):
                               self.time, self.wirelen, self.sniffed_on))
 
 
+def _show_head(text: str, upto: int) -> tuple:
+    """The part of a Rust `show()` before layer `upto`, and the indent that
+    layer's fields would have had."""
+    starts = [i for i, line in enumerate(text.splitlines(keepends=True))
+              if line.lstrip().startswith("###[")]
+    lines = text.splitlines(keepends=True)
+    if upto >= len(starts):
+        return text, ""
+
+    def indent(layer: int) -> int:
+        for line in lines[starts[layer] + 1:]:
+            if line.lstrip().startswith("###["):
+                break
+            return max(len(line) - len(line.lstrip()) - 2, 0)
+        return 0
+
+    lvl = 0
+    if upto >= 1:
+        lvl = indent(upto - 1)
+        if upto >= 2:
+            lvl += lvl - indent(upto - 2)
+    return "".join(lines[:starts[upto]]), " " * lvl
+
+
 def _from_stack(stack, payload, time, wirelen, sniffed_on) -> Packet:
     pkt = Packet(_stack=stack, _payload=payload, time=time, wirelen=wirelen)
     pkt.sniffed_on = sniffed_on
@@ -1174,8 +1419,9 @@ def _register(name: str, cls: type) -> None:
 
 for _n in _b.known_layers():
     _LAYERS[_n] = _make_layer(_n)
-    globals()[_n] = _LAYERS[_n]
-    __all__.append(_n)
+    if _n not in _PY_MODELLED:
+        globals()[_n] = _LAYERS[_n]
+        __all__.append(_n)
     _FLAG_FIELDS.update(f for f in _b.layer_fields(_n) if _b.flag_names(_n, f))
     _PARSED_FIELD[_n] = _b.parsed_field(_n)
 
