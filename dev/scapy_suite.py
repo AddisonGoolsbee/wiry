@@ -17,6 +17,7 @@ Outcomes are three-way and the distinction matters for honest reporting:
 Only FAIL is a defect. A SKIP is a scope boundary.
 """
 
+import ast
 import importlib
 import importlib.abc
 import importlib.util
@@ -110,8 +111,27 @@ def parse_uts(path):
         yield campaign, name, kw, "\n".join(buf)
 
 
+# Standard-library names `from scapy.all import *` leaks into a UTscapy
+# session, which scapy's tests use without importing. They are not wiry's API.
+_SCAPY_ALL_STDLIB = (
+    "abc", "argparse", "atexit", "builtins", "calendar", "code", "collections",
+    "copy", "ctypes", "dataclasses", "decimal", "difflib", "enum", "errno",
+    "functools", "getopt", "gzip", "hashlib", "hmac", "html", "importlib",
+    "inspect", "io", "itertools", "json", "locale", "logging", "math",
+    "operator", "os", "pathlib", "pickle", "queue", "random", "re", "select",
+    "shutil", "socket", "ssl", "string", "struct", "subprocess", "sys",
+    "tempfile", "threading", "time", "traceback", "types", "uuid", "warnings",
+    "zlib",
+)
+
+
 def namespace():
-    ns = {k: getattr(wiry, k) for k in dir(wiry) if not k.startswith("_")}
+    import datetime as dt
+
+    ns = {m: importlib.import_module(m) for m in _SCAPY_ALL_STDLIB}
+    ns.update(datetime=dt.datetime, timedelta=dt.timedelta,
+              timezone=dt.timezone, tzinfo=dt.tzinfo)
+    ns.update({k: getattr(wiry, k) for k in dir(wiry) if not k.startswith("_")})
     ns["__name__"] = "scapy_suite"
     return ns
 
@@ -168,7 +188,35 @@ def classify_error(exc, supported):
     if isinstance(exc, AttributeError):
         m = re.search(r"'([A-Za-z0-9_.]+)'", str(exc))
         return "skip", f"needs attribute {m.group(1) if m else '?'}"
+    # A patch an earlier test started and then skipped out of before it could
+    # stop it: that test's skip, surfacing again in the shared session.
+    if isinstance(exc, RuntimeError) and str(exc) == "Patch is already started":
+        return "skip", "a mock.patch an earlier skip left started"
     return "fail", text
+
+
+class _Display(ast.NodeTransformer):
+    """Route every expression statement through `__display__`, as an
+    interactive session's display hook sees it; function and class bodies are
+    not displayed, so they are left alone."""
+
+    def visit_Expr(self, node):
+        call = ast.Call(ast.Name("__display__", ast.Load()), [node.value], [])
+        return ast.copy_location(ast.Expr(call), node)
+
+    def _skip(self, node):
+        return node
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _skip
+    visit_Lambda = _skip
+
+
+def compile_test(code, name):
+    """UTscapy runs a test as an interactive session and judges it by the
+    last value that session displayed: `"invalid" in repr(x)` on a line of its
+    own fails the test when it is False. A plain `exec` would pass it."""
+    tree = _Display().visit(ast.parse(code, f"<{name}>"))
+    return compile(ast.fix_missing_locations(tree), f"<{name}>", "exec")
 
 
 def run(path, verbose=False, limit=None):
@@ -176,6 +224,11 @@ def run(path, verbose=False, limit=None):
     results = {"pass": 0, "skip": 0, "fail": 0}
     failures = []
     skips = {}
+    # One namespace per file: UTscapy runs a campaign as one session, and
+    # later tests read what earlier ones defined.
+    ns = namespace()
+    shown = []
+    ns["__display__"] = lambda v: shown.append(v) if v is not None else None
 
     for i, (campaign, name, kw, code) in enumerate(parse_uts(path)):
         if limit and i >= limit:
@@ -197,9 +250,15 @@ def run(path, verbose=False, limit=None):
                 f"uses {sorted(blocked)[0]}", 0) + 1
             continue
 
-        ns = namespace()
+        shown.clear()
         try:
-            exec(compile(code, f"<{name}>", "exec"), ns)
+            try:
+                compiled = compile_test(code, name)
+            except SyntaxError:
+                compiled = compile(code, f"<{name}>", "exec")
+            exec(compiled, ns)
+            if shown and not shown[-1]:
+                raise AssertionError(f"last value displayed was {shown[-1]!r}")
             results["pass"] += 1
             if verbose:
                 print(f"  PASS  {name}")
@@ -207,9 +266,9 @@ def run(path, verbose=False, limit=None):
             results["fail"] += 1
             line = ""
             tb = traceback.extract_tb(sys.exc_info()[2])
-            if tb:
+            if tb and tb[-1].filename.startswith("<"):
                 line = (tb[-1].line or "").strip()
-            failures.append((campaign, name, f"assertion failed: {line}"))
+            failures.append((campaign, name, f"assertion failed: {line or exc}"))
         except Exception as exc:  # noqa: BLE001
             kind, why = classify_error(exc, supported)
             results[kind] += 1
