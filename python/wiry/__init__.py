@@ -1818,5 +1818,5 @@ def _export(module: str) -> None:
 
 
 for _m in ("compat", "consts", "error", "utils", "utils6", "data", "plist",
-           "pcapio", "external"):
+           "pcapio", "external", "pton_ntop"):
     _export(_m)

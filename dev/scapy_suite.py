@@ -136,6 +136,14 @@ def namespace():
     return ns
 
 
+def _checkout_of(path):
+    """The scapy checkout a campaign file sits in, wherever under `test/`."""
+    for parent in path.parents:
+        if (parent / "test").is_dir() and (parent / "scapy").is_dir():
+            return parent
+    return path.parents[3]
+
+
 def utscapy_tools(root):
     """The helpers UTscapy puts in every session (`import_UTscapy_tools`):
     test scaffolding, not scapy's API. `scapy_path` resolves against the
@@ -266,7 +274,7 @@ def run(path, verbose=False, limit=None):
     # One namespace per file: UTscapy runs a campaign as one session, and
     # later tests read what earlier ones defined.
     ns = namespace()
-    ns.update(utscapy_tools(Path(path).resolve().parents[3]))
+    ns.update(utscapy_tools(_checkout_of(Path(path).resolve())))
     shown = []
     ns["__display__"] = lambda v: shown.append(v) if v is not None else None
 
