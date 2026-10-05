@@ -12,22 +12,13 @@
 
 //! libpcap, loaded at run time.
 //!
-//! wiry does not link against libpcap. A wheel that did could only be built on
-//! a machine with the development headers and could only run on one with the
-//! matching shared object, which is why every earlier build kept live capture
-//! behind an off-by-default feature. scapy has never had that problem: it
-//! `dlopen`s libpcap through ctypes when it is asked to capture and reports a
-//! missing library as a missing library. This crate is that, in Rust.
+//! A wheel linked against libpcap could only be built where its headers are and
+//! run where the matching shared object is. Like scapy, wiry `dlopen`s it on
+//! first use and reports a missing library as exactly that.
 //!
-//! **This is the one crate in the workspace that contains `unsafe`.** Every
-//! other one is `#![forbid(unsafe_code)]`, and the dissection engine — the part
-//! that reads attacker-controlled bytes — is among them. What is unsafe here is
-//! the FFI itself: loading a library, calling through a function pointer, and
-//! owning the four kinds of pointer libpcap hands back. Nothing in this file
-//! parses a packet.
-//!
-//! Declarations are transcribed from `pcap/pcap.h` (libpcap 1.10,
-//! BSD-3-Clause), cross-checked against scapy's ctypes bindings. See `NOTICE`.
+//! This is the only crate in the workspace that may contain `unsafe`, and it is
+//! confined to the FFI: loading the library, calling through its function
+//! pointers and owning the pointers it returns. Nothing here parses a packet.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -41,8 +32,7 @@ use std::sync::{Mutex, OnceLock};
 use libloading::Library;
 use sys::*;
 
-/// What went wrong, in the shape the caller needs to map it. The message is
-/// always libpcap's own where libpcap produced one.
+/// The category a caller maps to its own error type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     /// libpcap is not on this machine, or is not loadable.
@@ -53,6 +43,7 @@ pub enum Kind {
     Other,
 }
 
+/// `msg` is libpcap's own text wherever libpcap supplied one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     pub kind: Kind,
@@ -91,15 +82,13 @@ pub struct PktHdr {
     pub origlen: u32,
 }
 
-// ---------------------------------------------------------------- loading ---
-
 struct Api {
     path: String,
     create: PcapCreate,
     set_snaplen: PcapSetInt,
     set_promisc: PcapSetInt,
     set_timeout: PcapSetInt,
-    /// libpcap 1.5 and later. An older one still captures; it just batches.
+    /// Absent before libpcap 1.5, which then delivers frames in batches.
     set_immediate_mode: Option<PcapSetInt>,
     activate: PcapActivate,
     close: PcapClose,
@@ -118,19 +107,19 @@ struct Api {
     freealldevs: PcapFreealldevs,
     lookupnet: PcapLookupnet,
     lib_version: Option<PcapLibVersion>,
-    /// Dropping this would `dlclose` libpcap out from under every pointer
-    /// above, so it is held for the life of the process and never touched.
+    /// Held for the life of the process: dropping it would `dlclose` libpcap
+    /// out from under every function pointer above.
     _lib: Library,
 }
 
-// SAFETY: every field is either a plain `extern "C" fn` pointer, which is Send
-// and Sync, or the `Library` handle, which libloading documents as both.
+// SAFETY: every field is a plain `extern "C" fn` pointer, a `String`, or the
+// `Library` handle, which libloading documents as Send and Sync.
 unsafe impl Send for Api {}
 unsafe impl Sync for Api {}
 
-/// libpcap before 1.8 kept the filter compiler's lexer in globals, so two
-/// threads compiling at once corrupted each other. Distributions still ship
-/// those; serialising costs nothing next to the parse.
+/// libpcap before 1.8 keeps the filter compiler's lexer state in globals, so
+/// concurrent `pcap_compile` calls corrupt each other, and distributions still
+/// ship such versions.
 static COMPILE_LOCK: Mutex<()> = Mutex::new(());
 
 static API: OnceLock<Result<Api, Error>> = OnceLock::new();
@@ -151,9 +140,8 @@ fn candidates() -> Vec<String> {
     }
     #[cfg(windows)]
     {
-        // Npcap installs beside, not over, an older WinPcap, and its directory
-        // is deliberately absent from the default search path. scapy prepends
-        // it; so does this.
+        // Npcap installs beside any WinPcap, in a directory deliberately left
+        // off the DLL search path, so it is tried first by full path.
         let mut out = Vec::new();
         if let Ok(windir) = std::env::var("WINDIR") {
             out.push(format!("{windir}\\System32\\Npcap\\wpcap.dll"));
@@ -186,12 +174,14 @@ fn install_hint() -> &'static str {
 /// `name` must be the NUL-terminated name of a symbol in `lib` whose C type is
 /// exactly `T`.
 unsafe fn sym<T: Copy>(lib: &Library, name: &[u8]) -> Option<T> {
-    // SAFETY: the caller guarantees the type; the pointer is copied out and the
-    // library outlives it, being leaked into `API` for the life of the process.
+    // SAFETY: the caller guarantees the type. The copied pointer stays valid
+    // because `Api` keeps `lib` loaded for the life of the process.
     unsafe { lib.get::<T>(name) }.ok().map(|s| *s)
 }
 
 fn required<T: Copy>(lib: &Library, name: &'static [u8], path: &str) -> Result<T, Error> {
+    // SAFETY: every caller stores the result in the `Api` field whose type is
+    // the `sys` alias for `name`, which fixes `T`.
     unsafe { sym::<T>(lib, name) }.ok_or_else(|| Error {
         kind: Kind::NotLoaded,
         msg: format!(
@@ -205,9 +195,8 @@ fn load() -> Result<Api, Error> {
     let tried = candidates();
     let mut lib = None;
     for c in &tried {
-        // SAFETY: loading a shared library runs its initialisers, which is the
-        // whole point. The candidates are libpcap's own SONAMEs, or a path the
-        // operator set deliberately.
+        // SAFETY: loading runs the library's initialisers. The candidates are
+        // libpcap's own names, or a path the operator chose via WIRY_LIBPCAP.
         if let Ok(l) = unsafe { Library::new(c) } {
             lib = Some((l, c.clone()));
             break;
@@ -224,6 +213,8 @@ fn load() -> Result<Api, Error> {
         ),
     })?;
 
+    // SAFETY (the optional `sym` calls): each field's type is the `sys` alias
+    // for the symbol it is looked up by.
     Ok(Api {
         create: required(&lib, b"pcap_create\0", &path)?,
         set_snaplen: required(&lib, b"pcap_set_snaplen\0", &path)?,
@@ -256,8 +247,7 @@ fn api() -> Result<&'static Api, &'static Error> {
     API.get_or_init(load).as_ref()
 }
 
-/// Whether libpcap is loadable on this host. Never raises, and the answer is
-/// computed once.
+/// Whether libpcap loaded. The load is attempted once per process.
 pub fn available() -> bool {
     api().is_ok()
 }
@@ -267,7 +257,7 @@ pub fn unavailable_reason() -> Option<&'static Error> {
     api().err()
 }
 
-/// The file that was loaded, for a diagnostic that has to be believable.
+/// The path libpcap was loaded from.
 pub fn loaded_path() -> Option<&'static str> {
     api().ok().map(|a| a.path.as_str())
 }
@@ -276,6 +266,7 @@ pub fn loaded_path() -> Option<&'static str> {
 pub fn lib_version() -> Option<String> {
     let a = api().ok()?;
     let f = a.lib_version?;
+    // SAFETY: `pcap_lib_version` returns a static NUL-terminated string.
     Some(
         unsafe { CStr::from_ptr(f()) }
             .to_string_lossy()
@@ -283,21 +274,18 @@ pub fn lib_version() -> Option<String> {
     )
 }
 
-// ------------------------------------------------------------------ errors ---
-
 /// # Safety
 /// `p` must be NUL-terminated and valid for reads up to the NUL.
 unsafe fn text(p: *const c_char) -> String {
     if p.is_null() {
         return String::new();
     }
-    // SAFETY: the caller guarantees the pointer.
+    // SAFETY: non-null here, and NUL-terminated by the caller's contract.
     unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
 }
 
 fn classify(msg: &str, code: Option<c_int>) -> Kind {
-    // The status code is exact where there is one; the string is the fallback
-    // for the calls that return only -1 and a buffer.
+    // Calls that return only -1 and a message leave the text as the only signal.
     match code {
         Some(PCAP_ERROR_PERM_DENIED) | Some(PCAP_ERROR_PROMISC_PERM_DENIED) => {
             return Kind::Permission
@@ -315,17 +303,15 @@ fn classify(msg: &str, code: Option<c_int>) -> Kind {
     }
 }
 
-// ----------------------------------------------------------------- handles ---
-
-/// An owned `pcap_t`. Closed on drop.
+/// An owned `pcap_t`, closed on drop. `raw` is non-null and live for as long
+/// as the `Handle` exists.
 pub struct Handle {
     raw: *mut PcapT,
     api: &'static Api,
 }
 
-// SAFETY: libpcap permits a handle to be used from any one thread at a time,
-// which is all `&mut self` on a non-Sync type allows. `AsyncSniffer` moves one
-// to a capture thread and never shares it.
+// SAFETY: libpcap allows a handle to move between threads provided only one
+// uses it at a time, and without `Sync` that is all Rust permits.
 unsafe impl Send for Handle {}
 
 impl Handle {
@@ -336,8 +322,8 @@ impl Handle {
         let name = CString::new(device)
             .map_err(|_| Error::other("an interface name cannot contain a NUL"))?;
         let mut err = [0i8 as c_char; PCAP_ERRBUF_SIZE];
-        // SAFETY: `name` outlives the call; `err` is PCAP_ERRBUF_SIZE as the
-        // contract requires.
+        // SAFETY: `name` outlives the call and `err` is the PCAP_ERRBUF_SIZE
+        // octets the call requires.
         let raw = unsafe { (api.create)(name.as_ptr(), err.as_mut_ptr()) };
         if raw.is_null() {
             // SAFETY: on failure pcap_create fills the buffer with a C string.
@@ -354,6 +340,7 @@ impl Handle {
     /// link type without an interface or any privilege at all.
     pub fn open_dead(linktype: i32, snaplen: i32) -> Result<Handle, Error> {
         let api = api().map_err(|e| e.clone())?;
+        // SAFETY: takes two integers and returns an owned handle or NULL.
         let raw = unsafe { (api.open_dead)(linktype as c_int, snaplen as c_int) };
         if raw.is_null() {
             return Err(Error::other("pcap_open_dead failed to allocate"));
@@ -362,19 +349,19 @@ impl Handle {
     }
 
     fn err(&mut self, ctx: &str, code: Option<c_int>) -> Error {
-        // SAFETY: pcap_geterr returns the handle's own buffer, valid while the
-        // handle is.
+        // SAFETY: pcap_geterr returns the handle's own NUL-terminated buffer,
+        // valid while the handle is.
         let mut msg = unsafe { text((self.api.geterr)(self.raw)) };
         if msg.is_empty() {
             msg = match (code, self.api.statustostr) {
+                // SAFETY: pcap_statustostr returns a NUL-terminated string
+                // libpcap owns.
                 (Some(c), Some(f)) => unsafe { text(f(c)) },
                 _ => format!("{ctx} failed"),
             };
         }
         Error {
             kind: classify(&msg, code),
-            // An empty context leaves libpcap's own sentence alone, for the
-            // callers that supply a better one of their own.
             msg: if ctx.is_empty() {
                 msg
             } else {
@@ -384,6 +371,8 @@ impl Handle {
     }
 
     fn set(&mut self, f: PcapSetInt, v: c_int, what: &str) -> Result<(), Error> {
+        // SAFETY: `f` is a `pcap_set_*` setter, which takes a live handle and an
+        // int; libpcap rejects a call after activation with an error code.
         let rc = unsafe { f(self.raw, v) };
         if rc < 0 {
             Err(self.err(what, Some(rc)))
@@ -404,9 +393,8 @@ impl Handle {
         self.set(self.api.set_promisc, c_int::from(v), "promisc")
     }
 
-    /// libpcap's read timeout, in milliseconds. Never 0: the pcap README warns
-    /// that can hang `pcap_next_ex` on macOS, and the timeout is how the driver
-    /// gets a turn to check its deadline and its stop flag.
+    /// Read timeout in milliseconds. Never pass 0: the pcap README warns it can
+    /// hang `pcap_next_ex` on macOS. It does not bound a read; see `set_nonblock`.
     pub fn set_timeout(&mut self, ms: i32) -> Result<(), Error> {
         self.set(self.api.set_timeout, ms as c_int, "read timeout")
     }
@@ -421,9 +409,10 @@ impl Handle {
     }
 
     pub fn activate(&mut self) -> Result<(), Error> {
+        // SAFETY: `raw` is live; a second activation is an error code, not UB.
         let rc = unsafe { (self.api.activate)(self.raw) };
-        // Positive is a warning that still activated: promiscuous mode refused
-        // on an interface that captures anyway, a link type substituted.
+        // Positive is a warning on a handle that did activate, such as
+        // promiscuous mode being refused.
         if rc < 0 {
             let mut e = self.err("", Some(rc));
             if rc == PCAP_ERROR_IFACE_NOT_UP {
@@ -435,14 +424,12 @@ impl Handle {
     }
 
     pub fn datalink(&self) -> i32 {
+        // SAFETY: `raw` is live.
         unsafe { (self.api.datalink)(self.raw) }
     }
 
-    /// The next frame, copied into `out`. `Ok(None)` is the read timeout
-    /// expiring, which is the driver's turn to poll, not a failure.
-    ///
-    /// The copy happens while libpcap's own borrow is live because the next
-    /// read reuses that slot.
+    /// Copies the next frame into `out`. `Ok(None)` means no frame was ready,
+    /// which is the driver's cue to poll its stop conditions, not a failure.
     pub fn next_into(&mut self, out: &mut Vec<u8>) -> Result<Option<PktHdr>, Error> {
         let mut hdr: *mut PcapPkthdr = std::ptr::null_mut();
         let mut data: *const u8 = std::ptr::null();
@@ -466,8 +453,8 @@ impl Handle {
                     origlen: h.len as u32,
                 }))
             }
-            // 0 is the read timeout; -2 is end-of-file, which a live handle
-            // never reports and a caller treats the same way.
+            // 0: nothing ready. -2: end of a savefile, never seen on a live
+            // handle.
             0 | -2 | 1 => Ok(None),
             _ => Err(self.err("capture", Some(rc))),
         }
@@ -476,6 +463,7 @@ impl Handle {
     pub fn sendpacket(&mut self, data: &[u8]) -> Result<(), Error> {
         let len = c_int::try_from(data.len())
             .map_err(|_| Error::other("a frame longer than an int cannot be sent"))?;
+        // SAFETY: `data` is valid for `len` octets, which libpcap only reads.
         let rc = unsafe { (self.api.sendpacket)(self.raw, data.as_ptr(), len) };
         if rc < 0 {
             Err(self.err("send", Some(rc)))
@@ -516,18 +504,15 @@ impl Handle {
         })
     }
 
-    /// Makes a read that finds nothing return at once instead of waiting.
+    /// Makes a read with nothing ready return 0 at once.
     ///
-    /// **libpcap's read timeout is not a deadline, and on Linux it is not even
-    /// a bound.** `pcap_next_ex` is documented to return 0 when the timeout
-    /// expires, but the memory-mapped Linux capture loops internally and blocks
-    /// until a frame actually arrives; a `sniff(timeout=2)` over an interface
-    /// with no traffic then never returns, and neither does Ctrl-C. In
-    /// non-blocking mode the read returns 0 immediately on every platform, and
-    /// the driver owns the waiting — which is where the deadline, the stop flag
-    /// and the signal check already live.
+    /// The live driver needs this because libpcap's read timeout is not a
+    /// bound: on Linux the memory-mapped capture blocks inside `pcap_next_ex`
+    /// until a frame arrives, so on a silent interface the deadline, `stop()`
+    /// and Ctrl-C, all polled between reads, would never get a turn.
     pub fn set_nonblock(&mut self, v: bool) -> Result<(), Error> {
         let mut err = [0i8 as c_char; PCAP_ERRBUF_SIZE];
+        // SAFETY: `raw` is live and `err` is PCAP_ERRBUF_SIZE octets.
         let rc = unsafe { (self.api.setnonblock)(self.raw, c_int::from(v), err.as_mut_ptr()) };
         if rc < 0 {
             // SAFETY: on failure libpcap fills the buffer with a C string.
@@ -540,9 +525,11 @@ impl Handle {
         Ok(())
     }
 
-    /// Installs a compiled program on this handle, so the kernel drops what
-    /// does not match before it is ever copied to userland.
+    /// Installs `p` in the kernel, so non-matching frames are never copied to
+    /// userland. libpcap keeps its own copy, so `p` may be dropped afterwards.
     pub fn set_filter(&mut self, p: &mut Program) -> Result<(), Error> {
+        // SAFETY: both are live, and libpcap copies the program rather than
+        // keeping a pointer to it.
         let rc = unsafe { (self.api.setfilter)(self.raw, &mut p.prog) };
         if rc < 0 {
             let mut e = self.err("filter", Some(rc));
@@ -556,7 +543,7 @@ impl Handle {
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        // SAFETY: the handle is live and this is the only owner.
+        // SAFETY: `raw` is live and this is its only owner.
         unsafe { (self.api.close)(self.raw) }
     }
 }
@@ -567,14 +554,14 @@ pub struct Program {
     api: &'static Api,
 }
 
-// SAFETY: the instruction array is written once by pcap_compile and only read
-// afterwards; pcap_offline_filter is a pure interpreter over it.
+// SAFETY: pcap_compile writes the instruction array once; afterwards it is only
+// read, and pcap_offline_filter is a pure interpreter over it.
 unsafe impl Send for Program {}
 unsafe impl Sync for Program {}
 
 impl Program {
-    /// Runs the filter over one frame in userland, for the paths that have no
-    /// kernel to run it in: an offline capture, or a frame already read.
+    /// Runs the filter over one frame in userland, for frames no kernel filter
+    /// saw: offline captures and frames already read.
     pub fn matches(&self, frame: &[u8]) -> bool {
         let n = frame.len().min(c_uint::MAX as usize) as c_uint;
         let hdr = PcapPkthdr {
@@ -613,8 +600,6 @@ impl Drop for Program {
     }
 }
 
-// -------------------------------------------------------------- interfaces ---
-
 const AF_INET: u16 = 2;
 #[cfg(any(
     target_vendor = "apple",
@@ -643,10 +628,9 @@ unsafe fn sockaddr_str(sa: *const Sockaddr) -> Option<String> {
         return None;
     }
     let p = sa.cast::<u8>();
-    // Every sockaddr is at least 16 octets, so the first two are always there.
-    // On the BSDs they are a length and a family; everywhere else a 16-bit
-    // family. Reading them as octets covers both without a second layout.
-    // SAFETY: the caller guarantees a real sockaddr, which is never shorter.
+    // On the BSDs the first two octets are `sa_len` and `sa_family`; elsewhere
+    // they are a 16-bit `sa_family`.
+    // SAFETY: every sockaddr is at least 16 octets, per the caller's contract.
     let head = unsafe { [*p, *p.add(1)] };
     let family = if cfg!(any(
         target_vendor = "apple",
@@ -659,8 +643,8 @@ unsafe fn sockaddr_str(sa: *const Sockaddr) -> Option<String> {
     } else {
         u16::from_ne_bytes(head)
     };
-    // The address sits after the family and the port in both layouts: four
-    // octets in for IPv4, eight for IPv6, where the flow label intervenes.
+    // Both layouts put the family and port first: the address starts at octet
+    // 4 for IPv4 and at 8 for IPv6, after the flow label.
     match family {
         AF_INET => {
             // SAFETY: a sockaddr_in is 16 octets, so 4..8 is inside it.
@@ -679,9 +663,8 @@ unsafe fn sockaddr_str(sa: *const Sockaddr) -> Option<String> {
     }
 }
 
-/// Every interface libpcap will admit to, with its addresses.
-///
-/// Unprivileged on every platform: this is `getifaddrs`, not a capture.
+/// Every interface libpcap reports, with its IPv4 and IPv6 addresses. Needs no
+/// privilege.
 pub fn find_all_devs() -> Result<Vec<Device>, Error> {
     let api = api().map_err(|e| e.clone())?;
     let mut head: *mut PcapIf = std::ptr::null_mut();
@@ -699,12 +682,13 @@ pub fn find_all_devs() -> Result<Vec<Device>, Error> {
     let mut out = Vec::new();
     let mut cur = head;
     while !cur.is_null() {
-        // SAFETY: libpcap's list is a chain of live `pcap_if_t` until NULL, and
-        // nothing frees it before `pcap_freealldevs` below.
+        // SAFETY: the list is a NULL-terminated chain of live `pcap_if_t`, freed
+        // only by `pcap_freealldevs` below.
         let d = unsafe { &*cur };
         let mut addresses = Vec::new();
         let mut a = d.addresses;
         while !a.is_null() {
+            // SAFETY: address nodes live exactly as long as their interface.
             let ad = unsafe { &*a };
             // SAFETY: libpcap sizes each sockaddr for its own family.
             if let Some(s) = unsafe { sockaddr_str(ad.addr) } {
@@ -713,8 +697,7 @@ pub fn find_all_devs() -> Result<Vec<Device>, Error> {
             a = ad.next;
         }
         out.push(Device {
-            // SAFETY: libpcap always sets `name`; `description` may be NULL,
-            // which `text` answers with an empty string.
+            // SAFETY: both are NULL or NUL-terminated; `text` maps NULL to "".
             name: unsafe { text(d.name) },
             description: match unsafe { text(d.description) } {
                 s if s.is_empty() => None,
@@ -725,15 +708,14 @@ pub fn find_all_devs() -> Result<Vec<Device>, Error> {
         });
         cur = d.next;
     }
-    // SAFETY: `head` is the list libpcap just allocated and nothing above kept
-    // a pointer into it — every string was copied.
+    // SAFETY: `head` came from pcap_findalldevs, and every string above was
+    // copied out, so nothing points into the list.
     unsafe { (api.freealldevs)(head) };
     Ok(out)
 }
 
-/// The netmask of `device`, for the two filter primitives that need one
-/// (`ip broadcast`, `ip multicast`). `None` wherever libpcap will not say,
-/// which is not an error: the filter compiles either way.
+/// The netmask of `device`, which only `ip broadcast` needs. `None` where
+/// libpcap cannot say; every other filter compiles without one.
 pub fn lookup_net(device: &str) -> Option<u32> {
     let api = api().ok()?;
     let name = CString::new(device).ok()?;
@@ -745,8 +727,8 @@ pub fn lookup_net(device: &str) -> Option<u32> {
     (rc == 0).then_some(mask)
 }
 
-/// The canonical explanation for a host that cannot capture, for the callers
-/// that must raise it without having tried anything yet.
+/// The load failure, for callers that must report it before attempting a
+/// capture.
 pub fn require() -> Result<(), Error> {
     api().map(|_| ()).map_err(|e| e.clone())
 }
@@ -774,9 +756,6 @@ mod tests {
         }
     }
 
-    /// The whole point of the crate: the three things below need no interface,
-    /// no root and no /dev/bpf, so they run in ordinary CI on every platform
-    /// that has libpcap at all.
     #[test]
     fn a_filter_compiles_and_runs_with_no_device_and_no_privileges() {
         if !available() {
@@ -827,8 +806,6 @@ mod tests {
         let devs = find_all_devs().unwrap();
         assert!(!devs.is_empty(), "no interfaces at all");
         assert!(devs.iter().all(|d| !d.name.is_empty()));
-        // Every host this can run on has a loopback, and it is the one
-        // interface whose flag is not a guess.
         assert!(devs.iter().any(|d| d.loopback), "no loopback interface");
     }
 
@@ -855,7 +832,7 @@ mod tests {
         }
         let mut h = match Handle::create("wiry-no-such-if0") {
             Ok(h) => h,
-            // Some libpcap builds refuse at create rather than at activate.
+            // Some libpcap builds refuse at create rather than activate.
             Err(e) => {
                 assert_ne!(e.kind, Kind::NotLoaded);
                 return;
@@ -880,11 +857,9 @@ mod tests {
         );
     }
 
-    /// `caplen` and `len` follow the timeval, so a timeval of the wrong width
-    /// makes `next_into` read a timestamp as a length. Getting it wrong is
-    /// silent, and it is the one part of the layout that differs per platform:
-    /// 8 octets where `long` is 32 bits, 16 where it is 64, including on the
-    /// BSDs, where a 32-bit `tv_usec` is followed by four of padding.
+    /// A timeval of the wrong width silently makes `next_into` read a timestamp
+    /// as a length. It is two `long`s wide everywhere, including the BSDs, where
+    /// a 32-bit `tv_usec` is followed by four octets of padding.
     #[test]
     fn the_packet_header_has_the_layout_this_platform_uses() {
         use std::mem::{align_of, size_of};

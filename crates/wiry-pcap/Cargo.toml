@@ -11,7 +11,6 @@ readme = "../../README.md"
 rust-version.workspace = true
 
 [dependencies]
-# Pinned for the reason the whole crate exists: the loader is the one place
-# unsafe lives, and a silent minor bump of the thing doing the dlopen is not
-# something to discover from a segfault.
+# Pinned: every unsafe call rests on this loader, and a silent minor bump of it
+# should not first show up as a segfault.
 libloading = "=0.8.9"

@@ -4,13 +4,13 @@ use std::fmt;
 pub enum CaptureError {
     /// Built without the `live` feature.
     Unsupported,
-    /// Built with it, but libpcap is not on this host. Carries libpcap's own
-    /// loader message and the install instruction for this platform.
+    /// libpcap could not be loaded. Carries the loader's message and this
+    /// platform's install instruction.
     LibraryMissing(String),
-    /// The operation cannot work on this platform at all.
+    /// The operation is impossible on this platform.
     UnsupportedOn(&'static str),
-    /// What the caller handed in is not something this can send. A packet
-    /// shape is not an availability problem, so it must not be reported as one.
+    /// The input cannot be sent. Kept apart from the availability errors so a
+    /// malformed packet is never reported as a missing capability.
     BadArgument(String),
     Permission(String),
     NoSuchDevice(String),
