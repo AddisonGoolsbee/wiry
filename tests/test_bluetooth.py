@@ -24,19 +24,19 @@ ACL = bytes([0x02, 0x2A, 0x20, 0x04, 0x00]) + b"data"
 def test_an_acl_header_reads_its_flags_from_the_top_of_the_word():
     p = HCI_Hdr(ACL)
     assert p.layers()[:2] == ["HCI_Hdr", "HCI_ACL_Hdr"]
-    assert (p.handle, p.PB, p.BC, p[HCI_ACL_Hdr].len) == (0x02A, 2, 0, 4)
+    assert (p.connection_handle, p.PB, p.BC, p[HCI_ACL_Hdr].len) == (0x02A, 2, 0, 4)
 
 
 def test_an_acl_header_builds_the_same_word_and_its_length():
-    built = bytes(HCI_Hdr() / HCI_ACL_Hdr(handle=0x02A, PB=2) / b"data")
+    built = bytes(HCI_Hdr() / HCI_ACL_Hdr(connection_handle=0x02A, PB=2) / b"data")
     assert built == ACL
 
 
 def test_writing_one_field_of_a_group_leaves_its_neighbours():
     p = HCI_Hdr(ACL)
-    p.handle = 0xABC
+    p.connection_handle = 0xABC
     assert bytes(p)[1:3] == bytes([0xBC, 0x2A])
-    assert (p.handle, p.PB, p.BC) == (0xABC, 2, 0)
+    assert (p.connection_handle, p.PB, p.BC) == (0xABC, 2, 0)
 
 
 def test_a_command_opcode_is_ogf_and_ocf_in_one_little_endian_word():
@@ -91,12 +91,12 @@ def test_contrib_bit_fields_count_from_the_bottom_of_the_octet():
 
 
 def test_columns_read_a_little_endian_group_as_each_packet_does(tmp_path):
-    frames = [HCI_Hdr() / HCI_ACL_Hdr(handle=h, PB=h % 4, BC=(h >> 2) % 4) / b"x"
+    frames = [HCI_Hdr() / HCI_ACL_Hdr(connection_handle=h, PB=h % 4, BC=(h >> 2) % 4) / b"x"
               for h in (0, 1, 0x2A, 0x7FF, 0xFFF)]
     path = tmp_path / "hci.pcap"
     wiry.wrpcap(str(path), frames)
     pl = wiry.rdpcap(str(path))
-    cols = pl.columns([("HCI_ACL_Hdr", f) for f in ("handle", "PB", "BC")])
-    per = [(p.handle, p.PB, p.BC) for p in pl]
+    cols = pl.columns([("HCI_ACL_Hdr", f) for f in ("connection_handle", "PB", "BC")])
+    per = [(p.connection_handle, p.PB, p.BC) for p in pl]
     assert list(zip(*cols.values())) == per
     assert per == [(h, h % 4, (h >> 2) % 4) for h in (0, 1, 0x2A, 0x7FF, 0xFFF)]
