@@ -3,10 +3,9 @@
 //! values come from the IANA "Protocol Numbers" registry, option types from
 //! "Destination Options and Hop-by-Hop Options".
 //!
-//! Each header carries the next one's protocol number, so the chain is walked
-//! exactly the way the fixed header is: one span per header, ending at a
-//! transport protocol. §4.1 recommends an order but does not require it, so
-//! nothing here depends on the order it lists.
+//! Each header is its own span, chained by Next Header exactly as the fixed
+//! header is. §4.1's order is only a recommendation, so nothing here assumes
+//! it.
 
 use crate::field::FieldDesc;
 use crate::options::{Item, LenRule, OptDesc, OptTable, Shape};
@@ -147,8 +146,7 @@ fn fragment_next(hdr: &[u8]) -> Next {
     if hdr.len() < 8 {
         return Next::Raw;
     }
-    // Only the first fragment carries the header Next Header names; the rest is
-    // payload, as it is for a fragmented IPv4 datagram.
+    // Only the first fragment carries the header Next Header names.
     if u16::from_be_bytes([hdr[2], hdr[3]]) & 0xfff8 != 0 {
         return Next::Raw;
     }
@@ -260,7 +258,7 @@ mod tests {
 
     #[test]
     fn a_later_fragment_carries_no_transport_header() {
-        // Offset 185 octets (23 eight-octet units), M clear.
+        // Offset 23 eight-octet units, M clear.
         let mut payload = vec![ipproto::UDP, 0x00, 0x00, 0xb8, 0, 0, 0, 7];
         payload.extend_from_slice(UDP8);
         let p = Packet::dissect(ipv6(ipproto::IPV6_FRAG, &payload), ProtoId::Ipv6);

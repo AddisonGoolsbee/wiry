@@ -1,4 +1,4 @@
-//! UDP header layout from RFC 768.
+//! UDP, RFC 768.
 
 use crate::field::FieldDesc;
 use crate::names::Host;
@@ -38,8 +38,7 @@ fn next(hdr: &[u8]) -> Next {
         ports::GRE_UDP => return Next::Proto(ProtoId::Gre),
         _ => {}
     }
-    // RFC 6762 §18 and RFC 4795 §2: mDNS and LLMNR carry RFC 1035 messages, so
-    // they are the DNS layer reached on another port, not a layer of their own.
+    // mDNS and LLMNR carry RFC 1035 messages (RFC 6762 §18, RFC 4795 §2).
     if matches!(sport, ports::MDNS | ports::LLMNR) || matches!(dport, ports::MDNS | ports::LLMNR) {
         return Next::Proto(ProtoId::Dns);
     }
@@ -57,7 +56,8 @@ fn content_len(hdr: &[u8]) -> usize {
     u16::from_be_bytes([hdr[4], hdr[5]]) as usize
 }
 
-/// RFC 951 §3 ports: the default 53/53 would otherwise dissect back as DNS.
+/// Sets both ports, since the default 53/53 would otherwise dissect back as DNS.
+/// BOOTP takes its RFC 951 §3 pair; anything else the destination port twice.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
     if hdr.len() < 4 {
         return;
@@ -77,8 +77,6 @@ fn bind_next(hdr: &mut [u8], p: ProtoId) {
             None => return,
         },
     };
-    // The source port names nothing, but the default 53 would dissect back as
-    // DNS, so it goes too.
     hdr[0..2].copy_from_slice(&dport.to_be_bytes());
     hdr[2..4].copy_from_slice(&dport.to_be_bytes());
 }

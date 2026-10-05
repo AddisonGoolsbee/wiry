@@ -8,13 +8,13 @@
 //   2026-10-03 — packet-type names transcribed into the field table
 
 //! LINKTYPE_LINUX_SLL (113) and LINKTYPE_LINUX_SLL2 (276) from the tcpdump
-//! link-layer header type registry: the cooked headers libpcap synthesises for
-//! a capture on the Linux `any` device, where frames from interfaces with
-//! different link layers share one file. Both are big-endian.
+//! link-layer header type registry: the cooked headers libpcap synthesises on
+//! the Linux `any` device, where interfaces with different link layers share
+//! one capture. Both are big-endian.
 //!
-//! SLL is 16 octets: packet type, ARPHRD_ type, address length, an 8-octet
-//! address field padded to that width, then a protocol type. SLL2 is 20 and
-//! leads with the protocol type instead.
+//! SLL is 16 octets: packet type, ARPHRD_ type, address length, an address
+//! padded to 8 octets, then a protocol type. SLL2 is 20 and leads with the
+//! protocol type.
 
 use crate::field::FieldDesc;
 use crate::names::{Host, Table};
@@ -47,8 +47,8 @@ pub static FIELDS_V2: &[FieldDesc] = &[
     FieldDesc::bytes("src", 96, 64),
 ];
 
-/// Values below 1536 are not EtherTypes but the LINUX_SLL_P_* selectors for
-/// 802.2/802.3 framing, which this build does not dissect.
+/// Values below 1536 are not EtherTypes but LINUX_SLL_P_* selectors for
+/// 802.2/802.3 framing, which dissect to `Raw`.
 fn proto_next(v: u16) -> Next {
     super::ether::from_ethertype(v)
 }

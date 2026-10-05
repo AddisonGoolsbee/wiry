@@ -1,10 +1,10 @@
 //! Neighbor Discovery options, shared by the five RFC 4861 message layers.
 //!
 //! RFC 4861 §4.6: a one-octet type, a one-octet length **in units of eight
-//! octets including the type and length octets**, then the option data. A
-//! length octet of zero is invalid and ends the walk. Type values come from the
-//! IANA "IPv6 Neighbor Discovery Option Formats" registry; §4.6.1 through
-//! §4.6.4 and RFC 8106 §5 name the ones below.
+//! octets, counting the type and length octets**, then the data. A zero length
+//! is invalid and ends the walk. Types follow the IANA "IPv6 Neighbor Discovery
+//! Option Formats" registry, defined in RFC 4861 §4.6.1–§4.6.4, RFC 4191 §2.3
+//! and RFC 8106 §5.
 
 use crate::layers::tlv::{self, TlvFmt};
 use crate::options::{Item, ItemValue};
@@ -25,8 +25,8 @@ fn name(t: u32) -> Option<&'static str> {
     })
 }
 
-/// `at` is where the message body ends and the options begin, which differs per
-/// message type (RFC 4861 §4.1 through §4.5).
+/// The options from offset `at`, where the message body ends; that offset
+/// differs per message type (RFC 4861 §4.1–§4.5).
 pub fn options(hdr: &[u8], at: usize) -> Vec<Item> {
     let Some(region) = hdr.get(at..) else {
         return Vec::new();

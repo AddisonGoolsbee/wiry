@@ -1,7 +1,6 @@
-//! MPLS label stack entries from RFC 3032 §2.1: a 20-bit label, 3 bits RFC 3032
-//! called Experimental Use and RFC 5462 renamed Traffic Class, the
-//! bottom-of-stack bit, and a TTL. EtherType values 0x8847 and 0x8848 come from
-//! the IANA "ETHER TYPES" registry.
+//! MPLS label stack entry, RFC 3032 §2.1: a 20-bit label, 3 bits of Traffic
+//! Class (RFC 5462; Experimental Use in RFC 3032), the bottom-of-stack bit and
+//! a TTL. EtherTypes 0x8847 and 0x8848 follow the IANA "ETHER TYPES" registry.
 
 use crate::field::FieldDesc;
 use crate::proto::{fixed_len, Next, ProtoDesc, ProtoId};
@@ -15,14 +14,13 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("ttl", 24, 8, 0),
 ];
 
-/// RFC 3032 carries no protocol field: what follows the bottom of the stack is
-/// agreed out of band, so there is nothing in the packet that names it. The
-/// first nibble is the only signal, and RFC 4385 §3 is what makes it one — a
-/// pseudowire control word starts with four zero bits precisely so that 4 and 6
-/// can mean an IP version. Everything else is read as an Ethernet pseudowire
-/// (RFC 4448 §4.6) with no control word, which is a guess, not a reading; a
-/// zero nibble is the control word itself, which has no layer here, so it stays
-/// `Raw` rather than becoming a frame shifted by four octets.
+/// RFC 3032 has no payload protocol field: what follows the bottom of the stack
+/// is agreed out of band. RFC 4385 §3 makes the first nibble usable, since a
+/// pseudowire control word starts with four zero bits, so 4 and 6 are IP
+/// versions. Any other nonzero nibble is guessed to be an Ethernet pseudowire
+/// without a control word (RFC 4448 §4.6). A zero nibble is a control word,
+/// which has no layer, so it stays `Raw` rather than becoming a frame four
+/// octets out of place.
 fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 4 {
         return Next::Raw;

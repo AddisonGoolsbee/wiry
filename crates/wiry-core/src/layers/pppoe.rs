@@ -7,10 +7,9 @@
 // Changed by the wiry authors:
 //   2026-10-03 — PPPoE code and PPP protocol names transcribed into the field table
 
-//! PPPoE from RFC 2516 §4 and PPP framing from RFC 1661 §2. EtherType values
-//! 0x8863 (Discovery) and 0x8864 (Session) come from the IANA "ETHER TYPES"
-//! registry; PPP protocol numbers from the IANA "PPP DLL PROTOCOL NUMBERS"
-//! registry.
+//! PPPoE, RFC 2516 §4, and PPP framing, RFC 1661 §2. EtherTypes 0x8863
+//! (Discovery) and 0x8864 (Session) follow the IANA "ETHER TYPES" registry, PPP
+//! protocol numbers the IANA "PPP DLL PROTOCOL NUMBERS" registry.
 
 use crate::field::FieldDesc;
 use crate::names::Table;
@@ -217,8 +216,7 @@ macro_rules! header_fields {
 pub static FIELDS: &[FieldDesc] = header_fields!(SESSION_CODES);
 pub static DISC_FIELDS: &[FieldDesc] = header_fields!(DISC_CODES);
 
-/// RFC 2516 §4: LENGTH covers the payload alone, so the datagram ends six
-/// octets further on than it claims.
+/// RFC 2516 §4: LENGTH excludes the 6-octet header.
 fn content_len(hdr: &[u8]) -> usize {
     match hdr.get(4..6) {
         Some(b) => 6 + u16::from_be_bytes([b[0], b[1]]) as usize,
@@ -280,9 +278,9 @@ pub mod pppproto {
     pub const MPLS_MULTICAST: u16 = 0x0283;
 }
 
-/// RFC 1661 §2 allows a one-octet Protocol field, but RFC 2516 §4 forbids that
-/// compression over PPPoE, which is the only framing this build reaches PPP
-/// through, so the field is always two octets here.
+/// Always two octets. RFC 1661 §2 lets the Protocol field be compressed to
+/// one, but RFC 2516 §4 forbids that over PPPoE, and a compressed field is not
+/// recognised on any other path either.
 pub static PPP_FIELDS: &[FieldDesc] =
     &[FieldDesc::uint("proto", 0, 16, pppproto::IPV4 as u64).named(PPP_PROTOS)];
 

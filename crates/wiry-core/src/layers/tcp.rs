@@ -1,4 +1,4 @@
-//! TCP header layout from RFC 9293 §3.1.
+//! TCP, RFC 9293 §3.1.
 
 use crate::field::FieldDesc;
 use crate::names::Host;
@@ -16,7 +16,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("ack", 64, 32, 0),
     FieldDesc::uint("dataofs", 96, 4, 5),
     FieldDesc::uint("reserved", 100, 3, 0),
-    // Defaults to SYN, as packet-crafting tools conventionally do.
+    // SYN, as in scapy.
     FieldDesc::flags("flags", 103, 9, FLAG_NAMES).with_default(0b0000_0010),
     FieldDesc::uint("window", 112, 16, 8192),
     FieldDesc::computed_uint("chksum", 128, 16),
@@ -32,11 +32,10 @@ fn header_len(hdr: &[u8]) -> usize {
     (((hdr[12] >> 4) & 0x0f) as usize * 4).max(20)
 }
 
-/// DNS is framed rather than dispatched on its payload; `proto::framing_octets`
-/// accounts for the RFC 1035 §4.2.2 length prefix that frames it. Every other
-/// application layer is reached through the generated table, which sees the
-/// payload as well as the ports: a segment from the middle of a stream is not
-/// the start of a message, and its guard says so.
+/// DNS is chosen by port alone; `proto::framing_octets` handles its RFC 1035
+/// §4.2.2 length prefix. Every other layer comes from the generated table,
+/// whose guards also see the payload, because a mid-stream segment is not the
+/// start of a message.
 fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 4 {
         return Next::Raw;
@@ -47,8 +46,7 @@ fn next(hdr: &[u8]) -> Next {
         return Next::Proto(ProtoId::Dns);
     }
     let payload = hdr.get(header_len(hdr)..).unwrap_or(&[]);
-    // Telnet's dispatch arm is unguarded, so a bare ACK to port 23 would
-    // otherwise dissect as Telnet.
+    // Unguarded arms such as Telnet's would otherwise claim a bare ACK.
     if payload.is_empty() {
         return Next::Raw;
     }
@@ -58,9 +56,8 @@ fn next(hdr: &[u8]) -> Next {
     }
 }
 
-/// Without this a built `TCP()/DNS()` would not dissect back as DNS, since the
-/// default ports name no protocol. DNS takes the source port, as scapy's last
-/// `bind_layers(TCP, DNS, sport=53)` does.
+/// Sets the port a built layer needs to dissect back as itself. DNS takes the
+/// source port, as scapy's last `bind_layers(TCP, DNS, sport=53)` does.
 fn bind_next(hdr: &mut [u8], p: ProtoId) {
     if hdr.len() < 4 {
         return;

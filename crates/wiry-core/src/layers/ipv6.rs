@@ -7,8 +7,8 @@
 // Changed by the wiry authors:
 //   2026-10-03 — next-header names transcribed into the field table
 
-//! IPv6 header layout from RFC 8200 §3; Next Header values from the IANA
-//! "Protocol Numbers" registry.
+//! IPv6, RFC 8200 §3. Next Header values follow the IANA "Protocol Numbers"
+//! registry.
 
 use crate::field::FieldDesc;
 use crate::layers::dispatch;
@@ -69,8 +69,8 @@ pub fn next_header(v: u8) -> Next {
     }
 }
 
-/// The inverse. Only a header whose own next-header field is an IPv6 one may
-/// name an extension header, which is why these are not in `ipv4::to_ipproto`.
+/// The inverse of [`next_header`]. Extension headers are mapped here, not in
+/// `ipv4::to_ipproto`, because only an IPv6-family header may name one.
 pub fn to_next_header(p: ProtoId) -> Option<u8> {
     Some(match p {
         ProtoId::HopByHop => ipproto::HOPOPT,
@@ -86,9 +86,8 @@ fn next(hdr: &[u8]) -> Next {
     if hdr.len() < 40 {
         return Next::Raw;
     }
-    // The Neighbor Discovery and MLD messages are whole ICMPv6 messages, type
-    // octet included, so they replace the generic layer rather than nesting
-    // under it.
+    // Neighbor Discovery and MLD layers are whole ICMPv6 messages, type octet
+    // included, so they replace the generic layer rather than nest under it.
     if hdr[6] == ipproto::IPV6_ICMP {
         if let Some(p) = hdr.get(40).and_then(|t| dispatch::by_icmpv6_type(*t)) {
             return Next::Proto(p);

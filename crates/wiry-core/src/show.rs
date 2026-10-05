@@ -30,21 +30,19 @@ pub fn render_flags(bits: u64, names: &[&str]) -> String {
     names
         .iter()
         .enumerate()
-        // A caller-declared `FlagsField` may name more bits than a `u64` holds;
-        // shifting by such an index panics in debug and wraps modulo 64 in
-        // release, printing flags that are not set.
+        // A declared `FlagsField` may name more than 64 bits; shifting by 64 or
+        // more panics in debug and wraps in release, printing unset flags.
         .filter(|(i, n)| !n.is_empty() && *i < 64 && bits & (1u64 << i) != 0)
         .map(|(_, n)| *n)
         .collect::<Vec<_>>()
         .join(separator(names))
 }
 
-/// The inverse of `render_flags`. A name counts only where it appears whole:
-/// matching by substring also sets every bit whose name is contained in
-/// another, so the integer read back would not be the integer on the wire.
+/// The inverse of [`render_flags`]. Names match whole, never by substring, or a
+/// name contained in another would set both bits.
 ///
-/// `None` where a token names no flag of this field. Reading a typo as zero
-/// builds a packet the caller did not ask for and says nothing about it.
+/// `None` when a token names no flag of this field: reading a typo as zero
+/// would silently build the wrong packet.
 pub fn flags_from(text: &str, names: &[&str]) -> Option<u64> {
     let bit = |tok: &str| {
         if tok.is_empty() {
@@ -54,7 +52,7 @@ pub fn flags_from(text: &str, names: &[&str]) -> Option<u64> {
         names
             .iter()
             .position(|n| !n.is_empty() && *n == tok)
-            // A name past bit 63 names a bit the field cannot hold.
+            // Past bit 63 the field cannot hold it.
             .filter(|i| *i < 64)
             .map(|i| 1u64 << i)
     };
@@ -176,8 +174,7 @@ mod tests {
     use super::*;
     use crate::packet::Packet;
 
-    /// IEEE 802.3 clause 3 framing over RFC 791 §3.1 and RFC 9293 §3.1, built
-    /// by hand so the offsets are the RFC's and not another library's.
+    /// IEEE 802.3 clause 3 over RFC 791 §3.1 and RFC 9293 §3.1, built by hand.
     fn frame(ethertype: u16, payload: &[u8]) -> Vec<u8> {
         let mut v = vec![0x11; 6];
         v.extend_from_slice(&[0x22; 6]);

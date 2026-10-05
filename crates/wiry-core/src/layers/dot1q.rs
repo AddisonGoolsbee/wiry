@@ -1,9 +1,8 @@
-//! IEEE Std 802.1Q clause 9 (VLAN Tag): 16-bit TPID, then a 16-bit TCI of
-//! 3-bit PCP, 1-bit DEI and 12-bit VID, then the inner EtherType. EtherType
-//! values from the IANA "ETHER TYPES" registry.
+//! IEEE Std 802.1Q clause 9 VLAN tag: a TCI of 3-bit PCP, 1-bit DEI and 12-bit
+//! VID, then the inner EtherType, from the IANA "ETHER TYPES" registry.
 //!
-//! The TPID belongs to the enclosing Ethernet header's type field, so this
-//! layer starts at the TCI and is 4 bytes long: TCI plus inner EtherType.
+//! The TPID is the enclosing header's type field, so this layer starts at the
+//! TCI and is 4 octets long.
 
 use crate::field::FieldDesc;
 use crate::names::Host;

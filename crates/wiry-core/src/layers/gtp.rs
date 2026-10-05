@@ -6,8 +6,7 @@ use crate::field::FieldDesc;
 use crate::proto::{Next, ProtoDesc, ProtoId};
 
 /// TS 29.281 §5.1: the sequence number, N-PDU number and next-extension octets
-/// are present together or not at all, whichever of the three flags asked for
-/// them.
+/// are all present when any of E, S or PN is set.
 fn has_opt(hdr: &[u8]) -> bool {
     hdr.first().is_some_and(|b| b & 0x07 != 0)
 }
@@ -31,8 +30,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("next_ex", 88, 8, 0).when(has_opt),
 ];
 
-/// Bounds the extension-header walk; TS 29.281 §5.2 defines no limit, so an
-/// adversarial chain is only stopped by the buffer running out.
+/// TS 29.281 §5.2 sets no limit on the extension chain, so this caps the walk.
 const MAX_EXT: usize = 32;
 
 fn header_len(hdr: &[u8]) -> usize {
@@ -54,8 +52,7 @@ fn header_len(hdr: &[u8]) -> usize {
         }
         let end = at + units as usize * 4;
         if end > hdr.len() {
-            // Clipped mid-chain: the rest of what arrived is this header, so
-            // nothing after it is read as a datagram that is not there.
+            // Clipped mid-chain: the rest is header, not a datagram.
             return hdr.len();
         }
         next = hdr[end - 1];
@@ -73,8 +70,8 @@ fn content_len(hdr: &[u8]) -> usize {
     }
 }
 
-/// A T-PDU is an IP datagram with nothing naming its version but the first
-/// nibble, the same signal MPLS has to rely on.
+/// Only a G-PDU carries a datagram, and nothing names its IP version but the
+/// first nibble.
 fn next(hdr: &[u8]) -> Next {
     if hdr.get(1) != Some(&G_PDU) {
         return Next::Raw;
