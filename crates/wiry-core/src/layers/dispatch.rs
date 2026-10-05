@@ -298,7 +298,6 @@ fn by_a_t_t_hdr(hdr: &[u8]) -> Option<ProtoId> {
             14 => return Some(ProtoId::ATTReadMultipleRequest),
             15 => return Some(ProtoId::ATTReadMultipleResponse),
             16 => return Some(ProtoId::ATTReadByGroupTypeRequest),
-            17 => return Some(ProtoId::ATTReadByGroupTypeResponse),
             18 => return Some(ProtoId::ATTWriteRequest),
             19 => return Some(ProtoId::ATTWriteResponse),
             22 => return Some(ProtoId::ATTPrepareWriteRequest),
@@ -307,6 +306,8 @@ fn by_a_t_t_hdr(hdr: &[u8]) -> Option<ProtoId> {
             25 => return Some(ProtoId::ATTExecuteWriteResponse),
             27 => return Some(ProtoId::ATTHandleValueNotification),
             29 => return Some(ProtoId::ATTHandleValueIndication),
+            30 => return Some(ProtoId::ATTHandleValueConfirmation),
+            32 => return Some(ProtoId::ATTReadMultipleVariableRequest),
             82 => return Some(ProtoId::ATTWriteCommand),
             _ => {}
         }
@@ -363,12 +364,8 @@ fn by_b_t_l_e_c_t_r_l(hdr: &[u8]) -> Option<ProtoId> {
 
 #[inline(never)]
 fn by_b_t_l_e_d_a_t_a(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 8 {
-        match crate::field::read_in(hdr, 6, 2, 0, 0) {
-            2 => return Some(ProtoId::L2CAPHdr),
-            3 => return Some(ProtoId::BTLECTRL),
-            _ => {}
-        }
+    if hdr.len() * 8 >= 8 && crate::field::read_in(hdr, 6, 2, 0, 0) == 3 {
+        return Some(ProtoId::BTLECTRL);
     }
     if hdr.len() * 8 >= 16 && crate::field::read_in(hdr, 6, 10, 0, 0) == 256 {
         return Some(ProtoId::BTLEEMPTYPDU);
@@ -425,6 +422,7 @@ fn by_h_c_i_command_hdr(hdr: &[u8]) -> Option<ProtoId> {
             5125 => return Some(ProtoId::HCICmdReadRSSI),
             6145 => return Some(ProtoId::HCICmdReadLoopbackMode),
             6146 => return Some(ProtoId::HCICmdWriteLoopbackMode),
+            8193 => return Some(ProtoId::HCICmdLESetEventMask),
             8194 => return Some(ProtoId::HCICmdLEReadBufferSizeV1),
             8195 => return Some(ProtoId::HCICmdLEReadLocalSupportedFeatures),
             8197 => return Some(ProtoId::HCICmdLESetRandomAddress),
@@ -444,6 +442,9 @@ fn by_h_c_i_command_hdr(hdr: &[u8]) -> Option<ProtoId> {
             8217 => return Some(ProtoId::HCICmdLEEnableEncryption),
             8218 => return Some(ProtoId::HCICmdLELongTermKeyRequestReply),
             8219 => return Some(ProtoId::HCICmdLELongTermKeyRequestNegativeReply),
+            8245 => return Some(ProtoId::HCICmdLESetAdvertisingSetRandomAddress),
+            8249 => return Some(ProtoId::HCICmdLESetExtendedAdvertiseEnable),
+            8258 => return Some(ProtoId::HCICmdLESetExtendedScanEnable),
             8288 => return Some(ProtoId::HCICmdLEReadBufferSizeV2),
             _ => {}
         }
@@ -472,6 +473,7 @@ fn by_h_c_i_event_hdr(hdr: &[u8]) -> Option<ProtoId> {
         match crate::field::read_in(hdr, 0, 8, 0, 0) {
             1 => return Some(ProtoId::HCIEventInquiryComplete),
             3 => return Some(ProtoId::HCIEventConnectionComplete),
+            4 => return Some(ProtoId::HCIEventConnectionRequest),
             5 => return Some(ProtoId::HCIEventDisconnectionComplete),
             7 => return Some(ProtoId::HCIEventRemoteNameRequestComplete),
             8 => return Some(ProtoId::HCIEventEncryptionChange),
@@ -482,6 +484,7 @@ fn by_h_c_i_event_hdr(hdr: &[u8]) -> Option<ProtoId> {
             23 => return Some(ProtoId::HCIEventLinkKeyRequest),
             35 => return Some(ProtoId::HCIEventReadRemoteExtendedFeaturesComplete),
             50 => return Some(ProtoId::HCIEventIOCapabilityResponse),
+            61 => return Some(ProtoId::HCIEventRemoteHostSupportedFeaturesNotification),
             62 => return Some(ProtoId::HCIEventLEMeta),
             _ => {}
         }
@@ -495,7 +498,9 @@ fn by_h_c_i_event_l_e_meta(hdr: &[u8]) -> Option<ProtoId> {
         match crate::field::read_in(hdr, 0, 8, 0, 0) {
             1 => return Some(ProtoId::HCILEMetaConnectionComplete),
             3 => return Some(ProtoId::HCILEMetaConnectionUpdateComplete),
+            4 => return Some(ProtoId::HCILEMetaLEReadRemoteFeaturesComplete),
             5 => return Some(ProtoId::HCILEMetaLongTermKeyRequest),
+            10 => return Some(ProtoId::HCILEMetaEnhancedConnectionComplete),
             _ => {}
         }
     }
@@ -625,6 +630,7 @@ fn by_s_m_hdr(hdr: &[u8]) -> Option<ProtoId> {
             11 => return Some(ProtoId::SMSecurityRequest),
             12 => return Some(ProtoId::SMPublicKey),
             13 => return Some(ProtoId::SMDHKeyCheck),
+            14 => return Some(ProtoId::SMKeypressNotification),
             _ => {}
         }
     }
@@ -657,6 +663,9 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindInformationRequest {
         crate::field::write_in(hdr, 0, 8, 0, 0, 4);
     }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTHandleValueConfirmation {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 30);
+    }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTHandleValueIndication {
         crate::field::write_in(hdr, 0, 8, 0, 0, 29);
     }
@@ -678,9 +687,6 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByGroupTypeRequest {
         crate::field::write_in(hdr, 0, 8, 0, 0, 16);
     }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByGroupTypeResponse {
-        crate::field::write_in(hdr, 0, 8, 0, 0, 17);
-    }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByTypeRequest {
         crate::field::write_in(hdr, 0, 8, 0, 0, 8);
     }
@@ -689,6 +695,9 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadMultipleResponse {
         crate::field::write_in(hdr, 0, 8, 0, 0, 15);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadMultipleVariableRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 32);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadRequest {
         crate::field::write_in(hdr, 0, 8, 0, 0, 10);
@@ -816,9 +825,6 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if parent == ProtoId::BTLECTRL && child == ProtoId::LLVERSIONIND {
         crate::field::write_in(hdr, 0, 8, 0, 0, 12);
     }
-    if parent == ProtoId::BTLEDATA && child == ProtoId::L2CAPHdr {
-        crate::field::write_in(hdr, 6, 2, 0, 0, 2);
-    }
     if parent == ProtoId::BTLEDATA && child == ProtoId::BTLECTRL {
         crate::field::write_in(hdr, 6, 2, 0, 0, 3);
     }
@@ -911,6 +917,19 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     }
     if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetAdvertisingParameters {
         crate::field::write_in(hdr, 0, 16, 0, 2, 8198);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetAdvertisingSetRandomAddress
+    {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8245);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetEventMask {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8193);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetExtendedAdvertiseEnable {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8249);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetExtendedScanEnable {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8258);
     }
     if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetRandomAddress {
         crate::field::write_in(hdr, 0, 16, 0, 2, 8197);
@@ -1041,6 +1060,9 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventConnectionComplete {
         crate::field::write_in(hdr, 0, 8, 0, 0, 3);
     }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventConnectionRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
+    }
     if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventDisconnectionComplete {
         crate::field::write_in(hdr, 0, 8, 0, 0, 5);
     }
@@ -1074,6 +1096,11 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     {
         crate::field::write_in(hdr, 0, 8, 0, 0, 12);
     }
+    if parent == ProtoId::HCIEventHdr
+        && child == ProtoId::HCIEventRemoteHostSupportedFeaturesNotification
+    {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 61);
+    }
     if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventRemoteNameRequestComplete {
         crate::field::write_in(hdr, 0, 8, 0, 0, 7);
     }
@@ -1082,6 +1109,13 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     }
     if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaConnectionUpdateComplete {
         crate::field::write_in(hdr, 0, 8, 0, 0, 3);
+    }
+    if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaEnhancedConnectionComplete {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 10);
+    }
+    if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaLEReadRemoteFeaturesComplete
+    {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
     }
     if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaLongTermKeyRequest {
         crate::field::write_in(hdr, 0, 8, 0, 0, 5);
@@ -1232,6 +1266,9 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMIdentityInformation {
         crate::field::write_in(hdr, 0, 8, 0, 0, 8);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMKeypressNotification {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 14);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMMasterIdentification {
         crate::field::write_in(hdr, 0, 8, 0, 0, 7);

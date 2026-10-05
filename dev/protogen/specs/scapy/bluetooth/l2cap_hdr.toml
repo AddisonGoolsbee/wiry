@@ -4,7 +4,7 @@ id = "L2CAPHdr"
 num = 5003
 module = "bluetooth_l2cap_hdr"
 citation = """
-scapy/layers/bluetooth.py, class L2CAP_Hdr (scapy 2.7.0), converted by
+scapy/layers/bluetooth.py, class L2CAP_Hdr (scapy 2.8.0.post0), converted by
 dev/protogen/scapy2spec.py from the field objects scapy builds at run time.
 scapy's docstring cites no RFC for it.
 """
@@ -31,15 +31,7 @@ enum = { 1 = "control", 4 = "attribute" }
 from = "layer"
 layer = "HCIACLHdr"
 
-[[parents]]
-from = "layer"
-layer = "BTLEDATA"
-field = "LLID"
-off = 6
-len = 2
-values = [2]
-
 [provenance]
 source = "scapy/layers/bluetooth.py"
-version = "scapy 2.7.0"
+version = "scapy 2.8.0.post0"
 changed = ["2026-10-03 — field table, defaults, enum names and bindings of L2CAP_Hdr converted mechanically from the field objects by dev/protogen/scapy2spec.py"]

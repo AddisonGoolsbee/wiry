@@ -5,8 +5,8 @@ num = 5022
 module = "bluetooth_l2cap_connection_parameter_update_request"
 citation = """
 scapy/layers/bluetooth.py, class L2CAP_Connection_Parameter_Update_Request
-(scapy 2.7.0), converted by dev/protogen/scapy2spec.py from the field objects
-scapy builds at run time. scapy's docstring cites no RFC for it.
+(scapy 2.8.0.post0), converted by dev/protogen/scapy2spec.py from the field
+objects scapy builds at run time. scapy's docstring cites no RFC for it.
 """
 min_len = 8
 header_len = 8
@@ -47,5 +47,5 @@ values = [18]
 
 [provenance]
 source = "scapy/layers/bluetooth.py"
-version = "scapy 2.7.0"
+version = "scapy 2.8.0.post0"
 changed = ["2026-10-03 — field table, defaults, enum names and bindings of L2CAP_Connection_Parameter_Update_Request converted mechanically from the field objects by dev/protogen/scapy2spec.py"]

@@ -4,9 +4,9 @@ id = "L2CAPDisconnReq"
 num = 5010
 module = "bluetooth_l2cap_disconnreq"
 citation = """
-scapy/layers/bluetooth.py, class L2CAP_DisconnReq (scapy 2.7.0), converted by
-dev/protogen/scapy2spec.py from the field objects scapy builds at run time.
-scapy's docstring cites no RFC for it.
+scapy/layers/bluetooth.py, class L2CAP_DisconnReq (scapy 2.8.0.post0),
+converted by dev/protogen/scapy2spec.py from the field objects scapy builds at
+run time. scapy's docstring cites no RFC for it.
 """
 min_len = 4
 header_len = 4
@@ -35,5 +35,5 @@ values = [6]
 
 [provenance]
 source = "scapy/layers/bluetooth.py"
-version = "scapy 2.7.0"
+version = "scapy 2.8.0.post0"
 changed = ["2026-10-03 — field table, defaults, enum names and bindings of L2CAP_DisconnReq converted mechanically from the field objects by dev/protogen/scapy2spec.py"]

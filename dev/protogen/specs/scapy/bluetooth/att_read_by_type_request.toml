@@ -4,7 +4,7 @@ id = "ATTReadByTypeRequest"
 num = 5042
 module = "bluetooth_att_read_by_type_request"
 citation = """
-scapy/layers/bluetooth.py, class ATT_Read_By_Type_Request (scapy 2.7.0),
+scapy/layers/bluetooth.py, class ATT_Read_By_Type_Request (scapy 2.8.0.post0),
 converted by dev/protogen/scapy2spec.py from the field objects scapy builds at
 run time. scapy's docstring cites no RFC for it.
 """
@@ -43,5 +43,5 @@ values = [8]
 
 [provenance]
 source = "scapy/layers/bluetooth.py"
-version = "scapy 2.7.0"
+version = "scapy 2.8.0.post0"
 changed = ["2026-10-03 — field table, defaults, enum names and bindings of ATT_Read_By_Type_Request converted mechanically from the field objects by dev/protogen/scapy2spec.py"]

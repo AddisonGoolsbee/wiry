@@ -4,8 +4,8 @@ id = "L2CAPInfoResp"
 num = 5015
 module = "bluetooth_l2cap_inforesp"
 citation = """
-scapy/layers/bluetooth.py, class L2CAP_InfoResp (scapy 2.7.0), converted by
-dev/protogen/scapy2spec.py from the field objects scapy builds at run time.
+scapy/layers/bluetooth.py, class L2CAP_InfoResp (scapy 2.8.0.post0), converted
+by dev/protogen/scapy2spec.py from the field objects scapy builds at run time.
 scapy's docstring cites no RFC for it.
 """
 min_len = 4
@@ -41,5 +41,5 @@ values = [11]
 
 [provenance]
 source = "scapy/layers/bluetooth.py"
-version = "scapy 2.7.0"
+version = "scapy 2.8.0.post0"
 changed = ["2026-10-03 — field table, defaults, enum names and bindings of L2CAP_InfoResp converted mechanically from the field objects by dev/protogen/scapy2spec.py"]

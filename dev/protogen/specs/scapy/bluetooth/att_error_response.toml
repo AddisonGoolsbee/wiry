@@ -4,9 +4,9 @@ id = "ATTErrorResponse"
 num = 5034
 module = "bluetooth_att_error_response"
 citation = """
-scapy/layers/bluetooth.py, class ATT_Error_Response (scapy 2.7.0), converted
-by dev/protogen/scapy2spec.py from the field objects scapy builds at run time.
-scapy's docstring cites no RFC for it.
+scapy/layers/bluetooth.py, class ATT_Error_Response (scapy 2.8.0.post0),
+converted by dev/protogen/scapy2spec.py from the field objects scapy builds at
+run time. scapy's docstring cites no RFC for it.
 """
 min_len = 4
 header_len = 4
@@ -40,5 +40,5 @@ values = [1]
 
 [provenance]
 source = "scapy/layers/bluetooth.py"
-version = "scapy 2.7.0"
+version = "scapy 2.8.0.post0"
 changed = ["2026-10-03 — field table, defaults, enum names and bindings of ATT_Error_Response converted mechanically from the field objects by dev/protogen/scapy2spec.py"]

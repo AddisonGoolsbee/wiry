@@ -2338,6 +2338,12 @@ def main(argv: list[str]) -> int:
 
     shorts = {m.split(".", 2)[2].replace(".", "_") for m in mods if m.count(".") >= 2}
     load_claims({OUT / sh for sh in shorts})
+    # The built engine still has what the last run of these modules emitted;
+    # a class this run refuses must not be named as a parent or a child.
+    for name, spec in ours.items():
+        if any(spec.is_relative_to(OUT / sh) for sh in shorts):
+            wl.pop(name, None)
+            WIRY_IDS.pop(name, None)
     report = []
     base = a.id_base
     for m in mods:

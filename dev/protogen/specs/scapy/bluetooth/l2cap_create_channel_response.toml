@@ -4,9 +4,9 @@ id = "L2CAPCreateChannelResponse"
 num = 5017
 module = "bluetooth_l2cap_create_channel_response"
 citation = """
-scapy/layers/bluetooth.py, class L2CAP_Create_Channel_Response (scapy 2.7.0),
-converted by dev/protogen/scapy2spec.py from the field objects scapy builds at
-run time. scapy's docstring cites no RFC for it.
+scapy/layers/bluetooth.py, class L2CAP_Create_Channel_Response (scapy
+2.8.0.post0), converted by dev/protogen/scapy2spec.py from the field objects
+scapy builds at run time. scapy's docstring cites no RFC for it.
 """
 min_len = 8
 header_len = 8
@@ -49,5 +49,5 @@ values = [13]
 
 [provenance]
 source = "scapy/layers/bluetooth.py"
-version = "scapy 2.7.0"
+version = "scapy 2.8.0.post0"
 changed = ["2026-10-03 — field table, defaults, enum names and bindings of L2CAP_Create_Channel_Response converted mechanically from the field objects by dev/protogen/scapy2spec.py"]
