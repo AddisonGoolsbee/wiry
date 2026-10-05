@@ -1,10 +1,10 @@
 //! Shared machinery for the line-oriented application protocols.
 //!
 //! HTTP (RFC 9112 §2.1), SIP (RFC 3261 §7), FTP (RFC 959 §4), SMTP (RFC 5321
-//! §4.1), IMAP (RFC 3501 §2.2) and syslog (RFC 5424 §6) are not field tables at
-//! any offset: they are CRLF-delimited text. They are served here as the same
-//! named-item list `options.rs` already produces for a TLV region, so the
-//! engine keeps two shapes rather than gaining a third — see DEVIATIONS T1.
+//! §4.1), IMAP (RFC 3501 §2.2) and syslog (RFC 5424 §6) are CRLF-delimited
+//! text, not field tables. They are served as the named-item list `options.rs`
+//! produces for a TLV region, so the engine keeps two shapes rather than three
+//! (DEVIATIONS T1).
 
 use crate::options::{Item, ItemValue};
 
@@ -42,8 +42,8 @@ fn trim(mut b: &[u8]) -> &[u8] {
     b
 }
 
-/// Lines with their terminators removed. A final unterminated line counts:
-/// a snaplen-clipped capture ends mid-message routinely.
+/// At most 256 lines, terminators removed. A final unterminated line counts,
+/// since a snaplen-clipped capture ends mid-message routinely.
 pub fn lines(data: &[u8]) -> Vec<&[u8]> {
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -73,8 +73,8 @@ pub fn headers_end(data: &[u8]) -> usize {
 }
 
 /// Offset just past the blank line that ends a header block, or `None` when
-/// the block was clipped before it. A reassembler needs to tell a clipped
-/// block from a complete one; a dissector takes what it has.
+/// the block was clipped before it, which a reassembler must tell apart from a
+/// complete block.
 pub fn header_block(data: &[u8]) -> Option<usize> {
     let mut i = 0usize;
     while i < data.len() {
@@ -92,8 +92,8 @@ pub fn header_block(data: &[u8]) -> Option<usize> {
     None
 }
 
-/// `Content-type` and `CONTENT-TYPE` are the same field name (RFC 9110 §5.1),
-/// so one spelling is chosen rather than leaving callers to guess.
+/// Field names are case-insensitive (RFC 9110 §5.1), so each is given one
+/// spelling: `CONTENT-TYPE` becomes `Content-Type`.
 fn canonical(name: &[u8]) -> String {
     let mut out = String::with_capacity(name.len());
     let mut upper = true;
@@ -141,9 +141,9 @@ pub fn header_items(block: &[u8]) -> Vec<Item> {
     out
 }
 
-/// The field lines of a start-line message (HTTP, SIP), stepping over the
-/// start line, which is not one. Every reader of these headers goes through
-/// here, so a dissector and a framer cannot disagree about what a header says.
+/// The field lines of a start-line message (HTTP, SIP), skipping the start
+/// line. Dissector and framer both parse through here so they cannot disagree
+/// about a header.
 pub fn message_headers(msg: &[u8]) -> Vec<Item> {
     let at = msg
         .iter()
@@ -152,8 +152,8 @@ pub fn message_headers(msg: &[u8]) -> Vec<Item> {
     header_items(msg.get(at..).unwrap_or(&[]))
 }
 
-/// One field's value, by the parse `message_headers` gives. Field names are
-/// case-insensitive (RFC 9110 §5.1).
+/// One field's value from `message_headers`, matched case-insensitively
+/// (RFC 9110 §5.1).
 pub fn message_field<'a>(fields: &'a [Item], name: &str) -> Option<&'a str> {
     fields.iter().find_map(|f| match &f.value {
         ItemValue::Text(t) if f.name.eq_ignore_ascii_case(name) => Some(t.trim()),
@@ -161,9 +161,8 @@ pub fn message_field<'a>(fields: &'a [Item], name: &str) -> Option<&'a str> {
     })
 }
 
-/// The three space-separated parts of an HTTP or SIP start line. A line with
-/// fewer parts is not one, which is what keeps a mid-stream TCP segment from
-/// dissecting as a message.
+/// The three space-separated parts of an HTTP or SIP start line. Requiring all
+/// three is what keeps a mid-stream TCP segment from dissecting as a message.
 pub fn start_line(line: &[u8]) -> Option<(&[u8], &[u8], &[u8])> {
     let a = line.iter().position(|c| *c == b' ')?;
     let rest = &line[a + 1..];
@@ -194,9 +193,8 @@ pub fn command(line: &[u8]) -> (&[u8], &[u8]) {
     }
 }
 
-/// FTP (RFC 959 §4) and SMTP (RFC 5321 §4) share a line grammar: a reply code
-/// or an alphabetic verb. Anything else on those ports is the middle of a
-/// stream, not the start of a message.
+/// FTP (RFC 959 §4) and SMTP (RFC 5321 §4) lines start with a reply code or an
+/// alphabetic verb; anything else on those ports is mid-stream.
 pub fn looks_like_control(data: &[u8]) -> bool {
     let Some(line) = lines(data).into_iter().next() else {
         return false;

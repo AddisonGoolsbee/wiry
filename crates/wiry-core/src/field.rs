@@ -54,7 +54,7 @@ impl FieldDesc {
         self
     }
 
-    /// Sorted by value.
+    /// `t` must be sorted by value.
     pub const fn named(mut self, t: Table) -> Self {
         self.names = Names::Table(t);
         self
@@ -65,8 +65,8 @@ impl FieldDesc {
         self
     }
 
-    /// The table is picked by the field at `on_off`/`on_len` of the same
-    /// header. Both levels sorted by value.
+    /// The table is chosen by the field at `on_off`/`on_len` of the same
+    /// header. Both levels must be sorted by value.
     pub const fn named_by(
         mut self,
         on_off: u16,
@@ -271,10 +271,9 @@ fn fixed_bytes<const N: usize>(hdr: &[u8], bit_off: u16) -> [u8; N] {
     out
 }
 
-/// Whether `v` is representable in this field, so an assignment too wide for it
-/// is refused rather than masked by `write_bits`. A field of whole octets is
-/// packed by `struct` in the API this follows and rejects an oversized value; a
-/// sub-octet field is a bit field there and masks. Both halves are kept.
+/// Whether `v` fits this field. scapy packs a whole-octet field with `struct`,
+/// which rejects an oversized value, and masks a sub-octet bit field; this
+/// keeps both behaviours, so only the first kind refuses.
 #[inline]
 pub fn fits(f: &FieldDesc, v: u64) -> bool {
     if f.bit_len == 0 || f.bit_len >= 64 || f.bit_off % 8 != 0 || f.bit_len % 8 != 0 {
@@ -320,8 +319,8 @@ pub fn decode(hdr: &[u8], f: &FieldDesc) -> FieldValue {
     }
 }
 
-/// An address left-aligned in sixteen octets, so an IPv4 and an IPv6 flow key
-/// are one shape. Anything longer is cut, because nothing addresses wider.
+/// An address left-aligned in sixteen octets, so IPv4 and IPv6 flow keys share
+/// one shape. Longer input is truncated.
 pub fn wide(addr: &[u8]) -> [u8; 16] {
     let mut out = [0u8; 16];
     let n = addr.len().min(16);

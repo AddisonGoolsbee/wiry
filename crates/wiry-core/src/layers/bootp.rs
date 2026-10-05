@@ -303,8 +303,9 @@ fn parse_options(data: &[u8]) -> Vec<Item> {
     DHCP_OPTIONS.walk(data)
 }
 
-/// RFC 3396 §4 puts `file` before `sname`, which is the order a split value is
-/// joined in.
+/// The `(start, end)` header ranges option 52 hands to options, in RFC 3396
+/// §4 order: `file` before `sname`, which is also the order a split value
+/// joins in.
 pub fn overload_regions(tlvs: &[(u8, &[u8])]) -> Vec<(usize, usize)> {
     let Some(&v) = tlvs
         .iter()
@@ -323,9 +324,9 @@ pub fn overload_regions(tlvs: &[(u8, &[u8])]) -> Vec<(usize, usize)> {
 }
 
 /// RFC 3396 §5: a value too long for one option is split over repeated
-/// appearances of its code. Joining the octets before anything decodes them is
-/// the only order that can join halves which do not each decode alone — half an
-/// address list, or half a nested region. Pad and End repeat by design.
+/// appearances of its code. The octets are joined before decoding because the
+/// halves need not decode alone (half an address list, half a nested region).
+/// Pad and End repeat by design and are never joined.
 pub fn decode_joined(t: &OptTable, tlvs: &[(u8, &[u8])]) -> Vec<Item> {
     let mut count = [0u8; 256];
     for (code, _) in tlvs {

@@ -13,21 +13,18 @@
 //! | DNS query over UDP | that, and a response (QR set) carrying an equal DNS id |
 //! | ARP request (RFC 826 op 1) | op 2 whose psrc is the pdst asked about |
 //!
-//! Nothing else matches, and in particular a shared address pair alone never
-//! does. The two failure modes are not symmetric: a wrong match silently
-//! corrupts the user's results, while a missed one shows up in `unanswered`
-//! where it can be seen and investigated. Every rule therefore pins the
-//! addresses down, on the quoted header as well as the outer one: `sr` opens
-//! the handle promiscuously, so an error or a reply meant for a third party is
-//! on the wire to be mismatched.
+//! Nothing else matches; in particular a shared address pair alone never does.
+//! A wrong match silently corrupts results while a missed one shows up in
+//! `unanswered`, so every rule pins the addresses, on the quoted header as well
+//! as the outer one: `sr` captures promiscuously, so replies and errors meant
+//! for third parties are on the wire.
 
 use crate::layers::icmp::types;
 use crate::packet::{dissect_spans, LayerSpan};
 use crate::proto::ProtoId;
 
 /// Every ICMPv4 message that quotes the datagram which provoked it (RFC 792,
-/// RFC 1812 §4.3.2.3). ICMPv6 errors quote an IPv6 datagram and are not
-/// matched: the table above recognises these five types only.
+/// RFC 1812 §4.3.2.3). ICMPv6 errors are not matched.
 const ERROR_TYPES: [u8; 5] = [
     types::DEST_UNREACH,
     types::SOURCE_QUENCH,
@@ -73,7 +70,7 @@ pub struct DnsAsk {
     pub query: bool,
 }
 
-/// Addresses are held widest-first: an IPv4 address occupies the low 4 octets.
+/// Addresses are right-aligned in 16 octets: an IPv4 address is the low 4.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReplyKey {
     pub kind: ReplyKind,
@@ -83,12 +80,10 @@ pub struct ReplyKey {
     quote: Option<Quote>,
 }
 
-/// What an ICMP error would echo back: RFC 792 quotes the internet header plus
-/// at least the first 64 bits of what followed it. The addresses and the
-/// protocol are inside that guaranteed header, so they are as available as the
-/// id, and they are what tells two probes of one `sr` batch apart: wiry builds
-/// every datagram with `id = 1`, and a default `ICMP()` payload is the same
-/// eight octets every time.
+/// What an ICMP error echoes back: RFC 792 guarantees the internet header plus
+/// the first 64 bits after it. The addresses are what tell probes of one `sr`
+/// batch apart, since wiry builds every datagram with `id = 1` and a default
+/// `ICMP()` payload is the same eight octets every time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Quote {
     src: [u8; 4],
@@ -183,8 +178,7 @@ fn ipv4_quote(buf: &[u8], spans: &[LayerSpan]) -> Option<Quote> {
     })
 }
 
-/// `None` for anything the table has no rule for, which is also what a caller
-/// should treat as "this packet can never be answered".
+/// `None` when no rule applies, meaning nothing can ever answer this packet.
 pub fn reply_key(buf: &[u8], spans: &[LayerSpan]) -> Option<ReplyKey> {
     if let Some(s) = find(spans, ProtoId::Arp) {
         let h = hdr(buf, s);
@@ -275,16 +269,16 @@ fn sent_kind(buf: &[u8], spans: &[LayerSpan]) -> ReplyKind {
     ReplyKind::Ip
 }
 
+/// Whether the received packet answers `sent`, by the rules in the module table.
 pub fn answers(sent: &ReplyKey, recv_buf: &[u8], recv_spans: &[LayerSpan]) -> bool {
     answers_matching(sent, recv_buf, recv_spans, true)
 }
 
-/// [`answers`] with the address pinning made optional, which is scapy's
-/// `conf.checkIPaddr`. With `check_addr` false only the protocol identity is
-/// left — ports, echo id and seq, DNS id, the quoted header past its addresses
-/// — which is what a DHCP exchange needs, where the server answers from an
-/// address the client could not have predicted. It is strictly looser, and the
-/// table's warning about silent mispairing applies with full force.
+/// [`answers`] with address pinning optional, as scapy's `conf.checkIPaddr`.
+/// With `check_addr` false only protocol identity remains (ports, echo id and
+/// seq, DNS id, the quoted header past its addresses), which a DHCP exchange
+/// needs because the server answers from an address the client cannot predict.
+/// Strictly looser, so silent mispairing becomes possible.
 pub fn answers_matching(
     sent: &ReplyKey,
     recv_buf: &[u8],
@@ -386,9 +380,8 @@ fn direct_answer(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan], check_addr: b
 /// RFC 4443 §4.2.
 const ECHO_REPLY_V6: u8 = 129;
 
-/// How traceroute works: the reply is an error from a router that never saw
-/// the datagram's payload, so the quoted header is the only thing tying the
-/// two together.
+/// Traceroute's case: the error comes from a router that never saw the
+/// payload, so the quoted header is the only link back to the probe.
 fn quoted_back(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan], check_addr: bool) -> bool {
     let Some(q) = sent.quote else {
         return false;
@@ -405,9 +398,6 @@ fn quoted_back(sent: &ReplyKey, buf: &[u8], spans: &[LayerSpan], check_addr: boo
         return false;
     };
     let h = hdr(inner, ip);
-    // The addresses first: the id and the eight octets are both constant
-    // across a batch of wiry's own probes, so on their own they pair a reply
-    // with whichever probe happens to come first.
     if check_addr && (four(h, 12) != Some(q.src) || four(h, 16) != Some(q.dst)) {
         return false;
     }
@@ -628,7 +618,7 @@ mod tests {
 
     #[test]
     fn an_error_quoting_a_datagram_answers_whatever_it_carried() {
-        // DEVIATIONS.md S1 stops at the layers this build knows; the quote does not.
+        // The quote matches whatever the datagram carried, dissected or not.
         let sent = ip4_key(47, 0x7777, &[0x30, 0x00, 0x88, 0xbe, 0, 0, 0, 1, 0xff]);
         assert_eq!(sent.kind, ReplyKind::Ip);
         let quoted = ip4(
@@ -788,8 +778,8 @@ mod tests {
 
     #[test]
     fn a_dns_response_is_answered_by_nothing() {
-        // Once paired wrong pairs in a capture of ordinary traffic: a query
-        // flowing the other way matches on addresses, ports and id alone.
+        // A query flowing the other way matches on addresses, ports and id,
+        // and must still not count.
         let sent = key(
             ip4(17, 1, A, B, &udp(53, 5300, &dns_response(0x1a2b))),
             ProtoId::Ipv4,
