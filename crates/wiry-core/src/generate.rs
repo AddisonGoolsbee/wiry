@@ -53,7 +53,7 @@ pub enum GenVal {
     Text(String),
 }
 
-/// Wider than 8 octets has to travel as bytes; narrower fits the integer path.
+/// Wider than 8 octets travels as big-endian bytes; narrower as an integer.
 fn addr_val(n: u128, width: usize) -> GenVal {
     if width <= 8 {
         return GenVal::Uint(n as u64);
@@ -94,8 +94,8 @@ pub enum Gen {
 }
 
 impl Gen {
-    /// A volatile generator yields a fresh value per packet, so it multiplies
-    /// by one.
+    /// This generator's factor in the product, saturating at `u128::MAX`. A
+    /// random generator yields a fresh value per packet, so it counts as one.
     pub fn count(&self) -> u128 {
         match self {
             Gen::One(_) => 1,
@@ -300,10 +300,9 @@ mod tests {
             hi: u128::MAX,
             width: 16,
         };
-        // 2**128 addresses is one more than a u128 holds, so the widest single
-        // span is short by one and every wider product pins at the ceiling.
-        // What must never happen is a huge product reporting a small count and
-        // slipping under a caller's eager-expansion threshold.
+        // 2**128 is one more than a u128 holds, so this pins at the ceiling. A
+        // wrapped product would read as small and slip under a caller's
+        // eager-expansion threshold.
         assert_eq!(whole().count(), u128::MAX);
         for n in 1..=4 {
             let slots = (0..n).map(|i| slot(0, "dst", i, whole())).collect();

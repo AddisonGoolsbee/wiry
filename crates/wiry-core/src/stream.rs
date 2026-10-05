@@ -1,26 +1,19 @@
-//! TCP stream reassembly. RFC 9293 §3.1 gives the header, §3.4 the sequence
-//! space and §3.7 the reassembly a receiver must do; the sequence number is 32
-//! bits and wraps, so every comparison here is made on a 64-bit line derived
-//! from the frontier rather than on the wire value.
+//! TCP stream reassembly (RFC 9293 §3.4 sequence space, §3.7 reassembly).
+//! Sequence numbers are 32 bits and wrap, so every comparison is made on a
+//! 64-bit line anchored at the frontier rather than on the wire value.
 //!
-//! Overlapping bytes are resolved first-writer-wins: the earliest segment to
-//! claim a stream offset owns it, and a later segment overwrites nothing. That
-//! is the same choice `frag.rs` made and it is made for the same reason —
-//! operating systems disagree about overlap and the disagreement is the basis
-//! of stream-based IDS evasion — but TCP is the worse case, because a sender
-//! also controls the window, the segment size and when it retransmits. What
-//! this reassembles is therefore *a* reading of the stream, not necessarily the
-//! one a given target host would have assembled.
+//! Overlap resolves first-writer-wins, as in `frag.rs`. Operating systems
+//! disagree about overlap, and a TCP sender also controls the window, segment
+//! size and retransmission, so this is *a* reading of the stream, not
+//! necessarily the one a given host assembled.
 //!
-//! Nothing here is filled in for bytes that never arrived. A gap is recorded as
-//! a gap and the bytes either side of it are adjacent in `data`, so the octets
-//! a half holds are octets that were actually captured and the output of a run
-//! can never be larger than its input. That is what keeps a crafted capture
-//! from turning a few small segments into a large allocation.
+//! Nothing is invented for octets that never arrived: a gap is recorded and the
+//! octets either side of it are adjacent in `data`. Output therefore never
+//! exceeds input, which stops a few crafted segments becoming a large
+//! allocation.
 //!
-//! Inserting a segment costs O(log h) in the segments already held plus the
-//! octets it actually contributes, and h is bounded by `MAX_HELD_SEGS`, so no
-//! arrival is linear in the stream reassembled so far.
+//! An insert costs O(log h) plus the octets it contributes, with h bounded by
+//! `MAX_HELD_SEGS`.
 
 use crate::field::wide;
 use crate::layers::dispatch;
@@ -60,8 +53,7 @@ pub const MAX_AHEAD: u64 = 1 << 20;
 /// segment happened to be captured first.
 const ORIGIN_WINDOW: usize = 8;
 
-/// Octets of an HTTP message's header section that are walked looking for the
-/// blank line that ends it.
+/// Octets of an HTTP header section searched for the blank line ending it.
 const MAX_HEAD: usize = 64 << 10;
 
 /// Chunks walked in one chunked body (RFC 9112 §7.1).
@@ -89,8 +81,7 @@ pub struct Seg {
 }
 
 /// Octets that never arrived. `at` is the offset in `data` where they would
-/// have been; the octets either side of it are adjacent, because nothing is
-/// invented to stand in for what is missing.
+/// have been; nothing stands in for them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Gap {
     pub at: u32,
@@ -128,10 +119,8 @@ impl Half {
         self.seg_at(off).map(|s| s.pkt)
     }
 
-    /// The segments overlapping `[at, at + len)`. `segs` is sorted and
-    /// disjoint, so this is two searches and not a scan: asking once per
-    /// message with a scan costs the whole direction per message, which is
-    /// quadratic on a direction carrying many small records.
+    /// The segments overlapping `[at, at + len)`, by binary search: a scan per
+    /// message is quadratic on a direction carrying many small records.
     pub fn segs_in(&self, at: u32, len: u32) -> &[Seg] {
         let end = at.saturating_add(len);
         let lo = self.segs.partition_point(|s| s.at + s.len <= at);
@@ -145,16 +134,14 @@ struct Build {
     half: Half,
     held: BTreeMap<u64, Held>,
     held_bytes: usize,
-    /// Sequence of the next octet to deliver, and the reference every 32-bit
-    /// sequence number is read against. Before `open` there is no frontier and
-    /// it holds the first sequence number seen instead. It only ever moves
-    /// forward, which is what keeps a segment at the frontier expressible: a
-    /// second reference that lagged behind it would, after 2^31 of advance,
-    /// map arriving octets to the wrong side of the line and the direction
-    /// would go deaf without saying so.
+    /// Sequence of the next octet to deliver (before `open`, the first sequence
+    /// seen), and the reference every 32-bit sequence number is read against.
+    /// It only moves forward: a reference lagging the frontier by 2^31 would
+    /// map arriving octets behind the line and the direction would go deaf
+    /// silently.
     next: u64,
-    /// The lowest offset this direction can ever deliver. Octets below it are
-    /// not a retransmission of anything, so refusing them is a loss to report.
+    /// The lowest offset this direction can deliver. Octets below it are not a
+    /// retransmission, so refusing them is a loss to report.
     origin: u64,
     started: bool,
     open: bool,
@@ -169,9 +156,8 @@ impl Build {
 
     fn feed(&mut self, seq: u32, flags: u8, data: &[u8], pkt: u32) {
         if !self.started {
-            // The line starts one wrap in, so a segment that arrives before the
-            // first one seen still has somewhere to sit and the reference plus
-            // a 32-bit delta stays positive.
+            // One wrap in, so a segment earlier than the first one seen still
+            // lands at a positive offset.
             self.next = seq as u64 + (1u64 << 32);
             self.origin = self.next;
             self.started = true;
@@ -184,8 +170,7 @@ impl Build {
                 self.next = at.saturating_add(1);
                 self.open = true;
             }
-            // RFC 9293 §3.4: SYN occupies one sequence number, so any octets
-            // riding with it start one past it.
+            // RFC 9293 §3.4: SYN occupies one sequence number.
             at = at.saturating_add(1);
         }
         if flags & FIN != 0 {
@@ -198,8 +183,7 @@ impl Build {
             return;
         }
         if !self.open {
-            // Before the origin is fixed there is no frontier to measure
-            // against, so the first sequence number seen stands in for one.
+            // With no frontier yet, the first sequence number seen stands in.
             if at.abs_diff(self.next) > MAX_AHEAD {
                 self.half.flags |= LOSSY;
                 self.half.dropped += data.len() as u64;
@@ -249,11 +233,9 @@ impl Build {
         self.open = true;
     }
 
-    /// First writer wins, so only the parts of `[at, at + src.len())` that no
-    /// held segment already claims are kept. The pieces go in as their own
-    /// entries rather than being concatenated onto a neighbour: concatenating
-    /// would let a sender who sends descending, overlapping segments pay one
-    /// small segment for one whole-buffer copy.
+    /// Keeps only the parts of `[at, at + src.len())` no held segment claims,
+    /// each as its own entry. Concatenating onto a neighbour would let
+    /// descending, overlapping segments buy a whole-buffer copy each.
     fn hold(&mut self, at: u64, src: &[u8], pkt: u32) {
         let end = at.saturating_add(src.len() as u64);
         let mut cur = at;
@@ -279,16 +261,14 @@ impl Build {
                 self.held_bytes += bytes.len();
                 self.held.insert(cur, Held { bytes, pkt });
             }
-            // Held entries are never empty, so `stop.1` already passes `cur`;
-            // the floor is what makes that an invariant rather than a trust,
-            // on a loop whose shape the sender chooses.
+            // Held entries are never empty, so `stop.1 > cur` already; the
+            // floor guarantees progress on a loop whose shape the sender picks.
             cur = stop.1.max(cur.saturating_add(1));
         }
     }
 
-    /// Give up on the octets in front of what is held: record the gap, never
-    /// guess at it, and deliver what was waiting behind it. `false` when there
-    /// is nothing left to wait for.
+    /// Records the gap in front of what is held and delivers what waited behind
+    /// it. `false` when nothing is held.
     fn give_up_on_front(&mut self) -> bool {
         self.work.probe();
         let Some((&first, _)) = self.held.first_key_value() else {
@@ -305,7 +285,6 @@ impl Build {
         true
     }
 
-    /// Bring the held set back under its bounds.
     fn relieve(&mut self) {
         while (self.held.len() > MAX_HELD_SEGS || self.held_bytes > MAX_HELD_BYTES)
             && self.give_up_on_front()
@@ -357,8 +336,7 @@ impl Build {
         self.next = self.next.saturating_add(data.len() as u64);
     }
 
-    /// Everything still held is delivered, each run behind the gap in front of
-    /// it, so a stream that never became contiguous still hands back its octets.
+    /// Delivers everything still held, each run behind the gap in front of it.
     fn finish(mut self) -> Half {
         if !self.open {
             self.fix_origin();
@@ -368,10 +346,9 @@ impl Build {
     }
 }
 
-/// A stream is keyed on the address pair and the port pair without direction,
-/// so both halves of one connection meet here. Direction 0 is the side that
-/// opened it where a SYN says so, and otherwise the side the first captured
-/// packet came from.
+/// Direction-free, so both halves of a connection share one key. Direction 0
+/// is the side that opened it where a SYN says so, otherwise the sender of the
+/// first captured packet.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct Key {
     a: [u8; 16],
@@ -391,15 +368,14 @@ pub struct Stream {
     pub v6: bool,
     /// Position of the first packet seen on this stream.
     pub first: u32,
-    /// The stream was given up on to stay inside `MAX_STREAMS`; packets on the
-    /// same addresses after that point start another stream.
+    /// Retired to stay inside `MAX_STREAMS`; later packets on the same
+    /// addresses start another stream.
     pub evicted: bool,
     pub halves: [Half; 2],
 }
 
 impl Stream {
-    /// The spelling `PacketList.sessions()` uses for the same flow, so a stream
-    /// and a session name the same connection the same way.
+    /// The spelling `PacketList.sessions()` uses for the same flow.
     pub fn key(&self) -> String {
         format!(
             "TCP {}:{} > {}:{}",
@@ -424,8 +400,7 @@ impl Stream {
     }
 }
 
-/// The address as `key()` spells it, from the octets rather than from the
-/// key, so a caller reading `src` is not parsing a display string.
+/// The address as `key()` spells it.
 pub fn addr(a: &[u8; 16], v6: bool) -> String {
     let v = if v6 {
         crate::field::FieldValue::Ipv6(*a)
@@ -446,7 +421,6 @@ struct Live {
     build: [Build; 2],
 }
 
-/// What one frame carries, as far as this module cares.
 struct Segment {
     key: Key,
     src: [u8; 16],
@@ -489,9 +463,8 @@ fn inspect(buf: &[u8], link: ProtoId) -> Option<Segment> {
     let dport = u16::from_be_bytes([hdr[2], hdr[3]]);
     let seq = u32::from_be_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
     let flags = hdr[13];
-    // The payload extent is the dissector's, not a second reading of Data
-    // Offset, so a segment and the stream it joins cannot disagree about which
-    // octets are payload.
+    // The dissector's payload extent, not a second reading of Data Offset, so
+    // the two cannot disagree about which octets are payload.
     let at = (t + tcp.hlen as usize).min(buf.len());
     let end = (t + tcp.total as usize).min(buf.len()).max(at);
     let key = if (src, sport) <= (dst, dport) {
@@ -528,9 +501,9 @@ fn inspect(buf: &[u8], link: ProtoId) -> Option<Segment> {
 #[derive(Default)]
 pub struct Reassembler {
     live: HashMap<Key, Live>,
-    /// One entry per live stream, stamped so an entry left behind by an evicted
-    /// stream cannot evict the one that later reclaimed its key. A stamp is
-    /// pushed on every touch, which makes eviction least-recently-active.
+    /// Stamped, so a stale entry cannot evict a stream that later reclaimed its
+    /// key. A stamp is pushed on every touch, making eviction
+    /// least-recently-active.
     order: VecDeque<(u64, Key)>,
     seq: u64,
     held: usize,
@@ -547,8 +520,7 @@ impl Reassembler {
         self.seq += 1;
         self.work.probe();
         let live = self.live.entry(s.key).or_insert_with(|| {
-            // A SYN with no ACK is the side that opened the connection; with no
-            // SYN in the capture the first packet's own direction stands.
+            // A SYN-ACK comes from the server, so its reverse is direction 0.
             let client = s.flags & SYN != 0 && s.flags & ACK != 0;
             Live {
                 key_src: if client { s.dst } else { s.src },
@@ -582,10 +554,8 @@ impl Reassembler {
                 self.retire(l, true);
             }
         }
-        // Every touch and every eviction leaves a stale entry behind. Dropping
-        // the ones no live stream answers to bounds `order` at one entry per
-        // stream, which is what keeps this sweep amortised rather than
-        // per-packet.
+        // Every touch leaves a stale entry. Sweeping only once `order` is four
+        // times the live set keeps the sweep amortised rather than per-packet.
         if self.order.len() > 4 * self.live.len() + 4 * ORIGIN_WINDOW {
             self.work.probes(self.order.len());
             let live = &self.live;
@@ -641,13 +611,12 @@ where
     r.finish()
 }
 
-/// Octets of framing the message splice may add to the capture it was given.
-/// Each message costs one frame of headers, and a message can be as short as a
-/// five-octet TLS record, so without a ceiling a crafted capture comes back
-/// about twelve times its own size. Past it, messages are left unframed and
-/// their packets pass through as captured. The framing that keeps a partly
-/// consumed packet whole is outside this bound and inside the input's: it is
-/// at most two frames per contributing segment.
+/// Octets of framing the message splice may add to its input. A message can be
+/// a five-octet TLS record carrying a whole frame of headers, so unbounded, a
+/// crafted capture comes back about twelve times its size. Past this, messages
+/// stay unframed and their packets pass through as captured. Framing that
+/// keeps a partly consumed packet whole is not counted: it is at most two
+/// frames per contributing segment, so the input bounds it.
 pub const MAX_REFRAME_GROWTH: usize = 64 << 20;
 
 /// Where a frame's own headers end and its TCP payload begins.
@@ -688,21 +657,19 @@ pub fn room(s: &Splice) -> usize {
 /// `src`'s own headers carrying `data` as their TCP payload, with `skip` octets
 /// of that frame's payload ahead of where `data` starts.
 ///
-/// Lengths and the IPv4 header checksum are recomputed, because the header
-/// genuinely describes the frame that comes back. The TCP checksum is set to 0:
-/// RFC 9293 §3.1's checksum covers a segment that was on a wire, and this
-/// payload never was one, so the captured value would claim to cover octets it
-/// does not and a recomputed one would assert a transmission that never
-/// happened. 0 is this project's "not computed" (DEVIATIONS P8).
+/// Lengths and the IPv4 header checksum are recomputed, since that header does
+/// describe the result. The TCP checksum is 0, this project's "not computed"
+/// (DEVIATIONS P8): RFC 9293 §3.1's checksum covers a segment that was on a
+/// wire, so the captured value would be stale and a recomputed one would
+/// assert a transmission that never happened.
 pub fn reframe(src: &[u8], link: ProtoId, skip: u32, data: &[u8]) -> Option<Vec<u8>> {
     reframe_with(src, &splice(src, link)?, skip, data)
 }
 
-/// `reframe` for a caller that already holds the frame's `Splice`, so a frame
-/// carrying many messages is dissected once rather than once per message.
+/// `reframe` with the `Splice` already in hand, so a frame carrying many
+/// messages is dissected once.
 pub fn reframe_with(src: &[u8], s: &Splice, skip: u32, data: &[u8]) -> Option<Vec<u8>> {
-    // A snaplen-clipped frame can end inside the headers this rewrites, and a
-    // frame that cannot describe its own headers cannot be given new ones.
+    // A snaplen-clipped frame can end inside the headers this rewrites.
     let ip_min = if s.v6 { 40 } else { 20 };
     if s.payload < s.tcp + 20 || s.tcp < s.ip + ip_min || data.len() > room(s) {
         return None;
@@ -732,8 +699,8 @@ pub fn reframe_with(src: &[u8], s: &Splice, skip: u32, data: &[u8]) -> Option<Ve
     Some(f)
 }
 
-/// The dissector's own port table and content guards, so a stream and a
-/// segment cannot disagree about what they are.
+/// The dissector's own port table and content guards, so a stream and its
+/// segments cannot disagree about what they carry.
 pub fn app_of(sport: u16, dport: u16, data: &[u8]) -> Option<ProtoId> {
     dispatch::by_tcp_port(sport, dport, data)
 }
@@ -817,10 +784,9 @@ fn tls_len(d: &[u8]) -> Option<usize> {
     (d.len() >= n).then_some(n)
 }
 
-/// RFC 9112 §2.1: the header section ends at the first empty line. The walk is
-/// bounded because the line it looks for is under the sender's control, and it
-/// is the dissector's own scanner so the two cannot disagree about where a
-/// header block ends.
+/// RFC 9112 §2.1: the header section ends at the first empty line. Bounded,
+/// since the sender decides whether that line comes, and shared with the
+/// dissector so the two agree on where the block ends.
 fn head_end(d: &[u8]) -> Option<usize> {
     text::header_block(&d[..d.len().min(MAX_HEAD)])
 }
@@ -872,9 +838,8 @@ fn http_len(d: &[u8]) -> Option<usize> {
         let n: usize = v[..digits].parse().ok()?;
         return (body.len() >= n).then_some(head + n);
     }
-    // RFC 9112 §6.3: with no length and no chunking a request has no body, and
-    // a response runs to the close of the stream, which no arriving octet can
-    // announce.
+    // RFC 9112 §6.3: with no length and no chunking a request has no body and
+    // a response runs to the close, which no arriving octet announces.
     if d.starts_with(b"HTTP/") {
         return None;
     }
@@ -938,7 +903,7 @@ mod tests {
     fn shapes() -> &'static [(&'static str, Shape)] {
         &[
             // Descending, abutting: every arrival lands in front of everything
-            // held, which is the shape that made a merging buffer quadratic.
+            // held, which makes a merging buffer quadratic.
             ("descending", |n| {
                 (0..n).map(|i| c2s((4 * (n - i)) as u32, b"aaaa")).collect()
             }),
@@ -948,8 +913,7 @@ mod tests {
                     .map(|i| c2s((4 * (n - i)) as u32, b"aaaaa"))
                     .collect()
             }),
-            // A wide segment over many small held ones, repeated: the scan over
-            // what a new segment spans must not be paid again per arrival.
+            // A wide segment over many small held ones, repeated.
             ("wide over sparse", |n| {
                 let mut v: Vec<Vec<u8>> =
                     (0..n).map(|i| c2s((100 + 8 * i) as u32, b"aa")).collect();
@@ -957,14 +921,12 @@ mod tests {
                 v.extend((0..n).map(|_| c2s(100, &wide)));
                 v
             }),
-            // Never contiguous: every arrival opens a gap the next one does not
-            // close, so the held set stays at its bound and `relieve` runs on
-            // every arrival.
+            // Never contiguous, so the held set stays at its bound and
+            // `relieve` runs on every arrival.
             ("sparse", |n| {
                 (0..n).map(|i| c2s((1 + 64 * i) as u32, b"aaaa")).collect()
             }),
-            // One stream per packet: a real input, and the one that decides
-            // whether the eviction queue is amortised.
+            // One stream per packet: decides whether eviction is amortised.
             ("one stream each", |n| {
                 (0..n)
                     .map(|i| seg(1, 2, (i % 60000) as u16 + 1024, 80, 1, 0x18, b"hello"))
@@ -1120,11 +1082,9 @@ mod tests {
         assert_eq!(s[0].packets(), vec![0, 1, 2]);
     }
 
-    /// The frontier can advance entirely through `relieve`, never through an
-    /// in-order arrival. A reference that only followed the in-order path would
-    /// lag it without bound, and once the two were 2^31 apart every arriving
-    /// segment would map to the wrong side of the line and be discarded as
-    /// already delivered — a direction going deaf with nothing said about it.
+    /// The frontier here advances only through `relieve`. A reference that
+    /// followed only in-order arrivals would fall 2^31 behind, and every later
+    /// segment would be discarded as already delivered.
     #[test]
     fn the_reference_follows_the_frontier_however_it_advances() {
         let mut b = Build::default();
@@ -1147,9 +1107,8 @@ mod tests {
         assert!(h.data.ends_with(b"HEARD"), "the direction went deaf");
     }
 
-    /// The origin heuristic can be wrong: a segment earlier than the earliest
-    /// of the opening window, arriving later still, cannot be delivered. What
-    /// it must not do is vanish without saying so.
+    /// A segment earlier than anything in the opening window, arriving after
+    /// it, cannot be delivered, but must not vanish silently.
     #[test]
     fn octets_before_the_origin_are_refused_out_loud() {
         let mut frames: Vec<Vec<u8>> = (0..ORIGIN_WINDOW as u32)
@@ -1220,8 +1179,7 @@ mod tests {
                 }
             }
         }
-        // A message too wide for the length fields comes back as None, so a
-        // caller has to chunk rather than get a frame that lies about itself.
+        // Too wide for the length fields: the caller must chunk.
         let sp = splice(&full, ProtoId::Ether).expect("a whole frame splices");
         assert!(reframe(&full, ProtoId::Ether, 0, &body(room(&sp) + 1)).is_none());
         let f = reframe(&full, ProtoId::Ether, 0, &body(room(&sp))).expect("fits");
@@ -1232,11 +1190,6 @@ mod tests {
         assert_eq!(crate::checksum::ones_complement(&f[14..14 + 20]), 0);
     }
 
-    /// A spliced frame was never on a wire, so nothing it carries is covered by
-    /// the checksum the source segment had. It comes back as 0 — this
-    /// project's "not computed" — rather than as a stale value a downstream
-    /// tool would report as valid. The IPv4 header checksum is recomputed
-    /// instead of zeroed, because that header does describe the frame.
     #[test]
     fn a_spliced_frame_carries_no_tcp_checksum() {
         let mut src = c2s(7, &body(120));
@@ -1277,9 +1230,8 @@ mod tests {
             assert_eq!(http_len(&msg), Some(msg.len()), "framer on {head:?}");
         }
 
-        // Past the 256-line cap the parse carries, a header is invisible to
-        // both: the framer treats the request as bodyless exactly as `show`
-        // presents it, rather than framing on a header no one can see.
+        // Past the parse's 256-line cap a header is invisible to both, so the
+        // request is bodyless to the framer exactly as `show` presents it.
         let mut deep = b"POST / HTTP/1.1\r\n".to_vec();
         deep.extend(b"X: y\r\n".repeat(300));
         deep.extend(b"Content-Length: 4\r\n\r\n");
@@ -1299,30 +1251,19 @@ mod tests {
         assert!(run(&[arp]).is_empty());
     }
 
-    /// An insert probes the held set a bounded number of times whatever the
-    /// arrival order. `MAX_HELD_SEGS` is 64 and the search through it is
-    /// logarithmic, so six probes covers the search and the rest is the
-    /// amortised delivery of what the arrival unblocked; the worst shape here
-    /// measures 7.0. Sixteen leaves room for a constant this module might
-    /// honestly gain and still sits a quarter of the way to the held-set bound,
-    /// so an insert that examined what it holds fails.
+    /// A search over at most 64 held entries is about six probes, plus the
+    /// amortised delivery of what the arrival unblocked; the worst shape
+    /// measures 7.0. Sixteen is a quarter of the held-set bound, so an insert
+    /// that examined what it holds fails.
     const MAX_PROBES_PER_ARRIVAL: f64 = 16.0;
 
-    /// Four times the segments may cost at most five times the work. Linear is
-    /// 4.0 and every shape here measures between 4.00 and 4.05; a quadratic
-    /// term would show 16. Unlike a wall-clock ratio, nothing between 4 and 16
-    /// is noise, so the margin is about the algorithm alone.
+    /// Growth over 4x the segments. Linear is 4.0, every shape measures 4.00 to
+    /// 4.05, and quadratic is 16.
     const MAX_GROWTH: f64 = 5.0;
 
-    /// Every adversarial arrival order the module names, fed at two sizes.
-    ///
-    /// The cost of an insert is counted, not timed. A quadratic insert does
-    /// work proportional to what is already held, which is a property of
-    /// operations rather than of nanoseconds: a clock has to separate 4x growth
-    /// from 16x, and on a loaded machine the noise is wider than the room
-    /// between them. Counting is deterministic, and it is the stronger check —
-    /// a per-arrival bound catches an insert that walks what it holds even when
-    /// the total stays linear, which no ratio of any kind can see.
+    /// Counted rather than timed (see `work.rs`). The per-arrival bound also
+    /// catches an insert that walks what it holds while the total stays linear,
+    /// which no growth ratio can see.
     #[test]
     fn no_arrival_order_makes_an_insert_cost_what_is_already_held() {
         for (name, build) in shapes() {
@@ -1341,10 +1282,8 @@ mod tests {
                 growth <= MAX_GROWTH,
                 "{name}: 4x the segments examined {growth:.1}x the entries, which is not linear"
             );
-            // An arriving octet is copied into the held set at most once, and
-            // out of it into the delivered stream at most once. A reassembler
-            // that concatenated what it holds would move a whole buffer per
-            // arrival and break this on the first crafted capture.
+            // An arriving octet is copied into the held set at most once and
+            // out of it at most once.
             for (b, fed, n) in [(b0, fed0, 2000), (b1, fed1, 8000)] {
                 assert!(
                     b <= 2 * fed,

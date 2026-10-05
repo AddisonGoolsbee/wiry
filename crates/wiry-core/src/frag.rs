@@ -1,11 +1,9 @@
 //! Fragmentation and reassembly. IPv4 from RFC 791 §3.2, IPv6 from RFC 8200
 //! §4.5.
 //!
-//! Overlapping bytes are resolved first-writer-wins: the earliest fragment to
-//! claim a byte range owns it, and a later fragment overwrites nothing. That
-//! choice is deliberate and visible, because operating systems resolve overlap
-//! differently and the difference is the whole basis of fragmentation-based
-//! IDS evasion.
+//! Overlap resolves first-writer-wins: the earliest fragment to claim a byte
+//! owns it. Operating systems disagree on this, and that disagreement is what
+//! fragmentation-based IDS evasion exploits (DEVIATIONS E19).
 
 use crate::checksum::ones_complement;
 use crate::field::wide;
@@ -357,16 +355,12 @@ impl Group {
                 .is_some_and(|t| self.got.iter().next() == Some((&0, &t)) && self.got.len() == 1)
     }
 
-    /// First writer wins: only the parts of `[start, end)` no earlier fragment
-    /// claimed are written, so an overlapping fragment cannot rewrite bytes an
-    /// upstream stack has already seen.
+    /// Writes only the parts of `[start, end)` no earlier fragment claimed.
     ///
-    /// The claim is found, merged and reinserted in O(log h) plus one step per
-    /// range it swallows, and a range is swallowed once. Two earlier shapes
-    /// were linear in what is held instead: re-sorting the list per fragment,
-    /// and holding it in a `Vec` whose front insertion shifted every range
-    /// above it. Either makes one crafted datagram quadratic, and a sender
-    /// picks the arrival order.
+    /// O(log h) plus one step per range swallowed, and a range is swallowed
+    /// once. Re-sorting per fragment, or a `Vec` whose front insertion shifts
+    /// every range above, is linear in what is held, which makes one crafted
+    /// datagram quadratic: the sender picks the arrival order.
     fn absorb(&mut self, start: usize, src: &[u8], work: &mut Work) {
         let end = start + src.len();
         if end > self.data.len() {
@@ -554,7 +548,7 @@ impl Reassembler {
             return;
         }
         g.at.push(pos);
-        // Head and layout come from the offset-zero fragment, in any order.
+        // Only the offset-zero fragment carries a head, whenever it arrives.
         if g.head.is_none() {
             g.head = f.head;
         }
@@ -752,27 +746,16 @@ mod tests {
         (probes, bytes, fed, r.finish())
     }
 
-    /// `absorb` finds and merges a claim in O(log h) plus one step per range it
-    /// swallows, and a range is swallowed once. The worst shape here measures
-    /// 3.9 entries per fragment; twelve leaves room for a constant this module
-    /// might honestly gain and is still three orders below `MAX_FRAGS`, so a
-    /// claim that walked the list fails.
+    /// The worst shape measures 3.9. Twelve leaves headroom and is still three
+    /// orders below `MAX_FRAGS`, so a claim that walked the held list fails.
     const MAX_PROBES_PER_FRAGMENT: f64 = 12.0;
 
-    /// Four times the fragments may touch at most six times the entries. Linear
-    /// is 4.0 and the shapes here measure 2.6 to 4.5, the spread coming from
-    /// where the eviction sweep falls; a quadratic term would show 16.
+    /// Growth over 4x the fragments. Linear is 4.0, the shapes measure 2.6 to
+    /// 4.5 depending on where the eviction sweep falls, and quadratic is 16.
     const MAX_GROWTH: f64 = 6.0;
 
-    /// The named caps bound how much a hostile capture may buffer; this bounds
-    /// what it may cost, counted rather than timed.
-    ///
-    /// A 20-second deadline stood here before and could not do the job. The
-    /// bug it commemorates — re-sorting the received-range list per fragment —
-    /// was measured back in at 1.5s against 0.1s, so it passed; and the shape
-    /// fed was ascending, the one order a `Vec` inserts into for free, so the
-    /// front insertion that was quadratic never ran at all. Both are visible
-    /// here in entries touched, and neither is visible in a clock.
+    /// The caps bound what a hostile capture may buffer; this bounds what each
+    /// arrival may cost, counted rather than timed (see `work.rs`).
     #[test]
     fn no_arrival_order_makes_a_claim_cost_what_is_already_held() {
         for (name, build) in frag_shapes() {
