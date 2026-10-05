@@ -161,6 +161,8 @@ per-file blocks are authoritative.
 | `python/wiry/capture.py` | `scapy/sendrecv.py` (the socket loop of `AsyncSniffer._run`) | 2.7.0 / `7d69454` | 2026-10-03 |
 | `python/wiry/answering.py` | `scapy/layers/l2.py`, `inet.py`, `dhcp.py`, `dns.py`, `llmnr.py`, `netbios.py` (the answering machines) | 2.7.0 / `7d69454` | 2026-10-03 |
 | `crates/wiry-core/src/layers/variants.rs` | `scapy/layers/pptp.py`, `scapy/layers/ppp.py`, `scapy/layers/dot11.py` (the `dispatch_hook`s) | scapy 2.7.0 | 2026-10-04 |
+| `dev/protogen/specs/scapy/bluetooth/*.toml` and the `bluetooth_*.rs` they generate | `scapy/layers/bluetooth.py` | scapy master `e2e35c0` (2.8.0.post0) | 2026-10-04 |
+| `dev/protogen/specs/scapy/bluetooth4LE/*.toml` and the `bluetooth4le_*.rs` they generate | `scapy/layers/bluetooth4LE.py`, `scapy/contrib/ethercat.py` (`LEBitField`'s bit order) | scapy master `e2e35c0` (2.8.0.post0) | 2026-10-04 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift
