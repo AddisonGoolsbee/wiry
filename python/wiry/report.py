@@ -16,7 +16,7 @@ from functools import lru_cache
 from itertools import islice
 from typing import Any, Callable, Iterable, Iterator, Sequence
 
-from . import FlagValue, PacketList, _LayerView, _b, _enum_table, _flag_names
+from . import FlagValue, PacketList, _LayerView, _PY_MODELLED, _b, _enum_table, _flag_names
 
 __all__ = [
     "sprintf", "sprintf_list", "show2_str", "Sessions", "sessions",
@@ -173,7 +173,7 @@ class _PktSource:
 
     def __init__(self, pkt: Any):
         self.pkt = pkt
-        self.names = pkt.layers()
+        self.names = pkt._names()
 
     def time(self) -> Any:
         return self.pkt.time
@@ -190,6 +190,9 @@ class _PktSource:
                 seen += 1
                 if seen != nb:
                     continue
+            top = self.pkt._py_top() if name in _PY_MODELLED else None
+            if top is not None and top[0] == i:
+                return _py_value(top[1], field, raw)
             if not raw and field in _enum_table(name):
                 try:
                     return self.pkt._materialize().field_repr(i, field)
@@ -202,6 +205,16 @@ class _PktSource:
         if field is None:
             return layer in self.names
         return self.value(layer, 1, field) is not _MISS
+
+
+def _py_value(obj: Any, field: str, raw: bool) -> Any:
+    """A field of a Python-modelled layer as scapy's `sprintf` renders it:
+    through the field's `i2repr` unless the directive asked for the value."""
+    try:
+        fld, val = obj.getfield_and_val(field)
+    except (AttributeError, ValueError):
+        return _MISS
+    return val if raw or fld is None else fld.i2repr(obj, val)
 
 
 class _ColSource:

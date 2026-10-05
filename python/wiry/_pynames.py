@@ -258,9 +258,76 @@ EXPORTS = {
         "PKINIT_KEX_METHOD", "KerberosClient", "krb_as_req", "krb_tgs_req",
         "krb_as_and_tgs", "krb_get_salt", "kpasswd", "KerberosSSP",
     ),
+    "_pyfields": (
+        "MaximumItemsCount",
+    ),
+    "layers.dns": (
+        "dnstypes", "dnsqtypes", "dnsclasses", "dnssecalgotypes",
+        "dnssecdigesttypes", "dnssecnsec3algotypes", "dns_get_str",
+        "dns_encode", "DNSgetstr", "dns_compress", "DNSCompressedPacket",
+        "DNSStrField", "DNSTextField", "edns0types", "EDNS0TLV", "DNSRROPT",
+        "EDNS0OWN", "EDNS0DAU", "EDNS0DHU", "EDNS0N3U", "ClientSubnetv4",
+        "ClientSubnetv6", "EDNS0ClientSubnet", "EDNS0COOKIE", "EDNS0PADDING",
+        "extended_dns_error_codes", "EDNS0ExtendedDNSError",
+        "EDNS0OPT_DISPATCHER", "bitmap2RRlist", "RRlist2bitmap",
+        "RRlistField", "DNSRRHINFO", "DNSRRMX", "DNSRRSOA", "DNSRRRSIG",
+        "DNSRRNSEC", "DNSRRDNSKEY", "DNSRRDS", "DNSRRDLV", "DNSRRNSEC3",
+        "DNSRRNSEC3PARAM", "svc_param_keys", "SvcParam", "DNSRRSVCB",
+        "DNSRRHTTPS", "DNSRRSRV", "tsig_algo_sizes", "TimeSignedField",
+        "DNSRRTSIG", "DNSRRNAPTR", "DNSRR_DISPATCHER", "DNSRR", "DNSQR", "DNS",
+        "DNSTCP", "dns_resolve", "dyndns_add", "dyndns_del", "DNSSDResult",
+        "dnssd",
+    ),
+    "layers.dhcp6": (
+        "IP6ListField", "DomainNameListField", "dhcp6_cls_by_type",
+        "All_DHCP_Relay_Agents_and_Servers", "All_DHCP_Servers", "dhcp6opts",
+        "dhcp6opts_by_code", "dhcp6types", "duidtypes", "duidhwtypes",
+        "DUID_LLT", "DUID_EN", "DUID_LL", "DUID_UUID", "duid_cls",
+        "DHCP6OptUnknown", "DHCP6OptClientId", "DHCP6OptServerId",
+        "DHCP6OptIAAddress", "DHCP6OptIA_NA", "DHCP6OptIA_TA",
+        "DHCP6OptOptReq", "DHCP6OptPref", "DHCP6OptElapsedTime",
+        "DHCP6OptAuth", "DHCP6OptServerUnicast", "dhcp6statuscodes",
+        "DHCP6OptStatusCode", "DHCP6OptRapidCommit", "USER_CLASS_DATA",
+        "DHCP6OptUserClass", "VENDOR_CLASS_DATA", "DHCP6OptVendorClass",
+        "VENDOR_SPECIFIC_OPTION", "DHCP6OptVendorSpecificInfo",
+        "DHCP6OptIfaceId", "DHCP6OptReconfMsg", "DHCP6OptReconfAccept",
+        "DHCP6OptSIPDomains", "DHCP6OptSIPServers", "DHCP6OptDNSServers",
+        "DHCP6OptDNSDomains", "DHCP6OptIAPrefix", "DHCP6OptIA_PD",
+        "DHCP6OptNISServers", "DHCP6OptNISPServers", "DHCP6OptNISDomain",
+        "DHCP6OptNISPDomain", "DHCP6OptSNTPServers", "IRT_DEFAULT",
+        "IRT_MINIMUM", "DHCP6OptInfoRefreshTime", "DHCP6OptBCMCSDomains",
+        "DHCP6OptBCMCSServers", "DHCP6OptGeoConfElement", "DHCP6OptGeoConf",
+        "DHCP6OptRemoteID", "DHCP6OptSubscriberID", "DHCP6OptClientFQDN",
+        "DHCP6OptPanaAuthAgent", "DHCP6OptNewPOSIXTimeZone",
+        "DHCP6OptNewTZDBTimeZone", "DHCP6OptRelayAgentERO",
+        "DHCP6OptLQClientLink", "DHCP6NTPSubOptSrvAddr",
+        "DHCP6NTPSubOptMCAddr", "DHCP6NTPSubOptSrvFQDN", "DHCP6OptNTPServer",
+        "DHCP6OptBootFileUrl", "DHCP6OptClientArchType",
+        "DHCP6OptClientNetworkInterId", "DHCP6OptERPDomain",
+        "DHCP6OptRelaySuppliedOpt", "DHCP6OptVSS",
+        "DHCP6OptClientLinkLayerAddr", "DHCP6OptCaptivePortal",
+        "DHCP6OptMudUrl", "DHCP6OptAddrRegEnable",
+        "DHCP6RelayAgentUnicastAddr", "DHCP6RelayHopCount",
+        "DHCP6ServerUnicastAddr", "DHCP6ClientUnicastAddr", "DHCP6ClientIA_TA",
+        "DHCP6ClientIA_NA", "DHCP6ClientIAID", "T1", "T2", "DHCP6ServerDUID",
+        "DHCP6CurrentTransactionID", "DHCP6PrefVal", "DHCP6",
+        "DHCP6OptRelayMsg", "DHCP6_Solicit", "DHCP6_Advertise",
+        "DHCP6_Request", "DHCP6_Confirm", "DHCP6_Renew", "DHCP6_Rebind",
+        "DHCP6_Reply", "DHCP6_Release", "DHCP6_Decline", "DHCP6_Reconf",
+        "DHCP6_InfoRequest", "DHCP6_RelayForward", "DHCP6_RelayReply",
+        "DHCP6_AddrRegInform", "DHCP6_AddrRegReply", "DHCPv6_am", "dhcp6d",
+    ),
 }
 
 # Rust layers whose scapy contract is a tree of Python objects. The Rust layer
 # stays in the dissection chain, so a capture of them is found, counted and
 # filtered without Python; the name exported is the Python model.
-PY_MODELLED = {"SNMP": "layers.snmp", "LDAP": "layers.ldap"}
+PY_MODELLED = {
+    "SNMP": "layers.snmp", "LDAP": "layers.ldap", "DHCP6": "layers.dhcp6",
+    "DNS": "layers.dns",
+}
+
+# Where scapy splits one Rust layer into a class per variant, the function
+# that picks the class. Such a layer is built as Raw octets under the layer
+# below it, since the Rust layer's own fields cannot hold the whole message.
+PY_DECODER = {"DHCP6": "_dhcp6_dispatcher"}

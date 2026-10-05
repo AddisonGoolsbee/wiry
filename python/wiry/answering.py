@@ -16,6 +16,11 @@
 #                but do not write them (E8). mDNS's negative NSEC lists the
 #                types the name holds (RFC 6762 §6.1); DHCP_am answers nothing,
 #                rather than raising, once its pool is exhausted.
+#   2026-10-04 — the DNS machines build replies from wiry.layers.dns's
+#                records and compress them as scapy does, and relay=True asks
+#                conf.nameservers; the encoder that lived here is gone. The
+#                negative NSEC now does list the types the name holds, which
+#                the previous one claimed but did not.
 
 """scapy's ready-made answering machines, over wiry's layers.
 
@@ -282,109 +287,11 @@ class DHCP_am(BOOTP_am):
 
 
 
-def _labels(name: Any) -> List[bytes]:
-    """A name in RFC 1035 §5.1 presentation form, with `\\.` and `\\DDD`
-    escapes (RFC 4343 §2.1), as its labels."""
-    if isinstance(name, (bytes, bytearray)):
-        name = bytes(name).decode("latin-1")
-    out: List[bytes] = []
-    cur = bytearray()
-    i = 0
-    while i < len(name):
-        c = name[i]
-        if c == "\\" and i + 1 < len(name):
-            tail = name[i + 1:i + 4]
-            if len(tail) == 3 and tail.isdigit():
-                cur.append(int(tail) & 0xFF)
-                i += 4
-                continue
-            cur += name[i + 1].encode("latin-1", "replace")
-            i += 2
-            continue
-        if c == ".":
-            if cur:
-                out.append(bytes(cur))
-            cur = bytearray()
-        else:
-            cur += c.encode("latin-1", "replace")
-        i += 1
-    if cur:
-        out.append(bytes(cur))
-    return [lab[:63] for lab in out]
+def _normk(k: Any) -> bytes:
+    from ._pyfields import bytes_encode
 
-
-def _norm(name: Any) -> str:
-    if isinstance(name, (bytes, bytearray)):
-        name = bytes(name).decode("latin-1")
-    name = name.lower()
-    return name if name.endswith(".") else name + "."
-
-
-def _type_bitmap(types: Any) -> bytes:
-    """RFC 4034 §4.1.2's windowed type bit map."""
-    windows: Dict[int, bytearray] = {}
-    for t in sorted(set(int(x) for x in types)):
-        w, b = divmod(t, 256)
-        windows.setdefault(w, bytearray(32))[b // 8] |= 0x80 >> (b % 8)
-    out = bytearray()
-    for w, bm in sorted(windows.items()):
-        n = max(i for i, v in enumerate(bm) if v) + 1
-        out += bytes([w, n]) + bm[:n]
-    return bytes(out)
-
-
-class _Message:
-    """The sections of a DNS message after its twelve-octet header.
-
-    Names compress against every name already written (RFC 1035 §4.1.4),
-    except inside SRV and NSEC RDATA, which RFC 2782 and RFC 4034 §4.1.1 say
-    must stay uncompressed.
-    """
-
-    def __init__(self, compress: bool):
-        self.buf = bytearray()
-        self.seen: Optional[Dict[bytes, int]] = {} if compress else None
-
-    def name(self, name: Any, compress: bool = True) -> None:
-        labels = _labels(name)
-        for i in range(len(labels)):
-            key = b".".join(labels[i:]).lower()
-            if compress and self.seen is not None and key in self.seen:
-                self.buf += struct.pack("!H", 0xC000 | self.seen[key])
-                return
-            at = len(self.buf) + 12
-            if self.seen is not None and at < 0x4000:
-                self.seen.setdefault(key, at)
-            self.buf += bytes([len(labels[i])]) + labels[i]
-        self.buf.append(0)
-
-    def question(self, q: Dict[str, Any]) -> None:
-        self.name(q["qname"])
-        self.buf += struct.pack("!HH", q["qtype"], q.get("qclass", 1))
-
-    def record(self, rr: Tuple) -> None:
-        rrname, rtype, rclass, ttl, rdata = rr
-        self.name(rrname)
-        self.buf += struct.pack("!HHI", rtype, rclass, ttl)
-        at = len(self.buf)
-        self.buf += b"\x00\x00"
-        if rtype == 1:
-            self.buf += ipaddress.IPv4Address(rdata).packed
-        elif rtype == 28:
-            self.buf += ipaddress.IPv6Address(rdata).packed
-        elif rtype == 12:
-            self.name(rdata)
-        elif rtype == 33:
-            priority, weight, port, target = rdata
-            self.buf += struct.pack("!HHH", priority, weight, port)
-            self.name(target, compress=False)
-        elif rtype == 47:
-            nextname, types = rdata
-            self.name(nextname, compress=False)
-            self.buf += _type_bitmap(types)
-        else:
-            self.buf += bytes(rdata)
-        struct.pack_into("!H", self.buf, at, len(self.buf) - at - 2)
+    k = bytes_encode(k).lower()
+    return k if k.endswith(b".") else k + b"."
 
 
 class DNS_am(AnsweringMachine):
@@ -395,8 +302,9 @@ class DNS_am(AnsweringMachine):
     off by default. ``match`` maps a name to an address or to an
     ``(IPv4, IPv6)`` pair, or is a list of names answered with the jokers.
     ``srvmatch`` maps a name to ``(port, target)``; ``jokerarpa`` is the name
-    every in-addr.arpa PTR query gets. ``send_error`` answers an unknown name
-    with NXDOMAIN rather than silence.
+    every in-addr.arpa PTR query gets. ``relay`` asks ``conf.nameservers``
+    for anything else; ``send_error`` answers what is left with NXDOMAIN
+    rather than silence.
     """
 
     function_name = "dnsd"
@@ -412,11 +320,6 @@ class DNS_am(AnsweringMachine):
                       src_ip: Optional[str] = None,
                       src_ip6: Optional[str] = None, ttl: int = 10,
                       jokerarpa: Any = False) -> None:
-        if relay:
-            raise NotImplementedError(
-                "DNS_am(relay=True) needs a resolver; wiry has no "
-                "conf.nameservers or dns_resolve to relay through"
-            )
         if not isinstance(joker, (str, bool)) and joker is not None:
             raise ValueError("Bad 'joker': should be an IPv4 (str) or False !")
         if not isinstance(joker6, (str, bool)) and joker6 is not None:
@@ -427,8 +330,10 @@ class DNS_am(AnsweringMachine):
             raise ValueError("Bad 'from_ip': should be an IPv4 (str), Net or False !")
         if not isinstance(from_ip6, (str, Net6, bool)):
             raise ValueError("Bad 'from_ip6': should be an IPv6 (str), Net or False !")
-        if self.mDNS and (src_ip or src_ip6):
+        if self.mDNS and src_ip:
             raise ValueError("Cannot use 'src_ip' in mDNS !")
+        if self.mDNS and src_ip6:
+            raise ValueError("Cannot use 'src_ip6' in mDNS !")
         if joker is None and match is not None:
             joker = False
         self.joker = joker
@@ -442,13 +347,13 @@ class DNS_am(AnsweringMachine):
                 return (v, joker6)
             raise ValueError("Bad match value: '%s'" % repr(v))
 
-        self.match: Dict[str, Tuple] = {}
+        self.match: Dict[bytes, Tuple] = {}
         if match:
             if isinstance(match, (list, set)):
-                self.match.update({_norm(k): (None, None) for k in match})
+                self.match.update({_normk(k): (None, None) for k in match})
             else:
-                self.match.update({_norm(k): normv(v) for k, v in match.items()})
-        self.srvmatch = {_norm(k): tuple(v) for k, v in (srvmatch or {}).items()}
+                self.match.update({_normk(k): normv(v) for k, v in match.items()})
+        self.srvmatch = {_normk(k): normv(v) for k, v in (srvmatch or {}).items()}
         self.send_error = send_error
         self.relay = relay
         self.from_ip = Net(from_ip) if isinstance(from_ip, str) else from_ip
@@ -461,6 +366,8 @@ class DNS_am(AnsweringMachine):
         if DNS not in req or UDP not in req or req[DNS].qr != 0:
             return False
         if self.llmnr:
+            # RFC 4795 §2.1: a query arrives at the link-scope group with a
+            # hop limit of 1, and nothing else is answered.
             if req[UDP].dport != 5355:
                 return False
             if IPv6 in req:
@@ -483,6 +390,7 @@ class DNS_am(AnsweringMachine):
         if IPv6 in req:
             ip6 = req[IPv6]
             if self.mDNS:
+                # RFC 6762 §11: every response goes out with a hop limit of 255.
                 kw = dict(dst="ff02::fb", fl=ip6.fl, hlim=255)
             elif self.llmnr:
                 kw = dict(dst=ip6.src, src=self.src_ip6, fl=ip6.fl, hlim=ip6.hlim)
@@ -499,36 +407,23 @@ class DNS_am(AnsweringMachine):
             kw = dict(dst=ip.src, src=self.src_ip or ip.dst, id=ip.id, ttl=ip.ttl)
         return IP, {k: v for k, v in kw.items() if v is not None}
 
-    def _src_addr(self, rdata: Any, six: bool) -> Optional[str]:
-        if rdata is not None:
-            return rdata
-        if self.relay:
-            return None
-        return _if_addr(_iface(self), six)
-
-    def _answer(self, rq: Dict[str, Any], resp_src: Dict[str, Any]) -> List[Tuple]:
-        qname = rq["qname"]
-        key = _norm(qname)
-        qtype = rq["qtype"]
-        if qtype in (1, 28):
-            six = qtype == 28
-            rdata = self.match.get(key, (self.joker, self.joker6))[1 if six else 0]
-            rdata = self._src_addr(rdata, six)
-            if self.mDNS and rdata:
-                resp_src["src"] = rdata
-            if not rdata:
-                return []
-            addrs = rdata if isinstance(rdata, list) else [rdata]
-            return [(qname, qtype, 1, self.ttl, a) for a in addrs]
-        if qtype == 33 and key in self.srvmatch:
-            port, target = self.srvmatch[key]
-            return [(qname, 33, 1, self.ttl, (0, 100, port, target))]
-        if qtype == 12 and _norm(qname).endswith(".in-addr.arpa.") \
-                and self.jokerarpa:
-            return [(qname, 12, 1, self.ttl, self.jokerarpa + ".")]
-        return []
+    def _address(self, rqname: bytes, qtype: int) -> Any:
+        """What an A (1) or AAAA (28) query for `rqname` is answered with,
+        or a false value for nothing."""
+        six = qtype == 28
+        entry = self.match.get(rqname)
+        rdata = (self.joker6 if six else self.joker) if entry is None \
+            else entry[1 if six else 0]
+        if rdata is None and not self.relay:
+            rdata = _if_addr(_iface(self), six)
+        return rdata
 
     def make_reply(self, req: Any) -> Any:
+        from .layers.dns import (
+            DNSQR, DNSRR, DNSRRNSEC, DNSRROPT, DNSRRSRV, EDNS0OWN,
+            RRlist2bitmap, dns_compress, dns_resolve,
+        )
+
         if DNS not in req or UDP not in req \
                 or (IP not in req and IPv6 not in req):
             return None
@@ -543,45 +438,82 @@ class DNS_am(AnsweringMachine):
             else:
                 link = _link_reply(req)
         udp = req[UDP]
-        queries = list(req[DNS].qd or [])
-        ans: List[Tuple] = []
+        dnsreq = req[DNS]
+        queries = list(dnsreq.qd)
+        # An ALL query is answered as an A query and an AAAA query.
+        allquery = next(
+            (x for x in queries if getattr(x, "qtype", None) == 255), None)
+        if allquery is not None:
+            queries.remove(allquery)
+            queries.extend(
+                DNSQR(qtype=x, qname=allquery.qname,
+                      unicastresponse=allquery.unicastresponse,
+                      qclass=allquery.qclass)
+                for x in (1, 28)
+            )
+        ans: List[Any] = []
+        ars: List[Any] = []
         for rq in queries:
-            if rq.get("qtype") == 255:
-                queries += [{"qname": rq["qname"], "qtype": t,
-                             "qclass": rq.get("qclass", 1)} for t in (1, 28)]
-        for rq in queries:
-            if rq.get("qtype") == 255:
+            if not isinstance(rq, DNSQR):
                 continue
-            got = self._answer(rq, l3kw)
-            if got:
-                ans += got
-            elif self.mDNS:
-                # RFC 6762 §6.1: assert nonexistence of the missing type.
-                ans.append((rq["qname"], 47, 1, self.ttl,
-                            (rq["qname"], [rq["qtype"]])))
-        if self.mDNS and ans and all(rr[1] == 47 for rr in ans):
+            rqname = rq.qname.lower()
+            if rq.qtype in (1, 28):
+                rdata = self._address(rqname, rq.qtype)
+                if self.mDNS and rdata:
+                    l3kw["src"] = rdata
+                if rdata:
+                    ans.extend(
+                        DNSRR(rrname=rq.qname, ttl=self.ttl, rdata=x,
+                              type=rq.qtype, cacheflush=self.mDNS)
+                        for x in (rdata if isinstance(rdata, list) else [rdata])
+                    )
+                    continue
+            elif rq.qtype == 33 and rqname in self.srvmatch:
+                port, target = self.srvmatch[rqname]
+                ans.append(DNSRRSRV(rrname=rq.qname, port=port, target=target,
+                                    weight=100, ttl=self.ttl))
+                continue
+            elif rq.qtype == 12:
+                if rq.qname[-14:] == b".in-addr.arpa." and self.jokerarpa:
+                    ans.append(DNSRR(rrname=rq.qname, type=rq.qtype,
+                                     ttl=self.ttl, rdata=self.jokerarpa))
+                    continue
+            if self.relay:
+                try:
+                    rslv = dns_resolve(rq.qname, qtype=rq.qtype, raw=True)
+                except TimeoutError:
+                    rslv = None
+                if rslv:
+                    ans.extend(rslv.an)
+                    ars.extend(rslv.ar)
+                    continue
+            if self.mDNS:
+                # RFC 6762 §6.1: the negative answer's bit map lists the types
+                # the name does have. scapy lists the type asked for, which
+                # asserts the very record being denied.
+                held = [t for t in (1, 28) if self._address(rqname, t)]
+                ans.append(DNSRRNSEC(
+                    ttl=self.ttl, rrname=rq.qname, nextname=rq.qname,
+                    typebitmaps=RRlist2bitmap(held) if held else b"",
+                ))
+        if self.mDNS and all(x.type == 47 for x in ans):
             return None
         resp = l3cls(**l3kw) / UDP(sport=udp.dport, dport=udp.sport)
         if not ans:
             if self.send_error:
-                dns = self._dns_bytes(req[DNS].id, queries, [], rcode=3)
+                dns = DNS(id=dnsreq.id, qr=1, qd=dnsreq.qd, rcode=3)
                 return (link / resp / dns) if link else (resp / dns)
             return None
-        dns = self._dns_bytes(req[DNS].id, [] if self.mDNS else queries, ans)
-        return (link / resp / dns) if link else (resp / dns)
-
-    def _dns_bytes(self, ident: int, queries: List[Dict[str, Any]],
-                   answers: List[Tuple], rcode: int = 0) -> Any:
-        msg = _Message(compress=not self.llmnr)
-        for q in queries:
-            msg.question(q)
-        for rr in answers:
-            msg.record(rr)
-        header = dict(id=ident, qr=1, qdcount=len(queries), ancount=len(answers),
-                      rcode=rcode)
         if self.mDNS:
-            header.update(aa=1, rd=0)
-        return DNS(**header) / Raw(load=bytes(msg.buf))
+            # A Windows extension scapy sends: the responder's own MAC.
+            ars.append(DNSRROPT(z=0x1194, rdata=[EDNS0OWN(
+                primary_mac=None)]))
+            dns = DNS(id=dnsreq.id, aa=1, rd=0, qr=1, qd=[], ar=ars, an=ans)
+        else:
+            dns = DNS(id=dnsreq.id, qr=1, qd=dnsreq.qd, ar=ars, an=ans)
+        if not self.llmnr:
+            dns = dns_compress(dns)
+        return (link / resp / dns) if link else (resp / dns)
 
 
 class mDNS_am(DNS_am):
@@ -600,8 +532,6 @@ class LLMNR_am(DNS_am):
     filter = "udp port 5355"
     llmnr = True
     dport = 5355
-
-
 
 
 def _nb_encode(name: bytes) -> bytes:

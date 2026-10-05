@@ -79,8 +79,10 @@ def dns_bomb() -> bytes:
 
 def test_a_dns_decompression_bomb_decodes_a_bounded_amount():
     msg = dns_bomb()
-    dns = (UDP(sport=53, dport=53) / DNS(msg))["DNS"]
-    sections = [getattr(dns, s) for s in ("qd", "an", "ns", "ar")]
+    # Too long for UDP's own length field, which therefore claims nothing.
+    pkt = UDP(struct.pack(">HHHH", 53, 53, 0, 0) + msg)
+    recs = pkt._materialize().dns_records(1)
+    sections = [recs[s] for s in ("qd", "an", "ns", "ar")]
     decoded = sum(
         len(r.get("qname", r.get("rrname", ""))) for s in sections for r in s
     )
@@ -88,3 +90,9 @@ def test_a_dns_decompression_bomb_decodes_a_bounded_amount():
     # character per three, so this is under the 256 KB cap.
     assert decoded <= 256 * 1024
     assert sum(len(s) for s in sections) < 0xFFFF
+
+    # The record objects stop at conf.max_list_count, as scapy's do; the
+    # message is then still the Rust layer, header fields and all.
+    with pytest.raises(wiry.MaximumItemsCount):
+        DNS(msg)
+    assert DNS in pkt and pkt[DNS].id == 0x1234

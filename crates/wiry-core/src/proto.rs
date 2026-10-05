@@ -136,6 +136,7 @@ impl ProtoId {
     pub const HDLC: ProtoId = ProtoId(1104);
     pub const DIRPPP: ProtoId = ProtoId(1105);
     pub const PPPECPOptionOUI: ProtoId = ProtoId(1115);
+    pub const PPPLCP: ProtoId = ProtoId(1117);
     pub const PPPLCPMRUOption: ProtoId = ProtoId(1119);
     pub const PPPLCPACCMOption: ProtoId = ProtoId(1120);
     pub const PPPLCPQualityProtocolOption: ProtoId = ProtoId(1122);
@@ -371,6 +372,155 @@ impl ProtoId {
     pub const LLSUBRATEREQ: ProtoId = ProtoId(5289);
     pub const LLSUBRATEIND: ProtoId = ProtoId(5290);
     pub const LLCHANNELREPORTINGIND: ProtoId = ProtoId(5291);
+    pub const FileAlignmentInformation: ProtoId = ProtoId(6002);
+    pub const FileEaInformation: ProtoId = ProtoId(6005);
+    pub const FileInternalInformation: ProtoId = ProtoId(6013);
+    pub const FilePositionInformation: ProtoId = ProtoId(6015);
+    pub const FileStandardInformation: ProtoId = ProtoId(6017);
+    pub const WINNTSIDIDENTIFIERAUTHORITY: ProtoId = ProtoId(6019);
+    pub const FileFsSizeInformation: ProtoId = ProtoId(6044);
+    pub const SMB2FILEID: ProtoId = ProtoId(6072);
+    pub const SMB2CREATEDURABLEHANDLERESPONSE: ProtoId = ProtoId(6073);
+    pub const SMB2CREATEQUERYONDISKID: ProtoId = ProtoId(6075);
+    pub const SMB2CREATEDURABLEHANDLEREQUEST: ProtoId = ProtoId(6079);
+    pub const SMB2CREATEQUERYMAXIMALACCESSREQUEST: ProtoId = ProtoId(6081);
+    pub const SMB2CREATEALLOCATIONSIZE: ProtoId = ProtoId(6082);
+    pub const SMB2CREATETIMEWARPTOKEN: ProtoId = ProtoId(6083);
+    pub const SMB2CREATEAPPINSTANCEID: ProtoId = ProtoId(6088);
+    pub const SMB2CREATEAPPINSTANCEVERSION: ProtoId = ProtoId(6089);
+    pub const SMB2IOCTLOFFLOADREADRequest: ProtoId = ProtoId(6108);
+    pub const SMB2TransformHeader: ProtoId = ProtoId(6122);
+    pub const SMB2CompressionTransformHeader: ProtoId = ProtoId(6123);
+    pub const LLTDHello: ProtoId = ProtoId(6141);
+    pub const LLTDDiscover: ProtoId = ProtoId(6142);
+    pub const LLTDEmiteeDesc: ProtoId = ProtoId(6143);
+    pub const LLTDEmit: ProtoId = ProtoId(6144);
+    pub const LLTDRecveeDesc: ProtoId = ProtoId(6145);
+    pub const LLTDQueryLargeTlv: ProtoId = ProtoId(6147);
+    pub const LLTDAttributeEOP: ProtoId = ProtoId(6150);
+    pub const LLTDAttributeHostID: ProtoId = ProtoId(6151);
+    pub const LLTDAttributeCharacteristics: ProtoId = ProtoId(6152);
+    pub const LLTDAttributePhysicalMedium: ProtoId = ProtoId(6153);
+    pub const LLTDAttributeIPv4Address: ProtoId = ProtoId(6154);
+    pub const LLTDAttributeIPv6Address: ProtoId = ProtoId(6155);
+    pub const LLTDAttribute80211MaxRate: ProtoId = ProtoId(6156);
+    pub const LLTDAttributePerformanceCounterFrequency: ProtoId = ProtoId(6157);
+    pub const LLTDAttributeLinkSpeed: ProtoId = ProtoId(6158);
+    pub const LLTDAttributeLargeTLV: ProtoId = ProtoId(6159);
+    pub const LLTDAttributeQOSCharacteristics: ProtoId = ProtoId(6162);
+    pub const LLTDAttribute80211PhysicalMedium: ProtoId = ProtoId(6163);
+    pub const LLTDAttributeSeesList: ProtoId = ProtoId(6164);
+    pub const SCTPChunkParamIPv4Addr: ProtoId = ProtoId(6173);
+    pub const SCTPChunkParamIPv6Addr: ProtoId = ProtoId(6174);
+    pub const SCTPChunkParamCookiePreservative: ProtoId = ProtoId(6177);
+    pub const SCTPChunkParamSSNTSNResetReq: ProtoId = ProtoId(6182);
+    pub const SCTPChunkParamReConfigRes: ProtoId = ProtoId(6183);
+    pub const SCTPChunkParamAddOutgoingStreamReq: ProtoId = ProtoId(6184);
+    pub const SCTPChunkParamAddIncomingStreamReq: ProtoId = ProtoId(6185);
+    pub const SCTPChunkParamECNCapable: ProtoId = ProtoId(6186);
+    pub const SCTPChunkParamFwdTSN: ProtoId = ProtoId(6191);
+    pub const SCTPChunkParamSuccessIndication: ProtoId = ProtoId(6196);
+    pub const SCTPChunkParamAdaptationLayer: ProtoId = ProtoId(6197);
+    pub const SCTPForwardSkip: ProtoId = ProtoId(6200);
+    pub const SCTPIForwardSkip: ProtoId = ProtoId(6202);
+    pub const SCTPChunkShutdown: ProtoId = ProtoId(6210);
+    pub const SCTPChunkShutdownAck: ProtoId = ProtoId(6211);
+    pub const SCTPChunkCookieAck: ProtoId = ProtoId(6214);
+    pub const SCTPChunkShutdownComplete: ProtoId = ProtoId(6215);
+    pub const PPTP: ProtoId = ProtoId(6230);
+    pub const PPTPStartControlConnectionRequest: ProtoId = ProtoId(6231);
+    pub const PPTPStartControlConnectionReply: ProtoId = ProtoId(6232);
+    pub const PPTPStopControlConnectionRequest: ProtoId = ProtoId(6233);
+    pub const PPTPStopControlConnectionReply: ProtoId = ProtoId(6234);
+    pub const PPTPEchoRequest: ProtoId = ProtoId(6235);
+    pub const PPTPEchoReply: ProtoId = ProtoId(6236);
+    pub const PPTPOutgoingCallRequest: ProtoId = ProtoId(6237);
+    pub const PPTPOutgoingCallReply: ProtoId = ProtoId(6238);
+    pub const PPTPIncomingCallRequest: ProtoId = ProtoId(6239);
+    pub const PPTPIncomingCallReply: ProtoId = ProtoId(6240);
+    pub const PPTPIncomingCallConnected: ProtoId = ProtoId(6241);
+    pub const PPTPCallClearRequest: ProtoId = ProtoId(6242);
+    pub const PPTPCallDisconnectNotify: ProtoId = ProtoId(6243);
+    pub const PPTPWANErrorNotify: ProtoId = ProtoId(6244);
+    pub const PPTPSetLinkInfo: ProtoId = ProtoId(6245);
+    pub const Dot11QoS: ProtoId = ProtoId(6256);
+    pub const RSNCipherSuite: ProtoId = ProtoId(6261);
+    pub const AKMSuite: ProtoId = ProtoId(6262);
+    pub const Dot11EltCountryConstraintTriplet: ProtoId = ProtoId(6265);
+    pub const Dot11VHTOperationInfo: ProtoId = ProtoId(6273);
+    pub const Dot11Disas: ProtoId = ProtoId(6277);
+    pub const Dot11ReassoReq: ProtoId = ProtoId(6280);
+    pub const Dot11ReassoResp: ProtoId = ProtoId(6281);
+    pub const Dot11Deauth: ProtoId = ProtoId(6285);
+    pub const Dot11Action: ProtoId = ProtoId(6287);
+    pub const Dot11WNM: ProtoId = ProtoId(6288);
+    pub const SubelemTLV: ProtoId = ProtoId(6289);
+    pub const BSSTerminationDuration: ProtoId = ProtoId(6290);
+    pub const Dot11SpectrumManagement: ProtoId = ProtoId(6294);
+    pub const Dot11S1GBeacon: ProtoId = ProtoId(6296);
+    pub const Dot11Encrypted: ProtoId = ProtoId(6297);
+    pub const Dot11CCMP: ProtoId = ProtoId(6300);
+    pub const TPMSSCHEMESIGHASH: ProtoId = ProtoId(6311);
+    pub const TPMSNULLPARMS: ProtoId = ProtoId(6317);
+    pub const TPM2BPRIVATEKEYRSA: ProtoId = ProtoId(6320);
+    pub const TPM2BDIGESTX: ProtoId = ProtoId(6321);
+    pub const TPM2BNAME: ProtoId = ProtoId(6326);
+    pub const TPM2BDATA: ProtoId = ProtoId(6327);
+    pub const TPMALOCALITY: ProtoId = ProtoId(6328);
+    pub const TPMSPCRSELECTION: ProtoId = ProtoId(6329);
+    pub const TPMLPCRSELECTION: ProtoId = ProtoId(6330);
+    pub const TPMSCLOCKINFO: ProtoId = ProtoId(6333);
+    pub const TPM2BPUBLICKEYRSA: ProtoId = ProtoId(6338);
+    pub const LinkStatusEntry: ProtoId = ProtoId(6351);
+    pub const ZDPActiveEPReq: ProtoId = ProtoId(6359);
+    pub const ZCLGeneralReadAttributes: ProtoId = ProtoId(6368);
+    pub const ZCLGeneralDefaultResponse: ProtoId = ProtoId(6375);
+    pub const ZCLIASZoneZoneEnrollResponse: ProtoId = ProtoId(6376);
+    pub const ZCLIASZoneZoneStatusChangeNotification: ProtoId = ProtoId(6377);
+    pub const ZCLMeteringGetProfile: ProtoId = ProtoId(6379);
+    pub const ZCLPriceGetCurrentPrice: ProtoId = ProtoId(6380);
+    pub const ZCLPriceGetScheduledPrices: ProtoId = ProtoId(6381);
+    pub const NRTPEndHeader: ProtoId = ProtoId(6392);
+    pub const NRTPStatusCodeHeader: ProtoId = ProtoId(6394);
+    pub const NRTPCloseConnectionHeader: ProtoId = ProtoId(6397);
+    pub const ArrayInfo: ProtoId = ProtoId(6418);
+    pub const NRBFArraySingleObject: ProtoId = ProtoId(6419);
+    pub const NRBFMemberReference: ProtoId = ProtoId(6422);
+    pub const NRBFObjectNull: ProtoId = ProtoId(6423);
+    pub const NRBFMessageEnd: ProtoId = ProtoId(6427);
+    pub const NetflowRecordV1: ProtoId = ProtoId(6432);
+    pub const NetflowRecordV5: ProtoId = ProtoId(6434);
+    pub const NetflowRecordV9: ProtoId = ProtoId(6440);
+    pub const NetflowOptionsRecordScopeV9: ProtoId = ProtoId(6442);
+    pub const NetflowOptionsRecordOptionV9: ProtoId = ProtoId(6443);
+    pub const NetflowOptionsFlowsetScopeV9: ProtoId = ProtoId(6445);
+    pub const LoWPANUncompressedIPv6: ProtoId = ProtoId(6450);
+    pub const LoWPANHC2UDP: ProtoId = ProtoId(6452);
+    pub const LoWPANFragmentationFirst: ProtoId = ProtoId(6454);
+    pub const LoWPANBroadcast: ProtoId = ProtoId(6456);
+    pub const SixLoWPANESC: ProtoId = ProtoId(6462);
+    pub const Dot15d4CmdCoordRealignPage: ProtoId = ProtoId(6478);
+    pub const Dot15d4CmdAssocReq: ProtoId = ProtoId(6479);
+    pub const Dot15d4CmdAssocResp: ProtoId = ProtoId(6480);
+    pub const Dot15d4CmdDisassociation: ProtoId = ProtoId(6481);
+    pub const Dot15d4CmdGTSReq: ProtoId = ProtoId(6482);
+    pub const DceRpcSecVTBitmask: ProtoId = ProtoId(6497);
+    pub const DceRpcSecVTHeader2: ProtoId = ProtoId(6499);
+    pub const DceRpc5Version: ProtoId = ProtoId(6509);
+    pub const DceRpc5Auth3: ProtoId = ProtoId(6513);
+    pub const NDRSerialization1Header: ProtoId = ProtoId(6526);
+    pub const MSCHAP2Response: ProtoId = ProtoId(6595);
+    pub const MSCHAP2Success: ProtoId = ProtoId(6596);
+    pub const MSCHAPError: ProtoId = ProtoId(6597);
+    pub const MSCHAPDomain: ProtoId = ProtoId(6598);
+    pub const MobileIP: ProtoId = ProtoId(6600);
+    pub const MobileIPRRQ: ProtoId = ProtoId(6601);
+    pub const MobileIPRRP: ProtoId = ProtoId(6602);
+    pub const MobileIPTunnelData: ProtoId = ProtoId(6603);
+    pub const MKAPeerListTuple: ProtoId = ProtoId(6622);
+    pub const MKASAKUseParamSet: ProtoId = ProtoId(6625);
+    pub const MKADistributedCAKParamSet: ProtoId = ProtoId(6627);
+    pub const MKAICVSet: ProtoId = ProtoId(6628);
     // protogen:ids end
 
     pub fn name(self) -> &'static str {
@@ -562,6 +712,7 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::HDLC,
     ProtoId::DIRPPP,
     ProtoId::PPPECPOptionOUI,
+    ProtoId::PPPLCP,
     ProtoId::PPPLCPMRUOption,
     ProtoId::PPPLCPACCMOption,
     ProtoId::PPPLCPQualityProtocolOption,
@@ -797,6 +948,155 @@ const BUILTINS: &[ProtoId] = &[
     ProtoId::LLSUBRATEREQ,
     ProtoId::LLSUBRATEIND,
     ProtoId::LLCHANNELREPORTINGIND,
+    ProtoId::FileAlignmentInformation,
+    ProtoId::FileEaInformation,
+    ProtoId::FileInternalInformation,
+    ProtoId::FilePositionInformation,
+    ProtoId::FileStandardInformation,
+    ProtoId::WINNTSIDIDENTIFIERAUTHORITY,
+    ProtoId::FileFsSizeInformation,
+    ProtoId::SMB2FILEID,
+    ProtoId::SMB2CREATEDURABLEHANDLERESPONSE,
+    ProtoId::SMB2CREATEQUERYONDISKID,
+    ProtoId::SMB2CREATEDURABLEHANDLEREQUEST,
+    ProtoId::SMB2CREATEQUERYMAXIMALACCESSREQUEST,
+    ProtoId::SMB2CREATEALLOCATIONSIZE,
+    ProtoId::SMB2CREATETIMEWARPTOKEN,
+    ProtoId::SMB2CREATEAPPINSTANCEID,
+    ProtoId::SMB2CREATEAPPINSTANCEVERSION,
+    ProtoId::SMB2IOCTLOFFLOADREADRequest,
+    ProtoId::SMB2TransformHeader,
+    ProtoId::SMB2CompressionTransformHeader,
+    ProtoId::LLTDHello,
+    ProtoId::LLTDDiscover,
+    ProtoId::LLTDEmiteeDesc,
+    ProtoId::LLTDEmit,
+    ProtoId::LLTDRecveeDesc,
+    ProtoId::LLTDQueryLargeTlv,
+    ProtoId::LLTDAttributeEOP,
+    ProtoId::LLTDAttributeHostID,
+    ProtoId::LLTDAttributeCharacteristics,
+    ProtoId::LLTDAttributePhysicalMedium,
+    ProtoId::LLTDAttributeIPv4Address,
+    ProtoId::LLTDAttributeIPv6Address,
+    ProtoId::LLTDAttribute80211MaxRate,
+    ProtoId::LLTDAttributePerformanceCounterFrequency,
+    ProtoId::LLTDAttributeLinkSpeed,
+    ProtoId::LLTDAttributeLargeTLV,
+    ProtoId::LLTDAttributeQOSCharacteristics,
+    ProtoId::LLTDAttribute80211PhysicalMedium,
+    ProtoId::LLTDAttributeSeesList,
+    ProtoId::SCTPChunkParamIPv4Addr,
+    ProtoId::SCTPChunkParamIPv6Addr,
+    ProtoId::SCTPChunkParamCookiePreservative,
+    ProtoId::SCTPChunkParamSSNTSNResetReq,
+    ProtoId::SCTPChunkParamReConfigRes,
+    ProtoId::SCTPChunkParamAddOutgoingStreamReq,
+    ProtoId::SCTPChunkParamAddIncomingStreamReq,
+    ProtoId::SCTPChunkParamECNCapable,
+    ProtoId::SCTPChunkParamFwdTSN,
+    ProtoId::SCTPChunkParamSuccessIndication,
+    ProtoId::SCTPChunkParamAdaptationLayer,
+    ProtoId::SCTPForwardSkip,
+    ProtoId::SCTPIForwardSkip,
+    ProtoId::SCTPChunkShutdown,
+    ProtoId::SCTPChunkShutdownAck,
+    ProtoId::SCTPChunkCookieAck,
+    ProtoId::SCTPChunkShutdownComplete,
+    ProtoId::PPTP,
+    ProtoId::PPTPStartControlConnectionRequest,
+    ProtoId::PPTPStartControlConnectionReply,
+    ProtoId::PPTPStopControlConnectionRequest,
+    ProtoId::PPTPStopControlConnectionReply,
+    ProtoId::PPTPEchoRequest,
+    ProtoId::PPTPEchoReply,
+    ProtoId::PPTPOutgoingCallRequest,
+    ProtoId::PPTPOutgoingCallReply,
+    ProtoId::PPTPIncomingCallRequest,
+    ProtoId::PPTPIncomingCallReply,
+    ProtoId::PPTPIncomingCallConnected,
+    ProtoId::PPTPCallClearRequest,
+    ProtoId::PPTPCallDisconnectNotify,
+    ProtoId::PPTPWANErrorNotify,
+    ProtoId::PPTPSetLinkInfo,
+    ProtoId::Dot11QoS,
+    ProtoId::RSNCipherSuite,
+    ProtoId::AKMSuite,
+    ProtoId::Dot11EltCountryConstraintTriplet,
+    ProtoId::Dot11VHTOperationInfo,
+    ProtoId::Dot11Disas,
+    ProtoId::Dot11ReassoReq,
+    ProtoId::Dot11ReassoResp,
+    ProtoId::Dot11Deauth,
+    ProtoId::Dot11Action,
+    ProtoId::Dot11WNM,
+    ProtoId::SubelemTLV,
+    ProtoId::BSSTerminationDuration,
+    ProtoId::Dot11SpectrumManagement,
+    ProtoId::Dot11S1GBeacon,
+    ProtoId::Dot11Encrypted,
+    ProtoId::Dot11CCMP,
+    ProtoId::TPMSSCHEMESIGHASH,
+    ProtoId::TPMSNULLPARMS,
+    ProtoId::TPM2BPRIVATEKEYRSA,
+    ProtoId::TPM2BDIGESTX,
+    ProtoId::TPM2BNAME,
+    ProtoId::TPM2BDATA,
+    ProtoId::TPMALOCALITY,
+    ProtoId::TPMSPCRSELECTION,
+    ProtoId::TPMLPCRSELECTION,
+    ProtoId::TPMSCLOCKINFO,
+    ProtoId::TPM2BPUBLICKEYRSA,
+    ProtoId::LinkStatusEntry,
+    ProtoId::ZDPActiveEPReq,
+    ProtoId::ZCLGeneralReadAttributes,
+    ProtoId::ZCLGeneralDefaultResponse,
+    ProtoId::ZCLIASZoneZoneEnrollResponse,
+    ProtoId::ZCLIASZoneZoneStatusChangeNotification,
+    ProtoId::ZCLMeteringGetProfile,
+    ProtoId::ZCLPriceGetCurrentPrice,
+    ProtoId::ZCLPriceGetScheduledPrices,
+    ProtoId::NRTPEndHeader,
+    ProtoId::NRTPStatusCodeHeader,
+    ProtoId::NRTPCloseConnectionHeader,
+    ProtoId::ArrayInfo,
+    ProtoId::NRBFArraySingleObject,
+    ProtoId::NRBFMemberReference,
+    ProtoId::NRBFObjectNull,
+    ProtoId::NRBFMessageEnd,
+    ProtoId::NetflowRecordV1,
+    ProtoId::NetflowRecordV5,
+    ProtoId::NetflowRecordV9,
+    ProtoId::NetflowOptionsRecordScopeV9,
+    ProtoId::NetflowOptionsRecordOptionV9,
+    ProtoId::NetflowOptionsFlowsetScopeV9,
+    ProtoId::LoWPANUncompressedIPv6,
+    ProtoId::LoWPANHC2UDP,
+    ProtoId::LoWPANFragmentationFirst,
+    ProtoId::LoWPANBroadcast,
+    ProtoId::SixLoWPANESC,
+    ProtoId::Dot15d4CmdCoordRealignPage,
+    ProtoId::Dot15d4CmdAssocReq,
+    ProtoId::Dot15d4CmdAssocResp,
+    ProtoId::Dot15d4CmdDisassociation,
+    ProtoId::Dot15d4CmdGTSReq,
+    ProtoId::DceRpcSecVTBitmask,
+    ProtoId::DceRpcSecVTHeader2,
+    ProtoId::DceRpc5Version,
+    ProtoId::DceRpc5Auth3,
+    ProtoId::NDRSerialization1Header,
+    ProtoId::MSCHAP2Response,
+    ProtoId::MSCHAP2Success,
+    ProtoId::MSCHAPError,
+    ProtoId::MSCHAPDomain,
+    ProtoId::MobileIP,
+    ProtoId::MobileIPRRQ,
+    ProtoId::MobileIPRRP,
+    ProtoId::MobileIPTunnelData,
+    ProtoId::MKAPeerListTuple,
+    ProtoId::MKASAKUseParamSet,
+    ProtoId::MKADistributedCAKParamSet,
+    ProtoId::MKAICVSet,
     // protogen:builtins end
 ];
 
@@ -946,6 +1246,7 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::HDLC.0 as usize] = &ppp_hdlc::DESC;
     t[ProtoId::DIRPPP.0 as usize] = &ppp_dir_ppp::DESC;
     t[ProtoId::PPPECPOptionOUI.0 as usize] = &ppp_ppp_ecp_option_oui::DESC;
+    t[ProtoId::PPPLCP.0 as usize] = &ppp_ppp_lcp::DESC;
     t[ProtoId::PPPLCPMRUOption.0 as usize] = &ppp_ppp_lcp_mru_option::DESC;
     t[ProtoId::PPPLCPACCMOption.0 as usize] = &ppp_ppp_lcp_accm_option::DESC;
     t[ProtoId::PPPLCPQualityProtocolOption.0 as usize] = &ppp_ppp_lcp_quality_protocol_option::DESC;
@@ -1268,6 +1569,178 @@ static BUILTIN_DESCS: [&ProtoDesc; BUILTIN_COUNT as usize] = {
     t[ProtoId::LLSUBRATEREQ.0 as usize] = &bluetooth4le_ll_subrate_req::DESC;
     t[ProtoId::LLSUBRATEIND.0 as usize] = &bluetooth4le_ll_subrate_ind::DESC;
     t[ProtoId::LLCHANNELREPORTINGIND.0 as usize] = &bluetooth4le_ll_channel_reporting_ind::DESC;
+    t[ProtoId::FileAlignmentInformation.0 as usize] = &smb2_filealignmentinformation::DESC;
+    t[ProtoId::FileEaInformation.0 as usize] = &smb2_fileeainformation::DESC;
+    t[ProtoId::FileInternalInformation.0 as usize] = &smb2_fileinternalinformation::DESC;
+    t[ProtoId::FilePositionInformation.0 as usize] = &smb2_filepositioninformation::DESC;
+    t[ProtoId::FileStandardInformation.0 as usize] = &smb2_filestandardinformation::DESC;
+    t[ProtoId::WINNTSIDIDENTIFIERAUTHORITY.0 as usize] = &smb2_winnt_sid_identifier_authority::DESC;
+    t[ProtoId::FileFsSizeInformation.0 as usize] = &smb2_filefssizeinformation::DESC;
+    t[ProtoId::SMB2FILEID.0 as usize] = &smb2_smb2_fileid::DESC;
+    t[ProtoId::SMB2CREATEDURABLEHANDLERESPONSE.0 as usize] =
+        &smb2_smb2_create_durable_handle_response::DESC;
+    t[ProtoId::SMB2CREATEQUERYONDISKID.0 as usize] = &smb2_smb2_create_query_on_disk_id::DESC;
+    t[ProtoId::SMB2CREATEDURABLEHANDLEREQUEST.0 as usize] =
+        &smb2_smb2_create_durable_handle_request::DESC;
+    t[ProtoId::SMB2CREATEQUERYMAXIMALACCESSREQUEST.0 as usize] =
+        &smb2_smb2_create_query_maximal_access_request::DESC;
+    t[ProtoId::SMB2CREATEALLOCATIONSIZE.0 as usize] = &smb2_smb2_create_allocation_size::DESC;
+    t[ProtoId::SMB2CREATETIMEWARPTOKEN.0 as usize] = &smb2_smb2_create_timewarp_token::DESC;
+    t[ProtoId::SMB2CREATEAPPINSTANCEID.0 as usize] = &smb2_smb2_create_app_instance_id::DESC;
+    t[ProtoId::SMB2CREATEAPPINSTANCEVERSION.0 as usize] =
+        &smb2_smb2_create_app_instance_version::DESC;
+    t[ProtoId::SMB2IOCTLOFFLOADREADRequest.0 as usize] =
+        &smb2_smb2_ioctl_offload_read_request::DESC;
+    t[ProtoId::SMB2TransformHeader.0 as usize] = &smb2_smb2_transform_header::DESC;
+    t[ProtoId::SMB2CompressionTransformHeader.0 as usize] =
+        &smb2_smb2_compression_transform_header::DESC;
+    t[ProtoId::LLTDHello.0 as usize] = &lltd_lltdhello::DESC;
+    t[ProtoId::LLTDDiscover.0 as usize] = &lltd_lltddiscover::DESC;
+    t[ProtoId::LLTDEmiteeDesc.0 as usize] = &lltd_lltdemiteedesc::DESC;
+    t[ProtoId::LLTDEmit.0 as usize] = &lltd_lltdemit::DESC;
+    t[ProtoId::LLTDRecveeDesc.0 as usize] = &lltd_lltdrecveedesc::DESC;
+    t[ProtoId::LLTDQueryLargeTlv.0 as usize] = &lltd_lltdquerylargetlv::DESC;
+    t[ProtoId::LLTDAttributeEOP.0 as usize] = &lltd_lltdattributeeop::DESC;
+    t[ProtoId::LLTDAttributeHostID.0 as usize] = &lltd_lltdattributehostid::DESC;
+    t[ProtoId::LLTDAttributeCharacteristics.0 as usize] = &lltd_lltdattributecharacteristics::DESC;
+    t[ProtoId::LLTDAttributePhysicalMedium.0 as usize] = &lltd_lltdattributephysicalmedium::DESC;
+    t[ProtoId::LLTDAttributeIPv4Address.0 as usize] = &lltd_lltdattributeipv4address::DESC;
+    t[ProtoId::LLTDAttributeIPv6Address.0 as usize] = &lltd_lltdattributeipv6address::DESC;
+    t[ProtoId::LLTDAttribute80211MaxRate.0 as usize] = &lltd_lltdattribute80211maxrate::DESC;
+    t[ProtoId::LLTDAttributePerformanceCounterFrequency.0 as usize] =
+        &lltd_lltdattributeperformancecounterfrequency::DESC;
+    t[ProtoId::LLTDAttributeLinkSpeed.0 as usize] = &lltd_lltdattributelinkspeed::DESC;
+    t[ProtoId::LLTDAttributeLargeTLV.0 as usize] = &lltd_lltdattributelargetlv::DESC;
+    t[ProtoId::LLTDAttributeQOSCharacteristics.0 as usize] =
+        &lltd_lltdattributeqoscharacteristics::DESC;
+    t[ProtoId::LLTDAttribute80211PhysicalMedium.0 as usize] =
+        &lltd_lltdattribute80211physicalmedium::DESC;
+    t[ProtoId::LLTDAttributeSeesList.0 as usize] = &lltd_lltdattributeseeslist::DESC;
+    t[ProtoId::SCTPChunkParamIPv4Addr.0 as usize] = &sctp_sctpchunkparamipv4addr::DESC;
+    t[ProtoId::SCTPChunkParamIPv6Addr.0 as usize] = &sctp_sctpchunkparamipv6addr::DESC;
+    t[ProtoId::SCTPChunkParamCookiePreservative.0 as usize] =
+        &sctp_sctpchunkparamcookiepreservative::DESC;
+    t[ProtoId::SCTPChunkParamSSNTSNResetReq.0 as usize] = &sctp_sctpchunkparamssntsnresetreq::DESC;
+    t[ProtoId::SCTPChunkParamReConfigRes.0 as usize] = &sctp_sctpchunkparamreconfigres::DESC;
+    t[ProtoId::SCTPChunkParamAddOutgoingStreamReq.0 as usize] =
+        &sctp_sctpchunkparamaddoutgoingstreamreq::DESC;
+    t[ProtoId::SCTPChunkParamAddIncomingStreamReq.0 as usize] =
+        &sctp_sctpchunkparamaddincomingstreamreq::DESC;
+    t[ProtoId::SCTPChunkParamECNCapable.0 as usize] = &sctp_sctpchunkparamecncapable::DESC;
+    t[ProtoId::SCTPChunkParamFwdTSN.0 as usize] = &sctp_sctpchunkparamfwdtsn::DESC;
+    t[ProtoId::SCTPChunkParamSuccessIndication.0 as usize] =
+        &sctp_sctpchunkparamsuccessindication::DESC;
+    t[ProtoId::SCTPChunkParamAdaptationLayer.0 as usize] =
+        &sctp_sctpchunkparamadaptationlayer::DESC;
+    t[ProtoId::SCTPForwardSkip.0 as usize] = &sctp_sctpforwardskip::DESC;
+    t[ProtoId::SCTPIForwardSkip.0 as usize] = &sctp_sctpiforwardskip::DESC;
+    t[ProtoId::SCTPChunkShutdown.0 as usize] = &sctp_sctpchunkshutdown::DESC;
+    t[ProtoId::SCTPChunkShutdownAck.0 as usize] = &sctp_sctpchunkshutdownack::DESC;
+    t[ProtoId::SCTPChunkCookieAck.0 as usize] = &sctp_sctpchunkcookieack::DESC;
+    t[ProtoId::SCTPChunkShutdownComplete.0 as usize] = &sctp_sctpchunkshutdowncomplete::DESC;
+    t[ProtoId::PPTP.0 as usize] = &pptp_pptp::DESC;
+    t[ProtoId::PPTPStartControlConnectionRequest.0 as usize] =
+        &pptp_pptpstartcontrolconnectionrequest::DESC;
+    t[ProtoId::PPTPStartControlConnectionReply.0 as usize] =
+        &pptp_pptpstartcontrolconnectionreply::DESC;
+    t[ProtoId::PPTPStopControlConnectionRequest.0 as usize] =
+        &pptp_pptpstopcontrolconnectionrequest::DESC;
+    t[ProtoId::PPTPStopControlConnectionReply.0 as usize] =
+        &pptp_pptpstopcontrolconnectionreply::DESC;
+    t[ProtoId::PPTPEchoRequest.0 as usize] = &pptp_pptpechorequest::DESC;
+    t[ProtoId::PPTPEchoReply.0 as usize] = &pptp_pptpechoreply::DESC;
+    t[ProtoId::PPTPOutgoingCallRequest.0 as usize] = &pptp_pptpoutgoingcallrequest::DESC;
+    t[ProtoId::PPTPOutgoingCallReply.0 as usize] = &pptp_pptpoutgoingcallreply::DESC;
+    t[ProtoId::PPTPIncomingCallRequest.0 as usize] = &pptp_pptpincomingcallrequest::DESC;
+    t[ProtoId::PPTPIncomingCallReply.0 as usize] = &pptp_pptpincomingcallreply::DESC;
+    t[ProtoId::PPTPIncomingCallConnected.0 as usize] = &pptp_pptpincomingcallconnected::DESC;
+    t[ProtoId::PPTPCallClearRequest.0 as usize] = &pptp_pptpcallclearrequest::DESC;
+    t[ProtoId::PPTPCallDisconnectNotify.0 as usize] = &pptp_pptpcalldisconnectnotify::DESC;
+    t[ProtoId::PPTPWANErrorNotify.0 as usize] = &pptp_pptpwanerrornotify::DESC;
+    t[ProtoId::PPTPSetLinkInfo.0 as usize] = &pptp_pptpsetlinkinfo::DESC;
+    t[ProtoId::Dot11QoS.0 as usize] = &dot11_dot11qos::DESC;
+    t[ProtoId::RSNCipherSuite.0 as usize] = &dot11_rsnciphersuite::DESC;
+    t[ProtoId::AKMSuite.0 as usize] = &dot11_akmsuite::DESC;
+    t[ProtoId::Dot11EltCountryConstraintTriplet.0 as usize] =
+        &dot11_dot11eltcountryconstrainttriplet::DESC;
+    t[ProtoId::Dot11VHTOperationInfo.0 as usize] = &dot11_dot11vhtoperationinfo::DESC;
+    t[ProtoId::Dot11Disas.0 as usize] = &dot11_dot11disas::DESC;
+    t[ProtoId::Dot11ReassoReq.0 as usize] = &dot11_dot11reassoreq::DESC;
+    t[ProtoId::Dot11ReassoResp.0 as usize] = &dot11_dot11reassoresp::DESC;
+    t[ProtoId::Dot11Deauth.0 as usize] = &dot11_dot11deauth::DESC;
+    t[ProtoId::Dot11Action.0 as usize] = &dot11_dot11action::DESC;
+    t[ProtoId::Dot11WNM.0 as usize] = &dot11_dot11wnm::DESC;
+    t[ProtoId::SubelemTLV.0 as usize] = &dot11_subelemtlv::DESC;
+    t[ProtoId::BSSTerminationDuration.0 as usize] = &dot11_bssterminationduration::DESC;
+    t[ProtoId::Dot11SpectrumManagement.0 as usize] = &dot11_dot11spectrummanagement::DESC;
+    t[ProtoId::Dot11S1GBeacon.0 as usize] = &dot11_dot11s1gbeacon::DESC;
+    t[ProtoId::Dot11Encrypted.0 as usize] = &dot11_dot11encrypted::DESC;
+    t[ProtoId::Dot11CCMP.0 as usize] = &dot11_dot11ccmp::DESC;
+    t[ProtoId::TPMSSCHEMESIGHASH.0 as usize] = &tpm_tpms_scheme_sighash::DESC;
+    t[ProtoId::TPMSNULLPARMS.0 as usize] = &tpm_tpms_null_parms::DESC;
+    t[ProtoId::TPM2BPRIVATEKEYRSA.0 as usize] = &tpm_tpm2b_private_key_rsa::DESC;
+    t[ProtoId::TPM2BDIGESTX.0 as usize] = &tpm_tpm2b_digest::DESC;
+    t[ProtoId::TPM2BNAME.0 as usize] = &tpm_tpm2b_name::DESC;
+    t[ProtoId::TPM2BDATA.0 as usize] = &tpm_tpm2b_data::DESC;
+    t[ProtoId::TPMALOCALITY.0 as usize] = &tpm_tpma_locality::DESC;
+    t[ProtoId::TPMSPCRSELECTION.0 as usize] = &tpm_tpms_pcr_selection::DESC;
+    t[ProtoId::TPMLPCRSELECTION.0 as usize] = &tpm_tpml_pcr_selection::DESC;
+    t[ProtoId::TPMSCLOCKINFO.0 as usize] = &tpm_tpms_clock_info::DESC;
+    t[ProtoId::TPM2BPUBLICKEYRSA.0 as usize] = &tpm_tpm2b_public_key_rsa::DESC;
+    t[ProtoId::LinkStatusEntry.0 as usize] = &zigbee_linkstatusentry::DESC;
+    t[ProtoId::ZDPActiveEPReq.0 as usize] = &zigbee_zdpactiveepreq::DESC;
+    t[ProtoId::ZCLGeneralReadAttributes.0 as usize] = &zigbee_zclgeneralreadattributes::DESC;
+    t[ProtoId::ZCLGeneralDefaultResponse.0 as usize] = &zigbee_zclgeneraldefaultresponse::DESC;
+    t[ProtoId::ZCLIASZoneZoneEnrollResponse.0 as usize] =
+        &zigbee_zcliaszonezoneenrollresponse::DESC;
+    t[ProtoId::ZCLIASZoneZoneStatusChangeNotification.0 as usize] =
+        &zigbee_zcliaszonezonestatuschangenotification::DESC;
+    t[ProtoId::ZCLMeteringGetProfile.0 as usize] = &zigbee_zclmeteringgetprofile::DESC;
+    t[ProtoId::ZCLPriceGetCurrentPrice.0 as usize] = &zigbee_zclpricegetcurrentprice::DESC;
+    t[ProtoId::ZCLPriceGetScheduledPrices.0 as usize] = &zigbee_zclpricegetscheduledprices::DESC;
+    t[ProtoId::NRTPEndHeader.0 as usize] = &ms_nrtp_nrtpendheader::DESC;
+    t[ProtoId::NRTPStatusCodeHeader.0 as usize] = &ms_nrtp_nrtpstatuscodeheader::DESC;
+    t[ProtoId::NRTPCloseConnectionHeader.0 as usize] = &ms_nrtp_nrtpcloseconnectionheader::DESC;
+    t[ProtoId::ArrayInfo.0 as usize] = &ms_nrtp_arrayinfo::DESC;
+    t[ProtoId::NRBFArraySingleObject.0 as usize] = &ms_nrtp_nrbfarraysingleobject::DESC;
+    t[ProtoId::NRBFMemberReference.0 as usize] = &ms_nrtp_nrbfmemberreference::DESC;
+    t[ProtoId::NRBFObjectNull.0 as usize] = &ms_nrtp_nrbfobjectnull::DESC;
+    t[ProtoId::NRBFMessageEnd.0 as usize] = &ms_nrtp_nrbfmessageend::DESC;
+    t[ProtoId::NetflowRecordV1.0 as usize] = &netflow_netflowrecordv1::DESC;
+    t[ProtoId::NetflowRecordV5.0 as usize] = &netflow_netflowrecordv5::DESC;
+    t[ProtoId::NetflowRecordV9.0 as usize] = &netflow_netflowrecordv9::DESC;
+    t[ProtoId::NetflowOptionsRecordScopeV9.0 as usize] = &netflow_netflowoptionsrecordscopev9::DESC;
+    t[ProtoId::NetflowOptionsRecordOptionV9.0 as usize] =
+        &netflow_netflowoptionsrecordoptionv9::DESC;
+    t[ProtoId::NetflowOptionsFlowsetScopeV9.0 as usize] =
+        &netflow_netflowoptionsflowsetscopev9::DESC;
+    t[ProtoId::LoWPANUncompressedIPv6.0 as usize] = &sixlowpan_lowpanuncompressedipv6::DESC;
+    t[ProtoId::LoWPANHC2UDP.0 as usize] = &sixlowpan_lowpan_hc2_udp::DESC;
+    t[ProtoId::LoWPANFragmentationFirst.0 as usize] = &sixlowpan_lowpanfragmentationfirst::DESC;
+    t[ProtoId::LoWPANBroadcast.0 as usize] = &sixlowpan_lowpanbroadcast::DESC;
+    t[ProtoId::SixLoWPANESC.0 as usize] = &sixlowpan_sixlowpan_esc::DESC;
+    t[ProtoId::Dot15d4CmdCoordRealignPage.0 as usize] = &dot15d4_dot15d4cmdcoordrealignpage::DESC;
+    t[ProtoId::Dot15d4CmdAssocReq.0 as usize] = &dot15d4_dot15d4cmdassocreq::DESC;
+    t[ProtoId::Dot15d4CmdAssocResp.0 as usize] = &dot15d4_dot15d4cmdassocresp::DESC;
+    t[ProtoId::Dot15d4CmdDisassociation.0 as usize] = &dot15d4_dot15d4cmddisassociation::DESC;
+    t[ProtoId::Dot15d4CmdGTSReq.0 as usize] = &dot15d4_dot15d4cmdgtsreq::DESC;
+    t[ProtoId::DceRpcSecVTBitmask.0 as usize] = &dcerpc_dcerpcsecvtbitmask::DESC;
+    t[ProtoId::DceRpcSecVTHeader2.0 as usize] = &dcerpc_dcerpcsecvtheader2::DESC;
+    t[ProtoId::DceRpc5Version.0 as usize] = &dcerpc_dcerpc5version::DESC;
+    t[ProtoId::DceRpc5Auth3.0 as usize] = &dcerpc_dcerpc5auth3::DESC;
+    t[ProtoId::NDRSerialization1Header.0 as usize] = &dcerpc_ndrserialization1header::DESC;
+    t[ProtoId::MSCHAP2Response.0 as usize] = &radius_ms_chap2_response::DESC;
+    t[ProtoId::MSCHAP2Success.0 as usize] = &radius_ms_chap2_success::DESC;
+    t[ProtoId::MSCHAPError.0 as usize] = &radius_ms_chap_error::DESC;
+    t[ProtoId::MSCHAPDomain.0 as usize] = &radius_ms_chap_domain::DESC;
+    t[ProtoId::MobileIP.0 as usize] = &mobileip_mobileip::DESC;
+    t[ProtoId::MobileIPRRQ.0 as usize] = &mobileip_mobileiprrq::DESC;
+    t[ProtoId::MobileIPRRP.0 as usize] = &mobileip_mobileiprrp::DESC;
+    t[ProtoId::MobileIPTunnelData.0 as usize] = &mobileip_mobileiptunneldata::DESC;
+    t[ProtoId::MKAPeerListTuple.0 as usize] = &eap_mkapeerlisttuple::DESC;
+    t[ProtoId::MKASAKUseParamSet.0 as usize] = &eap_mkasakuseparamset::DESC;
+    t[ProtoId::MKADistributedCAKParamSet.0 as usize] = &eap_mkadistributedcakparamset::DESC;
+    t[ProtoId::MKAICVSet.0 as usize] = &eap_mkaicvset::DESC;
     // protogen:desc end
     t
 };
@@ -1426,6 +1899,13 @@ pub fn group_of(id: ProtoId) -> Option<&'static crate::repeat::GroupDesc> {
         ProtoId::HCICmdLESetExtendedAdvertiseEnable => {
             Some(&crate::layers::bluetooth_hci_cmd_le_set_extended_advertise_enable::GROUP)
         }
+        ProtoId::LLTDDiscover => Some(&crate::layers::lltd_lltddiscover::GROUP),
+        ProtoId::LLTDEmit => Some(&crate::layers::lltd_lltdemit::GROUP),
+        ProtoId::SubelemTLV => Some(&crate::layers::dot11_subelemtlv::GROUP),
+        ProtoId::TPMLPCRSELECTION => Some(&crate::layers::tpm_tpml_pcr_selection::GROUP),
+        ProtoId::ZCLGeneralReadAttributes => {
+            Some(&crate::layers::zigbee_zclgeneralreadattributes::GROUP)
+        }
         // protogen:groups end
         _ => None,
     }
@@ -1515,6 +1995,11 @@ pub fn parsed_field_name(id: ProtoId) -> &'static str {
         ProtoId::ATTReadMultipleRequest => "handles",
         ProtoId::ATTReadMultipleVariableRequest => "handles",
         ProtoId::HCICmdLESetExtendedAdvertiseEnable => "sets",
+        ProtoId::LLTDDiscover => "stations_list",
+        ProtoId::LLTDEmit => "descs_list",
+        ProtoId::SubelemTLV => "value",
+        ProtoId::TPMLPCRSELECTION => "pcrSelections",
+        ProtoId::ZCLGeneralReadAttributes => "attribute_identifiers",
         // protogen:parsed end
         _ => "options",
     }

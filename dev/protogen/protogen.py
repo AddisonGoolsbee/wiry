@@ -160,6 +160,13 @@ def validate_le(f: str, fields: list[dict], where: str = "") -> list[tuple[int, 
     group, two groups that overlap without being the same, and a big-endian
     field inside a group, which would read the octets in the other order."""
     groups: dict[tuple[int, int], str] = {}
+    every: set[tuple[int, int]] = set()
+
+    def alternative(fd):
+        # Fields that share octets by condition are checked against their own
+        # group only; which of them is present is the layout's business.
+        return fd.get("when") or fd.get("cond") or fd.get("overlaps")
+
     for fd in fields:
         le = fd.get("le")
         kind = fd.get("kind", "uint")
@@ -167,7 +174,9 @@ def validate_le(f: str, fields: list[dict], where: str = "") -> list[tuple[int, 
         if kind == "le_uint":
             if le is not None:
                 raise SpecError(f"{f}: {name!r} is le_uint, which is already one group")
-            groups.setdefault((fd["off"], fd["off"] + fd["len"]), name)
+            every.add((fd["off"], fd["off"] + fd["len"]))
+            if not alternative(fd):
+                groups.setdefault((fd["off"], fd["off"] + fd["len"]), name)
             continue
         if le is None:
             continue
@@ -187,7 +196,9 @@ def validate_le(f: str, fields: list[dict], where: str = "") -> list[tuple[int, 
         lo, hi = at * 8, (at + n) * 8
         if not (lo <= fd["off"] and fd["off"] + fd["len"] <= hi):
             raise SpecError(f"{f}: {name!r} lies outside its group, octets {at}..{at + n}")
-        groups.setdefault((lo, hi), name)
+        every.add((lo, hi))
+        if not alternative(fd):
+            groups.setdefault((lo, hi), name)
     spans = sorted(groups)
     for (a0, a1), (b0, b1) in zip(spans, spans[1:]):
         if b0 < a1:
@@ -198,7 +209,7 @@ def validate_le(f: str, fields: list[dict], where: str = "") -> list[tuple[int, 
     for fd in fields:
         if fd.get("le") is not None or fd.get("kind", "uint") == "le_uint":
             continue
-        if fd.get("kind", "uint").startswith("var_"):
+        if fd.get("kind", "uint").startswith("var_") or alternative(fd):
             continue
         lo, hi = fd["off"], fd["off"] + fd["len"]
         for g0, g1 in spans:
@@ -207,7 +218,7 @@ def validate_le(f: str, fields: list[dict], where: str = "") -> list[tuple[int, 
                     f"{f}: {fd['name']!r} is big-endian inside the little-endian "
                     f"group of {groups[(g0, g1)]!r}"
                 )
-    return spans
+    return sorted(every)
 
 
 def refuse_le_overlap(f: str, spans: list[tuple[int, int]], off: int, ln: int, what: str):

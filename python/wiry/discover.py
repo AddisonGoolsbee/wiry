@@ -241,7 +241,7 @@ def ls(obj: Any = None, case_sensitive: bool = False,
         return
 
     if isinstance(obj, Packet):
-        for i, n in enumerate(obj.layers()):
+        for i, n in enumerate(obj._names()):
             _print_layer(obj, i, n, verbose)
         return
 

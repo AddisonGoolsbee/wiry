@@ -706,11 +706,13 @@ impl PyPkt {
         render::summary_of(self.inner.raw_bytes(), self.inner.layers(), start)
     }
 
-    /// `given` and `start` as for `show`.
-    #[pyo3(signature = (given = None, start = 0))]
-    fn repr(&self, given: Option<Vec<Vec<String>>>, start: usize) -> String {
+    /// `given` and `start` as for `show`; `end` stops before that layer, for
+    /// a caller drawing the rest itself.
+    #[pyo3(signature = (given = None, start = 0, end = None))]
+    fn repr(&self, given: Option<Vec<Vec<String>>>, start: usize, end: Option<usize>) -> String {
         let g = given.as_deref().map(render::Given);
-        render::repr_of(self.inner.raw_bytes(), self.inner.layers(), g, start)
+        let end = end.unwrap_or(usize::MAX);
+        render::repr_range(self.inner.raw_bytes(), self.inner.layers(), g, start, end)
     }
 
     /// The serialised octets from layer `start` on, lengths and checksums

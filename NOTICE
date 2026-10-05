@@ -108,8 +108,10 @@ per-file blocks are authoritative.
 | `python/wiry/asn1fields.py` | `scapy/asn1fields.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/asn1packet.py` | `scapy/asn1packet.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/snmp.py` | `scapy/layers/snmp.py` | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/layers/dns.py` | `scapy/layers/dns.py` | master / `e2e35c0` | 2026-10-04 |
 | `python/wiry/layers/x509.py` | `scapy/layers/x509.py` | master / `e2e35c0` | 2026-10-03 |
 | `python/wiry/layers/ldap.py` | `scapy/layers/ldap.py` | master / `e2e35c0` | 2026-10-03 |
+| `python/wiry/layers/dhcp6.py` | `scapy/layers/dhcp6.py`, `scapy/layers/inet6.py` (`IP6ListField`, `DomainNameListField`), `scapy/layers/dns.py` (`DNSStrField`, `dns_encode`, `dns_get_str`) | scapy 2.7.0; `IP6ListField` master / `e2e35c0` | 2026-10-04 |
 | `python/wiry/_pyvolatile.py` | `scapy/volatile.py` | master / `e2e35c0` | 2026-10-04 |
 | `python/wiry/_pyfields.py` | `scapy/fields.py`, `scapy/utils.py` (`EDecimal`, `lhex`, `mac2str`, `str2mac`, `strxor`), `scapy/base_classes.py` (`ScopedIP`, `Field_metaclass`), `scapy/utils6.py` (6to4 and Teredo helpers) | master / `e2e35c0` | 2026-10-03 |
 | `crates/wiry-core/src/names.rs` | `scapy/data.py`, `scapy/dadict.py`, `scapy/libs/ethertypes.py`, `scapy/layers/l2.py` | scapy 2.7.0 | 2026-10-03 |
@@ -150,7 +152,7 @@ per-file blocks are authoritative.
 | `python/wiry/compat.py` | `scapy/compat.py`, `scapy/pton_ntop.py` | scapy 2.7.0 | 2026-10-03 |
 | `python/wiry/error.py` | `scapy/error.py` | scapy 2.7.0 | 2026-10-03 |
 | `python/wiry/consts.py` | `scapy/consts.py` | scapy 2.7.0 | 2026-10-03 |
-| `python/wiry/config.py` | `scapy/config.py` (the module-level helpers) | scapy 2.7.0 | 2026-10-03 |
+| `python/wiry/config.py` | `scapy/config.py` (the module-level helpers, `CacheInstance`, `NetCache`) | scapy 2.7.0 | 2026-10-03 |
 | `python/wiry/arch.py` | `scapy/arch/__init__.py`, `scapy/arch/common.py`, `scapy/arch/linux/__init__.py` | scapy 2.7.0 | 2026-10-03 |
 | `python/wiry/plist.py` | `scapy/plist.py`, `scapy/layers/inet.py` (`timeskew_graph`) | scapy 2.7.0 | 2026-10-03 |
 | `python/wiry/pcapio.py` | `scapy/utils.py` (pcap, pcapng and ERF readers and writers) | scapy 2.7.0 | 2026-10-03 |
@@ -158,6 +160,7 @@ per-file blocks are authoritative.
 | `python/wiry/sendrecv.py` | `scapy/sendrecv.py` | 2.7.0 / `7d69454` | 2026-10-03 |
 | `python/wiry/capture.py` | `scapy/sendrecv.py` (the socket loop of `AsyncSniffer._run`) | 2.7.0 / `7d69454` | 2026-10-03 |
 | `python/wiry/answering.py` | `scapy/layers/l2.py`, `inet.py`, `dhcp.py`, `dns.py`, `llmnr.py`, `netbios.py` (the answering machines) | 2.7.0 / `7d69454` | 2026-10-03 |
+| `crates/wiry-core/src/layers/variants.rs` | `scapy/layers/pptp.py`, `scapy/layers/ppp.py`, `scapy/layers/dot11.py` (the `dispatch_hook`s) | scapy 2.7.0 | 2026-10-04 |
 
 A generated layer's block comes from the `[provenance]` table in its
 `dev/protogen/specs/*.toml`, so the spec and the file it writes cannot drift

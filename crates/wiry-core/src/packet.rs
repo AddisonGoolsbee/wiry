@@ -122,11 +122,14 @@ impl Packet {
                 let prev = spans[i - 1];
                 let a = prev.off as usize;
                 let b = (a + prev.hlen as usize).min(buf.len());
-                if let Some(bind) = desc(prev.proto).bind_next {
-                    bind(&mut buf[a..b], p);
+                let base = crate::layers::variants::base_of(p);
+                for q in base.into_iter().chain([p]) {
+                    if let Some(bind) = desc(prev.proto).bind_next {
+                        bind(&mut buf[a..b], q);
+                    }
+                    crate::layers::dispatch::bind_layer(&mut buf[a..b], prev.proto, q);
+                    crate::proto::apply_bind(&mut buf[a..b], prev.proto, q);
                 }
-                crate::layers::dispatch::bind_layer(&mut buf[a..b], prev.proto, p);
-                crate::proto::apply_bind(&mut buf[a..b], prev.proto, p);
             }
             if let Some(setter) = d.set_hlen {
                 setter(&mut buf[off..hdr_end], hlen);
@@ -567,6 +570,11 @@ fn spans_of(buf: &[u8], link: ProtoId, bound: bool) -> Spans {
     let mut parent: Option<ProtoId> = None;
 
     for _ in 0..MAX_LAYERS {
+        // Only a fresh dissection: a layer the user built keeps its class when
+        // a later write respans the buffer, as a scapy object does.
+        if bound {
+            proto = crate::layers::variants::resolve(proto, &buf[off.min(end)..end]);
+        }
         let d = desc(proto);
         let remaining = end.saturating_sub(off);
         // Framing lengthens the header and the shortest readable input alike.

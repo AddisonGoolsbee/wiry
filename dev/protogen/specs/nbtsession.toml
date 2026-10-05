@@ -5,7 +5,8 @@ citation = """
 RFC 1002 §4.3.1: the NetBIOS session service prefixes each message over TCP
 port 139 with a one-octet type, a one-octet flags field whose low bit extends
 the length, and a 16-bit length. Type 0 is a session message, which over port
-139 carries SMB.
+139 carries SMB. [MS-SMB2] §2.1 reuses the same four octets as the Direct TCP
+framing on port 445, which is how scapy binds it.
 """
 min_len = 4
 header_len = 4
@@ -36,7 +37,8 @@ len = 16
 
 [[parents]]
 from = "tcp_port"
-values = [139]
+values = [139, 445]
+bind = 139
 guard = "crate::layers::nbtsession::looks_like"
 
 [vector]

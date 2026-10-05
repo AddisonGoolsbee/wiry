@@ -68,8 +68,8 @@ pub fn by_ipproto_of(p: ProtoId) -> Option<u8> {
 }
 
 const UDP_PORT_VALUES: &[u16] = &[
-    69, 80, 123, 137, 161, 162, 443, 514, 520, 546, 547, 1645, 1646, 1812, 1813, 1985, 2055, 3784,
-    3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
+    69, 80, 123, 137, 161, 162, 434, 443, 514, 520, 546, 547, 1645, 1646, 1812, 1813, 1985, 2055,
+    3784, 3785, 4739, 4784, 5060, 5061, 6343, 9995, 9996, 51820,
 ];
 
 static UDP_PORT_CLAIMED: [u64; 810] = port_bits(UDP_PORT_VALUES);
@@ -84,6 +84,7 @@ fn by_udp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
         123 => Some(ProtoId::Ntp),
         137 => Some(ProtoId::Nbns),
         161 | 162 => Some(ProtoId::Snmp),
+        434 => Some(ProtoId::MobileIP),
         514 => Some(ProtoId::Syslog),
         520 => Some(ProtoId::Rip),
         546 | 547 => Some(ProtoId::Dhcp6),
@@ -133,6 +134,7 @@ pub fn by_udp_port_of(p: ProtoId) -> Option<u16> {
         ProtoId::Quic => Some(443),
         ProtoId::Radius => Some(1812),
         ProtoId::Rip => Some(520),
+        ProtoId::MobileIP => Some(434),
         ProtoId::SFlow => Some(6343),
         ProtoId::Sip => Some(5060),
         ProtoId::Snmp => Some(161),
@@ -145,7 +147,7 @@ pub fn by_udp_port_of(p: ProtoId) -> Option<u16> {
 
 const TCP_PORT_VALUES: &[u16] = &[
     21, 22, 23, 25, 80, 139, 143, 179, 389, 443, 445, 465, 502, 563, 587, 636, 989, 990, 992, 993,
-    995, 1883, 3128, 3268, 5060, 5061, 8000, 8008, 8080, 8443, 8883, 8888,
+    995, 1723, 1883, 3128, 3268, 5060, 5061, 8000, 8008, 8080, 8443, 8883, 8888,
 ];
 
 static TCP_PORT_CLAIMED: [u64; 139] = port_bits(TCP_PORT_VALUES);
@@ -162,15 +164,15 @@ fn by_tcp_port_one(v: u16, payload: &[u8]) -> Option<ProtoId> {
         80 | 3128 | 8000 | 8008 | 8080 | 8888 => {
             crate::layers::http::looks_like(payload).then_some(ProtoId::Http)
         }
-        139 => crate::layers::nbtsession::looks_like(payload).then_some(ProtoId::NbtSession),
+        139 | 445 => crate::layers::nbtsession::looks_like(payload).then_some(ProtoId::NbtSession),
         143 => crate::layers::imap::looks_like(payload).then_some(ProtoId::Imap),
         179 => crate::layers::bgp::looks_like(payload).then_some(ProtoId::Bgp),
         389 | 3268 => crate::layers::ldap::looks_like(payload).then_some(ProtoId::Ldap),
         443 | 465 | 563 | 636 | 989 | 990 | 992 | 993 | 995 | 5061 | 8443 => {
             crate::layers::tls::looks_like(payload).then_some(ProtoId::Tls)
         }
-        445 => crate::layers::smb2::looks_like(payload).then_some(ProtoId::Smb2),
         502 => crate::layers::modbus::looks_like(payload).then_some(ProtoId::Modbus),
+        1723 => Some(ProtoId::PPTP),
         1883 | 8883 => crate::layers::mqtt::looks_like(payload).then_some(ProtoId::Mqtt),
         5060 => crate::layers::sip::looks_like(payload).then_some(ProtoId::Sip),
         _ => None,
@@ -197,8 +199,8 @@ pub fn by_tcp_port_of(p: ProtoId) -> Option<u16> {
         ProtoId::Modbus => Some(502),
         ProtoId::Mqtt => Some(1883),
         ProtoId::NbtSession => Some(139),
+        ProtoId::PPTP => Some(1723),
         ProtoId::Sip => Some(5060),
-        ProtoId::Smb2 => Some(445),
         ProtoId::Smtp => Some(25),
         ProtoId::Ssh => Some(22),
         ProtoId::Telnet => Some(23),
@@ -263,6 +265,7 @@ pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
         ProtoId::ATTHdr => by_a_t_t_hdr(hdr),
         ProtoId::BTLECTRL => by_b_t_l_e_c_t_r_l(hdr),
         ProtoId::BTLEDATA => by_b_t_l_e_d_a_t_a(hdr),
+        ProtoId::Dot11Action => by_dot11_action(hdr),
         ProtoId::HCIACLHdr => by_h_c_i_a_c_l_hdr(hdr),
         ProtoId::HCICommandHdr => by_h_c_i_command_hdr(hdr),
         ProtoId::HCIEventCommandComplete => by_h_c_i_event_command_complete(hdr),
@@ -274,6 +277,11 @@ pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
         ProtoId::HCIPHDRHdr => by_h_c_i_p_h_d_r_hdr(hdr),
         ProtoId::L2CAPCmdHdr => by_l2_c_a_p_cmd_hdr(hdr),
         ProtoId::L2CAPHdr => by_l2_c_a_p_hdr(hdr),
+        ProtoId::MobileIP => by_mobile_i_p(hdr),
+        ProtoId::NetflowRecordV1 => by_netflow_record_v1(hdr),
+        ProtoId::NetflowRecordV5 => by_netflow_record_v5(hdr),
+        ProtoId::NetflowV5 => by_netflow_v5(hdr),
+        ProtoId::Ppp => by_ppp(hdr),
         ProtoId::PppoeDisc => by_pppoe_disc(hdr),
         ProtoId::SMHdr => by_s_m_hdr(hdr),
         _ => None,
@@ -369,6 +377,18 @@ fn by_b_t_l_e_d_a_t_a(hdr: &[u8]) -> Option<ProtoId> {
     }
     if hdr.len() * 8 >= 16 && crate::field::read_in(hdr, 6, 10, 0, 0) == 256 {
         return Some(ProtoId::BTLEEMPTYPDU);
+    }
+    None
+}
+
+#[inline(never)]
+fn by_dot11_action(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
+            0 => return Some(ProtoId::Dot11SpectrumManagement),
+            10 => return Some(ProtoId::Dot11WNM),
+            _ => {}
+        }
     }
     None
 }
@@ -606,6 +626,42 @@ fn by_l2_c_a_p_hdr(hdr: &[u8]) -> Option<ProtoId> {
 }
 
 #[inline(never)]
+fn by_mobile_i_p(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
+            1 => return Some(ProtoId::MobileIPRRQ),
+            3 => return Some(ProtoId::MobileIPRRP),
+            4 => return Some(ProtoId::MobileIPTunnelData),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_netflow_record_v1(_hdr: &[u8]) -> Option<ProtoId> {
+    Some(ProtoId::NetflowRecordV1)
+}
+
+#[inline(never)]
+fn by_netflow_record_v5(_hdr: &[u8]) -> Option<ProtoId> {
+    Some(ProtoId::NetflowRecordV5)
+}
+
+#[inline(never)]
+fn by_netflow_v5(_hdr: &[u8]) -> Option<ProtoId> {
+    Some(ProtoId::NetflowRecordV5)
+}
+
+#[inline(never)]
+fn by_ppp(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 16 && crate::field::read_in(hdr, 0, 16, 0, 0) == 49185 {
+        return Some(ProtoId::PPPLCP);
+    }
+    None
+}
+
+#[inline(never)]
 fn by_pppoe_disc(hdr: &[u8]) -> Option<ProtoId> {
     if hdr.len() * 8 >= 8 && crate::field::read_in(hdr, 4, 4, 0, 0) == 1 {
         return Some(ProtoId::PPPoEDTags);
@@ -830,6 +886,12 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     }
     if parent == ProtoId::BTLEDATA && child == ProtoId::BTLEEMPTYPDU {
         crate::field::write_in(hdr, 6, 10, 0, 0, 256);
+    }
+    if parent == ProtoId::Dot11Action && child == ProtoId::Dot11SpectrumManagement {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 0);
+    }
+    if parent == ProtoId::Dot11Action && child == ProtoId::Dot11WNM {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 10);
     }
     if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdAcceptConnectionRequest {
         crate::field::write_in(hdr, 0, 16, 0, 2, 1033);
@@ -1246,6 +1308,18 @@ pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if parent == ProtoId::L2CAPHdr && child == ProtoId::SMHdr {
         crate::field::write_in(hdr, 16, 16, 2, 2, 6);
     }
+    if parent == ProtoId::MobileIP && child == ProtoId::MobileIPRRP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 3);
+    }
+    if parent == ProtoId::MobileIP && child == ProtoId::MobileIPRRQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 1);
+    }
+    if parent == ProtoId::MobileIP && child == ProtoId::MobileIPTunnelData {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
+    }
+    if parent == ProtoId::Ppp && child == ProtoId::PPPLCP {
+        crate::field::write_in(hdr, 0, 16, 0, 0, 49185);
+    }
     if parent == ProtoId::PppoeDisc && child == ProtoId::PPPoEDTags {
         crate::field::write_in(hdr, 4, 4, 0, 0, 1);
     }
@@ -1349,6 +1423,10 @@ mod tests {
             Some((6, 10, 0, 0))
         );
         assert_eq!(
+            span_of(ProtoId::Dot11Action, &["category"]),
+            Some((0, 8, 0, 0))
+        );
+        assert_eq!(
             span_of(ProtoId::HCICommandHdr, &["ogf", "ocf"]),
             Some((0, 16, 0, 2))
         );
@@ -1372,6 +1450,8 @@ mod tests {
         );
         assert_eq!(span_of(ProtoId::L2CAPCmdHdr, &["code"]), Some((0, 8, 0, 0)));
         assert_eq!(span_of(ProtoId::L2CAPHdr, &["cid"]), Some((16, 16, 2, 2)));
+        assert_eq!(span_of(ProtoId::MobileIP, &["type"]), Some((0, 8, 0, 0)));
+        assert_eq!(span_of(ProtoId::Ppp, &["proto"]), Some((0, 16, 0, 0)));
         assert_eq!(span_of(ProtoId::PppoeDisc, &["type"]), Some((4, 4, 0, 0)));
         assert_eq!(span_of(ProtoId::SMHdr, &["sm_command"]), Some((0, 8, 0, 0)));
     }
