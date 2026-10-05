@@ -1,9 +1,8 @@
-//! Layout from the IETF draft "PCAP Next Generation (pcapng) Capture File
-//! Format" (draft-ietf-opsawg-pcapng).
+//! pcapng, draft-ietf-opsawg-pcapng.
 //!
 //! Every block is `block type (4) | total length (4) | body | total length (4)`,
-//! the length covering all four parts and a multiple of 4. The trailing copy is
-//! an integrity check here, and a mismatch stops the walk.
+//! the length covering all four parts and a multiple of 4. A trailing copy that
+//! disagrees stops the walk.
 
 pub use crate::pcap::{link_to_proto, Record};
 
@@ -114,7 +113,8 @@ fn decode_tsresol(v: u8) -> u64 {
 pub struct Reader<'a> {
     buf: &'a [u8],
     off: usize,
-    /// Buffer end, or the declared section length (-1 means unknown).
+    /// End of the current section, clamped to the buffer. A section length of
+    /// -1 (unknown) runs to the buffer's end.
     end: usize,
     swapped: bool,
     ifaces: Vec<Iface>,
@@ -153,8 +153,8 @@ impl<'a> Reader<'a> {
         };
         r.off = r.enter_section(0).ok_or(PcapngError::BadSectionHeader)?;
 
-        // Consume the leading interface descriptions so the file header can
-        // report a link type before the first packet.
+        // Read the leading IDBs now so `header` has a link type before the
+        // first packet.
         while let Some((btype, total)) = r.read_block_at(r.off) {
             if btype != BLOCK_IDB {
                 break;
@@ -179,8 +179,8 @@ impl<'a> Reader<'a> {
             x if x.swap_bytes() == BYTE_ORDER_MAGIC => true,
             _ => return None,
         };
-        // The total length needs this section's endianness, so the block check
-        // runs only after the magic is decoded.
+        // The block check needs this section's byte order, so it runs after the
+        // magic, and against the whole buffer rather than the last section's end.
         self.end = self.buf.len();
         let (btype, total) = self.read_block_at(off)?;
         if btype != BLOCK_SHB || total < 28 {
@@ -198,10 +198,10 @@ impl<'a> Reader<'a> {
         Some(next)
     }
 
-    /// The extent returned is padded to four octets. A declared length that is
-    /// not a multiple of four breaks the spec, but old writers produced it with
-    /// the padding present and the trailing copy after it; Wireshark and scapy
-    /// both read such a block, and so does this.
+    /// The block type and its extent, padded to four octets. A declared length
+    /// that is not a multiple of four breaks the spec, but old writers produced
+    /// one with the padding present and the trailing copy after it; Wireshark
+    /// and scapy both read such a block, so this does too.
     fn read_block_at(&self, off: usize) -> Option<(u32, usize)> {
         if off + 12 > self.end {
             return None;
@@ -258,9 +258,8 @@ impl<'a> Reader<'a> {
             .unwrap_or(self.header.tsresol)
     }
 
-    /// `ts_frac` is microseconds, or nanoseconds at exactly 10^-9 resolution —
-    /// the two classic pcap can express. Anything else truncates to
-    /// microseconds rather than misreporting the scale.
+    /// `ts_frac` is nanoseconds at exactly 10^-9 resolution and microseconds at
+    /// any other, the only two scales classic pcap can express.
     fn split_ts(&self, ticks: u64, tsresol: u64) -> (u32, u32) {
         if tsresol == 0 {
             return (0, 0);
@@ -292,7 +291,7 @@ impl<'a> Iterator for Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    /// Each pass advances `off` by at least 12 bytes or stops, so the walk is
+    /// Each pass advances `off` by at least 12 octets or returns, so the walk is
     /// bounded by the buffer length.
     fn next_record(&mut self) -> Option<Record<'a>> {
         loop {
@@ -322,8 +321,7 @@ impl<'a> Reader<'a> {
                     } else {
                         rd32(self.buf, start + 8, self.swapped)?
                     };
-                    // No IDB for this id means no link type for the frame, so
-                    // there is nothing it could honestly be decoded as.
+                    // Without an IDB for this id the frame has no link type.
                     if self.ifaces.get(iface_id as usize).is_none() {
                         continue;
                     }
@@ -332,8 +330,8 @@ impl<'a> Reader<'a> {
                     let caplen = rd32(self.buf, start + 20, self.swapped)?;
                     let origlen = rd32(self.buf, start + 24, self.swapped)?;
                     let n = caplen as usize;
-                    // Data is padded to 4 bytes and options may follow, so the
-                    // body only has to be big enough.
+                    // Padding and options may follow the data, so the body
+                    // only has to be big enough.
                     if pad4(n) > total - 32 {
                         return None;
                     }
@@ -379,8 +377,7 @@ pub fn count(buf: &[u8]) -> Result<usize, PcapngError> {
 /// and the fixed part of the body included.
 pub const MAX_CAPLEN: usize = (u32::MAX - 36) as usize & !3;
 
-/// Little-endian throughout: the byte-order magic tells the reader, so there is
-/// nothing to gain from writing a section in the other order.
+/// Always little-endian; the byte-order magic tells the reader.
 fn open_block(out: &mut Vec<u8>, btype: u32, body_len: usize) -> u32 {
     let total = (12 + pad4(body_len)) as u32;
     out.extend_from_slice(&btype.to_le_bytes());
@@ -388,8 +385,8 @@ fn open_block(out: &mut Vec<u8>, btype: u32, body_len: usize) -> u32 {
     total
 }
 
-/// The body pads to four octets and the total length repeats at the end, which
-/// is what lets a reader walk the file backwards.
+/// Pads the body to four octets and repeats the total length, which is what
+/// lets a reader walk the file backwards.
 fn close_block(out: &mut Vec<u8>, body_len: usize, total: u32) {
     out.resize(out.len() + pad4(body_len) - body_len, 0);
     out.extend_from_slice(&total.to_le_bytes());
@@ -412,7 +409,7 @@ pub fn write_shb(out: &mut Vec<u8>) {
     write_block(out, BLOCK_SHB, &body);
 }
 
-/// The link type is 16 bits here, unlike pcap's 32.
+/// `linktype` is truncated to the IDB's 16 bits.
 pub fn write_idb(out: &mut Vec<u8>, linktype: u32, snaplen: u32, nanos: bool) {
     let mut body = Vec::with_capacity(24);
     body.extend_from_slice(&(linktype as u16).to_le_bytes());

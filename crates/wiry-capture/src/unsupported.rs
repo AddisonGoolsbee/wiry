@@ -2,8 +2,8 @@ use crate::error::CaptureError;
 use crate::sink::PacketMeta;
 use crate::{Interface, LiveConfig};
 
-/// Uninhabited: with the `live` feature off a handle can never be constructed,
-/// so every method below is unreachable rather than merely unimplemented.
+/// Uninhabited: without `live` no handle can exist, so these methods are
+/// unreachable rather than unimplemented.
 pub enum Handle {}
 
 impl Handle {

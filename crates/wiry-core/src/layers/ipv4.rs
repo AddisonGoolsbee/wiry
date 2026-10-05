@@ -1,5 +1,5 @@
-//! IPv4 header layout from RFC 791 §3.1; protocol numbers from the IANA
-//! "Protocol Numbers" registry.
+//! IPv4, RFC 791 §3.1. Protocol numbers follow the IANA "Protocol Numbers"
+//! registry.
 
 use crate::field::FieldDesc;
 use crate::names::Host;
@@ -43,11 +43,9 @@ fn content_len(hdr: &[u8]) -> usize {
     u16::from_be_bytes([hdr[2], hdr[3]]) as usize
 }
 
-/// The protocol numbers both IP versions share. The IPv6 extension headers are
-/// added on top of this by `ipv6::next_header` and `ipv6::to_next_header`;
-/// protocol 0 is HOPOPT, which is IPv6-only and also the value an unbound IPv4
-/// header carries, so reading it here would give every such datagram a header
-/// it does not have.
+/// The protocol numbers both IP versions share; `ipv6::next_header` adds the
+/// extension headers. 0 is absent on purpose: it is IPv6's HOPOPT, but also
+/// what an unbound IPv4 header carries, which has no such header.
 pub fn from_ipproto(v: u8) -> Next {
     match v {
         ipproto::TCP => Next::Proto(ProtoId::Tcp),
@@ -64,10 +62,8 @@ pub fn from_ipproto(v: u8) -> Next {
     }
 }
 
-/// The inverse, symmetric with it: the extension headers `from_ipproto` refuses
-/// to read are added back by `ipv6::to_next_header`, for the headers entitled to
-/// name one. RFC 2003 §3 tunnels IPv4 and RFC 4213 §3 tunnels IPv6, whichever
-/// version encloses them.
+/// The inverse of [`from_ipproto`]; `ipv6::to_next_header` adds the extension
+/// headers. Either IP version may carry either (RFC 2003 §3, RFC 4213 §3).
 pub fn to_ipproto(p: ProtoId) -> Option<u8> {
     Some(match p {
         ProtoId::Tcp => ipproto::TCP,
@@ -81,10 +77,10 @@ pub fn to_ipproto(p: ProtoId) -> Option<u8> {
     })
 }
 
-/// RFC 4385 §3: where nothing names the payload's protocol, an IP version in
-/// the first nibble is the only signal, and it is one precisely because a
-/// pseudowire control word is defined never to look like it. `None` means "not
-/// an IP datagram", which each tunnel resolves its own way.
+/// The IP version in the first nibble, for tunnels where nothing else names the
+/// payload. RFC 4385 §3 makes this sound: a pseudowire control word never
+/// starts with 4 or 6. `None` means not an IP datagram, which each tunnel
+/// resolves its own way.
 pub fn from_ip_version(first: Option<&u8>) -> Option<Next> {
     match first? >> 4 {
         4 => Some(Next::Proto(ProtoId::Ipv4)),

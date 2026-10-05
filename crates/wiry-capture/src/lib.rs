@@ -1,5 +1,5 @@
-//! Live capture and injection. Contains no PyO3 and no notion of a Python
-//! callback, so the capture loop is testable without an interpreter.
+//! Live capture and injection. Free of PyO3 and Python callbacks, so the
+//! capture loop is testable without an interpreter.
 
 #![forbid(unsafe_code)]
 
@@ -36,8 +36,8 @@ pub struct LiveConfig {
     pub iface: String,
     pub snaplen: u32,
     pub promisc: bool,
-    /// libpcap's read timeout. Never 0: the pcap README warns that can hang
-    /// next_packet on macOS.
+    /// Milliseconds. Never 0: the pcap README warns that can hang
+    /// `pcap_next_ex` on macOS.
     pub read_timeout_ms: i32,
     pub immediate: bool,
     pub filter: Option<String>,
@@ -60,18 +60,17 @@ pub fn available() -> bool {
     backend::available()
 }
 
-/// Why this host cannot capture, and `None` when it can. Answered without
-/// opening anything, so a caller can refuse early and say why.
+/// Why this host cannot capture, or `None` if it can. Opens nothing.
 pub fn unavailable_reason() -> Option<CaptureError> {
     backend::unavailable_reason()
 }
 
-/// libpcap's own version banner, for a diagnostic that has to be believable.
+/// libpcap's own version banner.
 pub fn backend_version() -> Option<String> {
     backend::backend_version()
 }
 
-/// The shared object that was loaded at run time.
+/// The path of the libpcap shared object loaded at run time.
 pub fn backend_path() -> Option<String> {
     backend::backend_path()
 }
@@ -100,18 +99,14 @@ pub fn send_l3(frames: &[Vec<u8>], count: usize, inter: f64) -> Result<usize, Ca
     backend::send_l3(frames, count, inter)
 }
 
-/// The destination of a buffer that really is an IPv4 datagram, and `None` for
-/// one that is not.
+/// The destination of `f` if it is an IPv4 datagram, else `None`.
 ///
-/// The raw socket takes the buffer as given, so this is the only thing between
-/// a caller's mistake and a frame on the wire addressed to whatever happened to
-/// sit at octets 16..20 — an `Ether()/IP()/TCP()` meant for `sendp`, an IPv6
-/// datagram, a line of text. Dissecting is no help: the dissector is *told* the
-/// link type rather than asked to detect it, so it reports IPv4 for anything
-/// long enough. The three fields RFC 791 §3.1 makes checkable are read here
-/// directly: version 4, an internet header length of at least five 32-bit words
-/// that the buffer holds, and a total length that neither undercuts the header
-/// nor claims more than was handed in.
+/// The raw socket sends whatever it is given, so this is the only guard against
+/// an `Ether()/IP()` meant for `sendp`, an IPv6 datagram or plain text going out
+/// addressed to octets 16..20. Dissecting cannot help: the dissector is told the
+/// link type, so it reports IPv4 for anything long enough. Instead this checks
+/// the three fields RFC 791 §3.1 makes checkable: version 4, an IHL of at least
+/// five words that the buffer holds, and a total length between the two.
 pub fn ipv4_dst(f: &[u8]) -> Option<[u8; 4]> {
     let first = *f.first()?;
     if first >> 4 != 4 {
@@ -128,14 +123,12 @@ pub fn ipv4_dst(f: &[u8]) -> Option<[u8; 4]> {
     Some([f[16], f[17], f[18], f[19]])
 }
 
-/// The interface's hardware address, for filling an unset `Ether.src` or
-/// `ARP.hwsrc` at send time.
+/// The interface's hardware address, for an unset `Ether.src` or `ARP.hwsrc`.
+/// `None` for an unknown interface or one without its own, such as a loopback
+/// or a tunnel.
 ///
-/// `pcap::Device` carries none. With the `live` feature this asks getifaddrs
-/// through `mac_address`, which is every platform a capture runs on; without it
-/// sysfs still answers on Linux. An interface with no hardware address of its
-/// own — a loopback, a tunnel — yields `None`, and so does every caller's
-/// ordinary "not known here".
+/// libpcap's device list carries no hardware address, so this asks getifaddrs
+/// with the `live` feature, and sysfs on Linux.
 pub fn interface_mac(name: &str) -> Option<[u8; 6]> {
     if name.is_empty() || name.contains(['/', '\\']) {
         return None;
@@ -202,7 +195,7 @@ mod tests {
     fn an_ipv4_datagram_yields_its_destination() {
         let d = ip4([10, 0, 0, 1], [10, 0, 0, 2], &[0u8; 20]);
         assert_eq!(ipv4_dst(&d), Some([10, 0, 0, 2]));
-        // Options are ordinary: IHL 6 with 24 octets of header.
+        // IHL 6: one word of options.
         let mut opts = d.clone();
         opts[0] = 0x46;
         opts.splice(20..20, [0x00, 0x00, 0x00, 0x00]);
@@ -279,8 +272,7 @@ mod live_tests {
 
     const ETHERNET: u32 = 1;
 
-    // An Ether/IPv4/TCP frame to port 80, laid out by hand from RFC 791 and
-    // RFC 9293 so the filter tests assert against known bytes.
+    // Ether/IPv4/TCP to port 80, hand-built from RFC 791 and RFC 9293.
     fn eth_ip_tcp() -> Vec<u8> {
         let mut v = vec![0u8; 12];
         v.extend_from_slice(&[0x08, 0x00]);
@@ -334,7 +326,7 @@ mod live_tests {
 
     #[test]
     fn listing_interfaces_does_not_raise() {
-        // May legitimately be empty in a container, so assert only that it works.
+        // A container may have no interfaces at all.
         let _ = list_interfaces().map(|v| v.len());
     }
 }

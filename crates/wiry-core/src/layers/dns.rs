@@ -29,9 +29,8 @@ static RCODES: Table = &[
     (5, "refused"),
 ];
 
-/// The header is the same twelve octets either way; over a stream RFC 1035
-/// §4.2.2 puts a length in front of it. One macro so the two layouts cannot
-/// drift apart.
+/// Over a stream, RFC 1035 §4.2.2 prefixes the same twelve-octet header with a
+/// length; one macro keeps the two layouts from drifting apart.
 macro_rules! header_fields {
     ($at:expr $(, $pre:expr)?) => {
         &[
@@ -61,10 +60,9 @@ pub static FIELDS: &[FieldDesc] = header_fields!(0);
 /// RFC 1035 §4.2.2.
 pub static TCP_FIELDS: &[FieldDesc] = header_fields!(16, FieldDesc::computed_uint("length", 0, 16));
 
-/// The layer is the whole message, its record sections included, as scapy's
-/// `DNS` is: a segment or datagram's octets past the last record are payload.
-/// A message whose records cannot be walked runs to the end of the input,
-/// since nothing then says where it stops.
+/// The layer spans the whole message, record sections included, as scapy's
+/// `DNS` does; octets past the last record are payload. A message whose
+/// records cannot be walked runs to the end of the input.
 fn header_len(msg: &[u8]) -> usize {
     message_len(msg).unwrap_or(msg.len())
 }
@@ -321,7 +319,7 @@ pub struct Records {
     pub ar: Vec<ResourceRecord>,
 }
 
-/// Jumps already go strictly backwards, ruling out loops; this bounds a long
+/// Pointers must go strictly backwards, which rules out loops; this caps a long
 /// descending chain so decoding cannot go quadratic.
 const MAX_JUMPS: usize = 64;
 
@@ -332,17 +330,14 @@ const MAX_NAME_OCTETS: usize = 255;
 /// octets, so without it 2.75 MB of input decodes to hundreds of MB.
 pub const MAX_DECODED_NAME_BYTES: usize = 256 * 1024;
 
-/// What one decoded record costs in owned memory, which is what the budget
-/// exists to bound.
+/// The owned memory one decoded record costs, charged against
+/// [`MAX_DECODED_NAME_BYTES`].
 ///
-/// Name bytes dominate, but they are not the only cost: TXT splits its RDATA
-/// into one owned string per character-string, so RDATA of N zero octets yields
-/// N empty strings. The bytes are bounded by RDLENGTH; the per-string overhead
-/// is not, and left uncharged it amplified 17 MB of input into 656 MB. Charge
-/// each string its header as well as its length.
-/// A signature, a digest or a public key is another unbounded allocation, and a
-/// type bit map turns 34 octets into 256 of them, so every owned byte a record
-/// type decodes to is charged, not only its names.
+/// Names dominate but are not the only cost. TXT yields one `String` per
+/// character-string, so RDATA of N zero octets is N empty strings; each is
+/// charged its header as well as its length, or 17 MB of input decodes to
+/// 656 MB. Signatures, digests and keys are unbounded too, and a type bit map
+/// turns 34 octets into 256 type numbers, so every owned byte is charged.
 pub fn decoded_name_bytes(rr: &ResourceRecord) -> usize {
     rr.rrname.len()
         + match &rr.rdata {
@@ -476,7 +471,7 @@ fn render(labels: &[&[u8]]) -> String {
     out
 }
 
-/// A name reaching past its own RDATA means a malformed RDLENGTH.
+/// `None` when the name runs past `end`, which means a malformed RDLENGTH.
 fn read_name_within(msg: &[u8], pos: usize, end: usize) -> Option<(String, usize)> {
     if pos > end {
         return None;
@@ -627,8 +622,8 @@ fn decode_dnskey(raw: &[u8]) -> Option<RData> {
     })
 }
 
-/// RFC 4034 §3.1. The signer's name is never compressed there, but reading it
-/// with the general walker costs nothing and stays bounded either way.
+/// RFC 4034 §3.1. The signer's name is never compressed, but the general
+/// walker reads it at no extra cost and stays bounded.
 fn decode_rrsig(msg: &[u8], start: usize, end: usize) -> Option<RData> {
     if start + 18 > end {
         return None;
@@ -1418,9 +1413,8 @@ mod tests {
         assert!(decoded > MAX_DECODED_NAME_BYTES / 2);
     }
 
-    /// TXT splits RDATA into one owned string per character-string, so RDATA of
-    /// N zero octets used to yield N empty strings free of charge. 17 MB of
-    /// input became 656 MB of output.
+    /// TXT RDATA of N zero octets is N empty strings, and each must be charged:
+    /// uncharged, 17 MB of input decodes to 656 MB.
     #[test]
     fn a_txt_bomb_spends_the_same_bounded_budget() {
         let rdata = vec![0u8; 0xffff];

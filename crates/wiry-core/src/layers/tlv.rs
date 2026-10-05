@@ -79,9 +79,9 @@ pub struct Raw<'a> {
     pub value: &'a [u8],
 }
 
-/// Malformed input stops the walk rather than erroring: a snaplen-clipped
-/// capture truncates option regions routinely. The guard bounds a region whose
-/// length octets claim zero.
+/// Stops at the first item that overruns `data` rather than erroring, since
+/// snaplen-clipped captures truncate these regions routinely. Yields at most
+/// 512 items.
 pub fn walk<'a>(data: &'a [u8], f: &TlvFmt) -> Vec<Raw<'a>> {
     let hdr = f.header_len();
     let mut out = Vec::new();
@@ -118,8 +118,8 @@ pub fn walk<'a>(data: &'a [u8], f: &TlvFmt) -> Vec<Raw<'a>> {
 
 pub type Namer = fn(u32) -> Option<&'static str>;
 
-/// Bytes by default; a name table decides nothing about the shape, because a
-/// wrong shape is worse than an opaque one.
+/// Every value stays bytes: `name` labels items but never picks a decoding,
+/// because a wrong shape is worse than an opaque one.
 pub fn items(data: &[u8], f: &TlvFmt, name: Namer) -> Vec<Item> {
     walk(data, f)
         .into_iter()

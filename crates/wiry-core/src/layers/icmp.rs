@@ -8,8 +8,7 @@
 //   2026-10-03 — type names and the per-type code names transcribed into the field table
 
 //! RFC 792 gives every ICMPv4 message the same Type / Code / Checksum prefix;
-//! what the four octets after it mean depends on the type, so those fields are
-//! conditional:
+//! the fields after it are conditional on the type:
 //!
 //! | Type          | Octets 4..8                          | Source        |
 //! |---------------|--------------------------------------|---------------|
@@ -162,7 +161,8 @@ fn is_param_problem(hdr: &[u8]) -> bool {
     msg_type(hdr) == PARAM_PROBLEM
 }
 
-/// Reserve octet 4 (RFC 792) and use octet 5 as the RFC 4884 extension length.
+/// Types that reserve octet 4 (RFC 792) and use octet 5 as the RFC 4884
+/// extension length.
 fn is_error(hdr: &[u8]) -> bool {
     matches!(msg_type(hdr), DEST_UNREACH | TIME_EXCEEDED)
 }
@@ -181,8 +181,8 @@ fn is_unstructured(hdr: &[u8]) -> bool {
 
 /// scapy declares `unused` for every type: four octets where nothing else is
 /// defined, the two after `length` on a time-exceeded or parameter problem,
-/// and a zero-width string on the rest. The two narrower shapes are here so a
-/// field read and a rendering agree with it.
+/// and a zero-width string on the rest. All three shapes are mirrored so field
+/// lists and rendering match scapy's.
 fn has_short_unused(hdr: &[u8]) -> bool {
     matches!(msg_type(hdr), TIME_EXCEEDED | PARAM_PROBLEM)
 }
@@ -194,8 +194,8 @@ fn has_empty_unused(hdr: &[u8]) -> bool {
     )
 }
 
-/// RFC 4884 §7 puts the extension structure after the quoted datagram, which
-/// this model treats as payload. The names are interface only.
+/// `ext` is declared for scapy's field list only: RFC 4884 §7 puts the
+/// extension structure after the quoted datagram, which is payload here.
 fn never(_: &[u8]) -> bool {
     false
 }
@@ -218,8 +218,7 @@ pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("unused", 32, 32, 0).when(is_unstructured),
     FieldDesc::uint("unused", 48, 16, 0).when(has_short_unused),
     FieldDesc::bytes("unused", 64, 0).when(has_empty_unused),
-    // RFC 4884 §7 padding sits after the quoted datagram; what the header
-    // itself holds of it is nothing.
+    // Zero-width: RFC 4884 §7 padding follows the quoted datagram.
     FieldDesc::bytes("extpad", 64, 0).when(has_ext_length),
     FieldDesc::var_bytes("ext", 64).when(never),
 ];

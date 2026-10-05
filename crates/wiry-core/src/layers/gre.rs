@@ -103,9 +103,9 @@ fn to_ethertype(p: ProtoId) -> Option<u16> {
     })
 }
 
-/// draft-foschiano-erspan-03 §4: the sequence bit is what tells Type II from
-/// Type I, so stacking a Type II header has to set it. The word it brings is
-/// appended here because `bind_next` cannot grow the header it is handed.
+/// draft-foschiano-erspan-03 §4: only the sequence bit tells Type II from Type
+/// I, so stacking Type II must set it. The sequence word is appended here
+/// because `bind_next` cannot grow the header it is handed.
 fn bind_next_bytes(p: ProtoId) -> &'static [u8] {
     match p {
         ProtoId::ErspanII => &[0; 4],
@@ -220,11 +220,10 @@ mod tests {
         }
     }
 
-    /// `key` is declared twice and `seqnum` three times, under conditions the
-    /// type system does not check for disjointness. Two live at once and a read
-    /// silently returns whichever the field table lists first; none live and it
-    /// aliases the octets of whatever is really there. The flags octet is eight
-    /// bits wide, so the whole space is enumerable — enumerate it.
+    /// `key` is declared twice and `seqnum` three times, under conditions
+    /// nothing checks for disjointness: with two live, a read silently returns
+    /// whichever the table lists first. The flags octet has only 256 values, so
+    /// all are checked.
     #[test]
     fn exactly_one_declaration_of_each_field_is_live_for_every_flags_octet() {
         for flags in 0u8..=255 {
@@ -258,9 +257,8 @@ mod tests {
         }
     }
 
-    /// The enumeration above proves the declarations disjoint; this proves each
-    /// live one reads the octets its offset names, out of a header where every
-    /// word is different.
+    /// The test above proves the declarations disjoint; this one proves each
+    /// live one reads its own octets, from a header whose every word differs.
     #[test]
     fn no_flags_octet_makes_a_field_alias_anothers_octets() {
         for flags in 0u8..=255 {

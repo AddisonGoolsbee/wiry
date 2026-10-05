@@ -5,10 +5,10 @@
 //! Encoding rules from ITU-T X.690 (02/2021) §8: identifier octets §8.1.2,
 //! length octets §8.1.3, INTEGER §8.3, OBJECT IDENTIFIER §8.19.
 //!
-//! `pkt[SNMP]` and every other ASN.1 object tree is `python/wiry/asn1`, whose
-//! contract (scapy's) is a Python object per field. This walks one level at a
-//! time and never recurses, so nesting costs nothing however deep it goes,
-//! and every walk over a constructed value stops at a cap.
+//! Full ASN.1 object trees such as `pkt[SNMP]` live in `python/wiry/asn1`,
+//! whose scapy contract is a Python object per field. This reader walks one
+//! level at a time and never recurses, so nesting depth costs nothing, and
+//! every walk over a constructed value is capped.
 
 use crate::options::ItemValue;
 
@@ -24,10 +24,10 @@ pub const OID: u32 = 0x06;
 pub const ENUMERATED: u32 = 0x0a;
 pub const SEQUENCE: u32 = 0x10;
 
-/// Elements `children` returns from one constructed value.
+/// Cap on the elements `children` returns from one constructed value.
 pub const MAX_CHILDREN: usize = 256;
 
-/// Subidentifiers `oid` decodes; an OID is a handful of arcs.
+/// Cap on the subidentifiers `oid` decodes.
 pub const MAX_ARCS: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,9 +40,9 @@ pub struct Tlv<'a> {
     pub total: usize,
 }
 
-/// `None` for a truncated or indefinite-length encoding, a tag number past
-/// 32 bits, or a length past 32 bits: guessing at any of them is worse than
-/// stopping, and none fits in a datagram.
+/// `None` for a truncated or indefinite-length encoding, or a tag number or
+/// length wider than 32 bits: stopping beats guessing, and no datagram carries
+/// either.
 pub fn read(data: &[u8]) -> Option<Tlv<'_>> {
     let id = *data.first()?;
     let mut i = 1usize;
@@ -91,8 +91,7 @@ pub fn children(data: &[u8]) -> Vec<Tlv<'_>> {
     children_upto(data, MAX_CHILDREN)
 }
 
-/// `children` with the caller's own cap, for a list the caller must report
-/// in full.
+/// `children` with a caller-chosen cap.
 pub fn children_upto(data: &[u8], cap: usize) -> Vec<Tlv<'_>> {
     let mut out = Vec::new();
     let mut i = 0usize;
@@ -166,8 +165,7 @@ pub fn text(v: &[u8]) -> String {
     String::from_utf8_lossy(v).into_owned()
 }
 
-/// A readable form for whichever universal type turned up, for a caller that
-/// wants one string per element.
+/// One display string per element, chosen by its universal type.
 pub fn render(t: &Tlv<'_>) -> String {
     if t.class != UNIVERSAL {
         return match t.value.len() {
@@ -306,7 +304,6 @@ mod tests {
         }
     }
 
-    /// Nothing here recurses, so nesting costs one `read` however deep it goes.
     /// A recursive walk would overflow the stack on this input.
     #[test]
     fn deep_nesting_costs_one_level() {

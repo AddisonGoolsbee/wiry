@@ -9,18 +9,15 @@
 //                timeval's tv_usec 32-bit on the BSDs, where scapy reads a
 //                long over four octets of padding
 
-//! The C declarations, transcribed from `pcap/pcap.h` and `pcap/bpf.h`
-//! (libpcap 1.10, BSD-3-Clause) and cross-checked against scapy's ctypes
-//! bindings in `scapy/libs/winpcapy.py` and `scapy/libs/structures.py`.
-//!
-//! Nothing here is called directly. `lib.rs` owns every pointer these produce.
+//! C declarations from `pcap/pcap.h` and `pcap/bpf.h` (libpcap 1.10,
+//! BSD-3-Clause), cross-checked against scapy's ctypes bindings.
 
 use core::ffi::{c_char, c_int, c_long, c_uint, c_void};
 
 pub const PCAP_ERRBUF_SIZE: usize = 256;
 
-/// `pcap_activate` and friends return these. Negative is failure, positive a
-/// warning that still activated the handle (RFC-free: `pcap.h` says so).
+/// Status codes: negative is failure, positive a warning on a handle that
+/// still activated.
 pub const PCAP_ERROR_NO_SUCH_DEVICE: c_int = -5;
 pub const PCAP_ERROR_PERM_DENIED: c_int = -8;
 pub const PCAP_ERROR_IFACE_NOT_UP: c_int = -9;
@@ -28,15 +25,14 @@ pub const PCAP_ERROR_PROMISC_PERM_DENIED: c_int = -11;
 
 pub const PCAP_IF_LOOPBACK: c_uint = 0x0000_0001;
 
-/// What `pcap_compile` wants when no netmask is known. Only `ip broadcast`
-/// needs one, and it is the one thing a dead handle cannot know.
+/// The netmask `pcap_compile` takes when none is known; `ip broadcast` then
+/// fails to compile.
 pub const PCAP_NETMASK_UNKNOWN: c_uint = 0xffff_ffff;
 
 pub type PcapT = c_void;
 
-/// `suseconds_t`. The BSDs and macOS make it a 32-bit int inside a struct that
-/// still aligns to 8, so reading it as a `long` would take four bytes of
-/// padding libpcap never wrote.
+/// `suseconds_t`. macOS and the BSDs make it 32 bits inside a struct aligned
+/// to 8, so reading a `long` there would take in four octets of padding.
 #[cfg(any(
     target_vendor = "apple",
     target_os = "freebsd",
@@ -101,11 +97,9 @@ pub struct PcapIf {
     pub flags: c_uint,
 }
 
-/// Opaque on purpose. libpcap allocates each of these at the size of its own
-/// family — 16 octets for an `AF_INET`, 28 for an `AF_INET6` — so a Rust struct
-/// wide enough for the larger would read past the smaller. Callers read single
-/// octets at known offsets instead, and only after the family says how many
-/// there are.
+/// Opaque because libpcap allocates each at its own family's size (16 octets
+/// for `AF_INET`, 28 for `AF_INET6`), so a struct wide enough for the larger
+/// would read past the smaller. Read single octets, after checking the family.
 pub type Sockaddr = c_void;
 
 pub type PcapCreate = unsafe extern "C" fn(*const c_char, *mut c_char) -> *mut PcapT;

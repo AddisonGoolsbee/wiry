@@ -34,19 +34,15 @@ pub struct Handle {
 }
 
 impl Handle {
-    /// Whether a read that finds nothing waits for a frame instead of
-    /// returning. False on every libpcap that accepted non-blocking mode,
-    /// which is all of them; a driver that sees True must not rely on the
-    /// read timeout to bound anything.
+    /// True only where libpcap refused non-blocking mode. A read may then wait
+    /// for a frame however long it takes, whatever the read timeout.
     pub fn reads_block(&self) -> bool {
         self.blocking
     }
 }
 
 impl Handle {
-    /// Copies the borrowed ring-buffer bytes into `scratch` while the borrow is
-    /// live. libpcap reuses the slot on the next read, so nothing borrowed may
-    /// outlive this call.
+    /// Copies the next frame into `scratch`; `Ok(None)` when none is ready.
     pub fn next_into(&mut self, scratch: &mut Vec<u8>) -> Result<Option<PacketMeta>, CaptureError> {
         match self.cap.next_into(scratch) {
             Ok(None) => Ok(None),
@@ -82,9 +78,8 @@ impl Handle {
 
 pub struct CompiledFilter {
     prog: raw::Program,
-    /// The dead handle the program was compiled on. libpcap frees a program's
-    /// instructions independently, but keeping the handle alive costs nothing
-    /// and removes the question.
+    /// libpcap frees a program independently of its handle; this is held only
+    /// so the program can never outlive the handle that compiled it.
     _dead: raw::Handle,
 }
 
@@ -98,8 +93,6 @@ pub fn available() -> bool {
     raw::available()
 }
 
-/// Why this host cannot capture, for the callers that must say so before
-/// trying anything. `None` when it can.
 pub fn unavailable_reason() -> Option<CaptureError> {
     raw::unavailable_reason().map(|e| CaptureError::LibraryMissing(e.msg.clone()))
 }
@@ -125,14 +118,10 @@ pub fn list_interfaces() -> Result<Vec<Interface>, CaptureError> {
         .collect())
 }
 
-/// The interface a capture with no `iface=` should use.
-///
-/// libpcap's own `pcap_lookupdev` is deprecated, removed from some builds and
-/// documented as returning an arbitrary device. scapy's `get_working_if` asks
-/// instead whether an interface has an address that is not `0.0.0.0`; the same
-/// test applied to libpcap's device list is the first interface that is not a
-/// loopback and carries a routable IPv4 address, then the first with any
-/// address at all, and a loopback only when there is nothing else.
+/// The interface a capture with no `iface=` uses: the first non-loopback with
+/// a routable IPv4 address, else the first non-loopback with any address, else
+/// a loopback. This is scapy's `get_working_if` test over libpcap's device
+/// list; `pcap_lookupdev` is deprecated and returns an arbitrary device.
 pub fn default_interface() -> Result<String, CaptureError> {
     let ifs = list_interfaces()?;
     let routable = |a: &&String| {
@@ -162,16 +151,14 @@ pub fn open_live(cfg: &LiveConfig) -> Result<Handle, CaptureError> {
     cap.set_promisc(cfg.promisc).map_err(|e| map_err(e, &dev))?;
     cap.set_timeout(cfg.read_timeout_ms)
         .map_err(|e| map_err(e, &dev))?;
-    // An older libpcap without the call still captures, in whatever batches the
-    // kernel chooses, so its absence is not a failure to open.
+    // A libpcap without immediate mode still captures, only in batches.
     let _ = cap.set_immediate_mode(cfg.immediate);
     cap.activate().map_err(|e| map_err(e, &dev))?;
 
-    // The read timeout is not a deadline: on Linux pcap_next_ex blocks until a
-    // frame arrives however the timeout is set, so a capture over a silent
-    // interface would never reach its own stop conditions. The driver does the
-    // waiting instead. The timeout above is still set, because it is what an
-    // older libpcap that refuses this falls back to.
+    // The read timeout does not bound a read: on Linux pcap_next_ex blocks until
+    // a frame arrives, so a silent interface would starve every stop condition.
+    // The driver waits instead; the timeout remains for a libpcap that refuses
+    // non-blocking mode.
     let blocking = cap.set_nonblock(true).is_err();
 
     let linktype = cap.datalink() as u32;
@@ -187,9 +174,9 @@ pub fn open_live(cfg: &LiveConfig) -> Result<Handle, CaptureError> {
     Ok(h)
 }
 
-/// The DLT_ value libpcap's compiler wants for a capture file's LINKTYPE_.
-/// They are the same number except where a BSD assigned a DLT before the
-/// file format reserved one (libpcap's `linktype_to_dlt`, pcap-common.c).
+/// The DLT libpcap's compiler expects for a file's LINKTYPE. They differ only
+/// where a BSD assigned a DLT before the file format reserved a number
+/// (`linktype_to_dlt` in libpcap's pcap-common.c).
 fn dlt_of(linktype: u32) -> u32 {
     match linktype {
         100 => 11,

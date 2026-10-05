@@ -1,12 +1,11 @@
-//! VXLAN from RFC 7348 §5: an 8-octet header over UDP whose payload is a whole
-//! Ethernet frame. The destination port is the IANA-assigned 4789; the source
-//! port is a flow hash, so it names nothing.
+//! VXLAN, RFC 7348 §5: an 8-octet header over UDP port 4789 whose payload is a
+//! whole Ethernet frame.
 
 use crate::field::FieldDesc;
 use crate::proto::{fixed_len, frame_next, ProtoDesc, ProtoId};
 
-/// RFC 7348 §5 defines only the I bit (0x08) of `flags`, and the VNI means
-/// nothing unless it is set; the rest is reserved and must be transmitted zero.
+/// RFC 7348 §5 defines only the I bit (0x08) of `flags`, which marks the VNI
+/// valid; every other bit is reserved and sent as zero.
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("flags", 0, 8, 0x08),
     FieldDesc::uint("reserved0", 8, 24, 0),

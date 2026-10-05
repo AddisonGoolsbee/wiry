@@ -58,8 +58,8 @@ impl Item {
     }
 }
 
-/// A value offered for encoding, before the table decides what shape it takes.
-/// `Text` covers a dotted quad, a symbolic name and a string payload alike.
+/// A caller's value for encoding; the option's `Shape` decides how it is
+/// coerced. `Text` covers a dotted quad, a symbolic name and a string payload.
 #[derive(Clone, Debug, PartialEq)]
 pub enum OptArg {
     Flag,
@@ -75,8 +75,7 @@ pub enum OptArg {
 pub const MAX_ARG_DEPTH: usize = 8;
 
 impl OptArg {
-    /// Iterative on purpose: measuring a deep value must not itself overflow
-    /// the stack.
+    /// Iterative, so measuring a deep value cannot itself overflow the stack.
     pub fn nests_deeper_than(&self, limit: usize) -> bool {
         let mut stack = vec![(self, 1usize)];
         while let Some((arg, depth)) = stack.pop() {
@@ -171,7 +170,8 @@ pub enum LenRule {
 pub struct OptTable {
     pub proto: &'static str,
     pub rule: LenRule,
-    /// The code that closes the region. The walk emits it and stops.
+    /// The code that closes the region. The walk stops there, emitting it as
+    /// an item only when it is `Bare`.
     pub end: Option<u8>,
     pub opts: &'static [OptDesc],
 }
@@ -217,8 +217,8 @@ impl OptTable {
         }
     }
 
-    /// Malformed input stops the walk rather than erroring: truncation is
-    /// normal on a snaplen-clipped capture.
+    /// Stops at malformed or truncated input rather than erroring, since
+    /// snaplen-clipped captures truncate routinely. At most 512 options.
     pub fn walk(&self, data: &[u8]) -> Vec<Item> {
         self.walk_raw(data)
             .into_iter()
@@ -231,7 +231,7 @@ impl OptTable {
     pub fn walk_raw<'a>(&self, data: &'a [u8]) -> Vec<(u8, &'a [u8])> {
         let mut out = Vec::new();
         let mut i = 0usize;
-        // Bound the walk: a zero-length option would otherwise spin forever.
+        // Caps the output whatever the region claims.
         let mut guard = 0;
         while i < data.len() && guard < 512 {
             guard += 1;
@@ -270,8 +270,9 @@ impl OptTable {
         out
     }
 
-    /// Resolves a name — or a decimal code for an option this table does not
-    /// name — and coerces the value into the shape that name implies.
+    /// Resolves a name, or a decimal code for an option this table does not
+    /// name, and coerces `arg` into that option's shape. Errors on an unknown
+    /// name, a value too deep, or one the shape cannot hold.
     pub fn item(&self, name: &str, arg: &OptArg) -> Result<Item, String> {
         if arg.nests_deeper_than(MAX_ARG_DEPTH) {
             return Err(format!(
@@ -299,7 +300,8 @@ impl OptTable {
         Err(format!("unknown {} option {name:?}", self.proto))
     }
 
-    /// The inverse of `walk`.
+    /// The inverse of `walk`. Errors when a code exceeds one octet or a payload
+    /// is too long for its length octet.
     pub fn encode(&self, items: &[Item]) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
         for it in items {
@@ -332,7 +334,7 @@ impl OptTable {
         Ok(out)
     }
 
-    /// Encode an option region from named values, the way a caller types them:
+    /// Encodes an option region from named values, e.g.
     /// `[("MSS", OptArg::Uint(1460)), ("SAckOK", OptArg::Flag)]`.
     pub fn build<S: AsRef<str>>(&self, opts: &[(S, OptArg)]) -> Result<Vec<u8>, String> {
         let items = opts
@@ -377,8 +379,8 @@ fn value_of(shape: Shape, names: &[(&str, u64)], arg: &OptArg) -> Result<ItemVal
     }
 }
 
-/// Accepts what the parse produced: (name, value) pairs. Anything else is raw
-/// octets.
+/// A list of `(name, value)` or `(name,)` entries becomes nested items; any
+/// other shape is taken as raw octets.
 fn sub_value(t: &'static OptTable, arg: &OptArg) -> Result<ItemValue, String> {
     let OptArg::List(entries) = arg else {
         return Ok(ItemValue::Bytes(flat_bytes(arg)));
@@ -491,8 +493,8 @@ fn push_addrs(arg: &OptArg, out: &mut Vec<u8>) -> Result<(), String> {
     Ok(())
 }
 
-/// An integer stands for one octet here, which is what a DHCP parameter
-/// request list is a list of.
+/// An integer is one octet here, truncated, as in a DHCP parameter request
+/// list.
 fn flat_bytes(arg: &OptArg) -> Vec<u8> {
     match arg {
         OptArg::Flag => Vec::new(),

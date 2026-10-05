@@ -11,34 +11,25 @@
 //                descriptor walked in Rust rather than a per-element Python
 //                object.
 
-//! Repeating groups: "N of these follow".
+//! Repeating groups: "N of these follow", which the flat `FieldDesc` table
+//! cannot express (DEVIATIONS E1). Three extents occur: a field giving an
+//! element count (RFC 3954 NetFlow v5 `count`, RFC 3376 §4.2 `numgrp`), a field
+//! giving a byte extent (RFC 2328 §A.3.1 OSPF `len`), and elements running to
+//! the end of the datagram (RFC 2453 §3.6 RIP).
 //!
-//! `DEVIATIONS.md` E1 records that the flat `FieldDesc` table cannot express a
-//! repeating payload, which for RIP, NetFlow, IGMPv3 and OSPF *is* the
-//! protocol. This is the construct that can, in the two shapes that occur:
-//! a header field giving an element **count** (RFC 3954 NetFlow v5 `count`,
-//! RFC 3376 §4.2 `numgrp`) and a header field giving a **byte extent** the
-//! elements fill (RFC 2328 §A.3.1 OSPF `len`). A third, elements running to the
-//! end of the datagram, is RFC 2453 §3.6 RIP.
+//! An element is itself a flat `FieldDesc` table, and a walk yields the same
+//! `Item` list `options.rs` does, so the per-packet and columnar paths read it
+//! identically and no element becomes a Python object.
 //!
-//! An element is itself a flat `FieldDesc` table, so the model gains a
-//! dimension rather than a second field model, and the result is the named
-//! `Item` list `options.rs` already produces — read identically by the
-//! per-packet and the columnar path, and never one Python object per element.
+//! Counts and lengths are attacker-controlled, so every walk is bounded three
+//! ways and returns what it managed:
 //!
-//! **Caps.** Element counts and length fields are attacker-controlled, so every
-//! walk is bounded three ways and returns what it managed:
+//! - `MAX_ELEMENTS` per group per nesting level, whatever the count claims.
+//! - `MAX_ITEMS` over a whole walk, nested groups included, since each element
+//!   carries fields and may carry a nested group of its own.
+//! - `MAX_OWNED_BYTES` copied out of the borrowed buffer over a whole walk.
 //!
-//! - `MAX_ELEMENTS` per group, per nesting level: a `count` of 65,535 over a
-//!   two-octet body yields at most this many, whatever the field claims.
-//! - `MAX_ITEMS` over a whole walk, nested groups included: bounds the total
-//!   work, which `MAX_ELEMENTS` alone does not, since each element carries
-//!   fields and may carry a nested group of its own.
-//! - `MAX_OWNED_BYTES` over a whole walk: bounds what is *copied out* of the
-//!   still-borrowed buffer, which is the axis that turned 2.75 MB of DNS into
-//!   568 MB before it had a budget.
-//!
-//! Nesting is one level, structurally, as `OptDesc::sub` is.
+//! Nesting is one level, as `OptDesc::sub` is.
 
 use crate::field::{self, FieldDesc, FieldKind, FieldValue};
 use crate::options::{Item, ItemValue, OptArg};
@@ -57,9 +48,9 @@ pub const MAX_REGION_BYTES: usize = 64 * 1024;
 pub enum Extent {
     /// A field holds the number of elements.
     Count { bit_off: u16, bit_len: u16 },
-    /// A field holds a byte extent. `covers` is how much of that extent the
-    /// enclosing record already spent before the first element, which differs
-    /// per protocol exactly as `LenRule` does for a TLV length octet.
+    /// A field holds a byte extent. `covers` is how much of it the enclosing
+    /// record spends before the first element, which differs per protocol as
+    /// `LenRule` does for a TLV length octet.
     Length {
         bit_off: u16,
         bit_len: u16,
@@ -94,10 +85,9 @@ pub enum ElemLen {
 }
 
 pub struct GroupDesc {
-    /// What one element is called. A group whose element has a single field and
-    /// no nested group is a list of that field instead, so this names the
-    /// region rather than an element — scapy's FieldListField against its
-    /// PacketListField, told apart by the table rather than by a flag.
+    /// The element's name, or the region's for a scalar list (one field,
+    /// nothing nested): scapy's FieldListField against PacketListField, told
+    /// apart by the table rather than by a flag.
     pub name: &'static str,
     pub fields: &'static [FieldDesc],
     pub elem: ElemLen,
@@ -106,7 +96,7 @@ pub struct GroupDesc {
     pub start: usize,
     /// Elements are padded up to this; 1 means no padding.
     pub align: usize,
-    /// One level only, as `OptDesc::sub` is: a walk descends exactly once.
+    /// One level only: a walk descends exactly once.
     pub nested: Option<&'static GroupDesc>,
     /// Headers that do not carry this group at all (IGMP is one layer for four
     /// message types).
@@ -155,8 +145,8 @@ impl GroupDesc {
         }
     }
 
-    /// True where an element is one field and carries nothing nested, so each
-    /// element contributes its own value rather than a wrapper.
+    /// Each element then yields its field's value rather than a one-field
+    /// record.
     fn is_scalar_list(&self) -> bool {
         self.fields.len() == 1 && self.nested.is_none()
     }
@@ -178,8 +168,7 @@ impl GroupDesc {
         }
     }
 
-    /// The fixed part an element always has, which is what `encode` lays down
-    /// before any nested group or padding.
+    /// What `encode` lays down before any nested group or padding.
     fn base_len(&self) -> usize {
         match self.elem {
             ElemLen::Fixed(n) => n,
@@ -246,9 +235,9 @@ impl Budget {
     }
 }
 
-/// The one walk, so the per-packet and the columnar path cannot answer
-/// differently. Truncated and over-claimed input stops the walk rather than
-/// erroring: a snaplen-clipped capture ends mid-record routinely.
+/// Shared by the per-packet and columnar paths so they cannot disagree.
+/// Truncated or over-claimed input ends the walk rather than erroring: a
+/// snaplen-clipped capture ends mid-record routinely.
 pub fn walk(rec: &[u8], g: &GroupDesc) -> Vec<Item> {
     walk_in(rec, g, &mut Budget::new())
 }
@@ -350,9 +339,8 @@ pub fn region_len(rec: &[u8], g: &GroupDesc) -> usize {
     i
 }
 
-/// Rewrite the field the extent reads, so a region that was appended or
-/// replaced describes itself. The walk that counts deliberately ignores the
-/// stale value it is about to overwrite.
+/// Rewrites the extent field to describe the region as it stands. The count
+/// ignores the stale value being overwritten.
 pub fn sync(rec: &mut [u8], g: &GroupDesc) {
     if !g.applies(rec) {
         return;
@@ -404,11 +392,8 @@ fn copy_of(g: &GroupDesc) -> GroupDesc {
     }
 }
 
-// ---------------------------------------------------------------- write path
-
-/// Resolve a named element the way a caller types it — `("RIPEntry", [("addr",
-/// "10.0.0.0"), ("metric", 1)])` — into the same `Item` a walk produces, so the
-/// two directions meet on one shape.
+/// Resolves an element as a caller types it — `("RIPEntry", [("addr",
+/// "10.0.0.0"), ("metric", 1)])` — into the `Item` a walk would produce.
 pub fn item(g: &GroupDesc, name: &str, arg: &OptArg) -> Result<Item, String> {
     if arg.nests_deeper_than(crate::options::MAX_ARG_DEPTH) {
         return Err(format!(
@@ -422,8 +407,7 @@ pub fn item(g: &GroupDesc, name: &str, arg: &OptArg) -> Result<Item, String> {
     }
     if g.is_scalar_list() {
         let f = &g.fields[0];
-        // A list of bare values is how a caller writes a scalar list, and the
-        // option shape carries a bare entry as its name with no value.
+        // A bare entry in a scalar list arrives as a name with no value.
         let bare;
         let arg = match arg {
             OptArg::Flag => {
@@ -493,8 +477,8 @@ fn field_value(f: &FieldDesc, arg: &OptArg) -> Result<ItemValue, String> {
     }
 }
 
-/// The inverse of `walk`: the region bytes for a list of elements, each padded
-/// out to the length its own fields claim so the result re-walks to itself.
+/// The inverse of `walk`. Each element is padded to the length its own fields
+/// claim, so the result re-walks to the same items.
 pub fn encode(g: &GroupDesc, items: &[Item]) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     for it in items {
@@ -800,16 +784,14 @@ mod tests {
         assert!(walk(&[0u8; 64], &ZERO).is_empty());
     }
 
-    /// The shape the caps exist for: a claimed count far past anything the
-    /// bytes can back must not allocate for the claim.
     #[test]
     fn the_element_cap_bounds_a_huge_region() {
         let data = vec![0u8; MAX_ELEMENTS * 8];
         assert_eq!(walk(&data, &RESTED).len(), MAX_ELEMENTS);
     }
 
-    /// The element cap alone does not bound the work, because a nested group
-    /// multiplies it: 512 records of 20 sources each is past the item budget.
+    /// 512 records of 20 sources each: within the element cap, past the item
+    /// budget.
     #[test]
     fn the_item_cap_bounds_the_total_work_across_nesting() {
         let mut data = Vec::new();

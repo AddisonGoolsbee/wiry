@@ -44,7 +44,6 @@ fuzz_target!(|data: &[u8]| {
         pcapng::write_epb(&mut ng, 0, sec, frac, bytes, *wirelen, nanos);
         want.push((sec, frac, *bytes, (*wirelen).max(bytes.len() as u32)));
     }
-    // Every block is a whole number of 4-byte words, framing included.
     assert_eq!(ng.len() % 4, 0, "a pcapng block was left unpadded");
 
     let proto = pcap::link_to_proto(link);

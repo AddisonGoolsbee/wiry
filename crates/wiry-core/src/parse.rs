@@ -83,9 +83,8 @@ pub fn ipv6(s: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
-/// One implementation, shared with the renderer whose output this reads back.
-/// `None` where a token names no flag of this field: the only way a typo can
-/// reach the caller instead of quietly building a packet with the bit clear.
+/// Reads back the renderer's flag syntax. `None` if any token names no flag of
+/// this field, so a typo fails rather than building a packet with the bit clear.
 pub fn flags(s: &str, names: &[&str]) -> Option<u64> {
     crate::show::flags_from(s, names)
 }
@@ -94,8 +93,8 @@ pub fn value_for(f: &FieldDesc, s: &str) -> Option<ValueBits> {
     value_in(f, s, &[])
 }
 
-/// `hdr` is the header the value will be written into, which is what picks
-/// the table of a field whose names depend on another field.
+/// `hdr` is the header the value will be written into; it selects the name
+/// table of a field whose names depend on another field.
 pub fn value_in(f: &FieldDesc, s: &str, hdr: &[u8]) -> Option<ValueBits> {
     match f.kind {
         FieldKind::Ipv4Addr => ipv4(s).map(|b| ValueBits::Bytes(b.to_vec())),

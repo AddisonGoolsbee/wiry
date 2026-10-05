@@ -1,16 +1,13 @@
 # Privileged capture checks
 
 These need root and a real interface, so they are **not** part of `pytest tests/`
-and never run in the normal CI job. Same posture as `dev/` and `fuzz/`: the
-shipped suite stays unprivileged and green on three platforms.
+and never run in CI: the shipped suite stays unprivileged and green on three
+platforms.
 
-**Run them.** Live capture needs no build flag any more — libpcap is loaded at
-run time — so the only thing standing between this code and a wire is somebody
-starting one of these. Two defects lived here until 2026-09-18 because nobody
-had: a capture that never reached its own deadline on a silent interface, and a
-layer-3 `send` that put `127.0.0.1` in the source address and was dropped before
-it left the host. Both were invisible to every offline test and obvious within
-one run of `netns_check.py`.
+**Run them.** Nothing else puts this code on a wire. They catch what no offline
+test can: one run of `netns_check.py` found a capture that never reached its
+deadline on a silent interface, and a layer-3 `send` that put `127.0.0.1` in the
+source address and was dropped before leaving the host.
 
     pip install .        # or: maturin develop --release --features pyo3/extension-module
 
@@ -36,13 +33,12 @@ over the pair, where exactly one address exists to answer: `arping` must find th
 peer and nobody else, `getmacbyip` must agree with it, `srloop` must collect every
 round, and `traceroute` must reach a peer one hop away.
 
-Four of its checks are about a capture that receives **nothing**, which is the
-case the offline driver cannot reach and the one that was broken: a deadline, an
-unreachable count, `stop()`, and Ctrl-C must each return in seconds over an
-interface with no traffic on it. Each runs on a worker with its own deadline,
+Four of its checks cover a capture that receives **nothing**, which the offline
+driver cannot reach: a deadline, an unreachable count, `stop()` and Ctrl-C must
+each return in seconds over an interface with no traffic. Each runs on a worker with its own deadline,
 because a wall-clock assertion made after the call cannot catch a hang.
 
-A privileged Linux container is enough, and is how this was last run:
+A privileged Linux container is enough:
 
     docker run --rm --privileged --cap-add=NET_ADMIN --cap-add=NET_RAW ...
 

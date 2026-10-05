@@ -11,13 +11,11 @@
 //! tcpdump link-layer header type registry: four octets holding the address
 //! family of the datagram that follows.
 //!
-//! DLT_NULL writes that value in the **host** byte order of the machine that
-//! captured, DLT_LOOP in network byte order. One layer serves both: `type` is
-//! declared twice under disjoint conditions, little-endian when that order
-//! yields a known address family and big-endian otherwise, so the field read
-//! reaches the same decision the dispatcher does. A DLT_NULL capture written on
-//! a big-endian host is still ambiguous with DLT_LOOP and stays logged as
-//! DEVIATIONS.md C3.
+//! DLT_NULL writes the family in the **capturing host's** byte order, DLT_LOOP
+//! in network order. One layer serves both: `type` is declared twice under
+//! disjoint conditions, little-endian when that yields a known family and
+//! big-endian otherwise, so the field read agrees with `next`. A DLT_NULL
+//! capture from a big-endian host reads as DLT_LOOP (DEVIATIONS.md C3).
 
 use crate::field::FieldDesc;
 use crate::names::Table;
@@ -59,8 +57,8 @@ fn known(v: u32) -> bool {
     )
 }
 
-/// True when reading the four octets little-endian names an address family we
-/// recognise, which is what makes this a host-order DLT_NULL header.
+/// Whether the four octets read little-endian name a known family, which is
+/// what marks a little-endian DLT_NULL header.
 fn host_order(hdr: &[u8]) -> bool {
     hdr.get(..4)
         .is_some_and(|b| known(u32::from_le_bytes([b[0], b[1], b[2], b[3]])))
@@ -157,7 +155,7 @@ mod tests {
 
     #[test]
     fn a_big_endian_af_inet_header_reaches_ipv4_too() {
-        // DLT_LOOP, and equally a little-endian file written on a big-endian host.
+        // DLT_LOOP, or DLT_NULL captured on a big-endian host.
         let p = Packet::dissect(frame(&[0, 0, 0, 2], IPV4), ProtoId::Null);
         assert_eq!(
             p.layers().iter().map(|s| s.proto).collect::<Vec<_>>(),
@@ -165,8 +163,8 @@ mod tests {
         );
     }
 
-    /// The dispatcher always tried both byte orders; the field read did not, so
-    /// every DLT_LOOP capture reported a byte-swapped `type`.
+    /// The field read must take the byte order `next` took, or every DLT_LOOP
+    /// capture reports a byte-swapped `type`.
     #[test]
     fn the_family_reads_in_the_order_the_dispatcher_chose() {
         for af in [af::INET, af::INET6_BSD, af::INET6_FREEBSD, af::INET6_DARWIN] {

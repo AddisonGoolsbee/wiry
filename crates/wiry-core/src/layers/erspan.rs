@@ -36,9 +36,8 @@ pub static DESC_II: ProtoDesc = ProtoDesc {
     content_len: None,
 };
 
-/// draft-foschiano-erspan-03 §5: the O bit brings an 8-octet platform-specific
-/// subheader that the flat field table cannot name field by field, so it is
-/// carried whole.
+/// draft-foschiano-erspan-03 §5: the O bit adds an 8-octet platform-specific
+/// subheader, carried whole because its layout varies by platform.
 fn has_subheader(hdr: &[u8]) -> bool {
     hdr.get(11).is_some_and(|b| b & 0x01 != 0)
 }

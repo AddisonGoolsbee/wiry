@@ -7,15 +7,14 @@
 // Changed by the wiry authors:
 //   2026-10-03 — hwtype and op names transcribed into the field table
 
-//! ARP packet format from RFC 826. Hardware type values from the IANA "Address
-//! Resolution Protocol (ARP) Parameters" registry; ptype shares the EtherType
-//! space.
+//! ARP, RFC 826. Hardware types follow the IANA "Address Resolution Protocol
+//! (ARP) Parameters" registry; `ptype` is an EtherType.
 
 use crate::field::FieldDesc;
 use crate::names::{Host, Table};
 use crate::proto::{ethertype, Next, ProtoDesc, ProtoId};
 
-/// scapy 2.7.0 `HARDWARE_TYPES` and `ARP.op`.
+/// scapy 2.7.0's `HARDWARE_TYPES`; `OPS` is its `ARP.op`.
 pub static HWTYPES: Table = &[
     (1, "Ethernet (10Mb)"),
     (2, "Ethernet (3Mb)"),
@@ -52,14 +51,13 @@ static OPS: Table = &[
     (9, "InARP-rep"),
 ];
 
-/// IANA ARP Parameters: 1 = Ethernet (10Mb).
 pub const HWTYPE_ETHER: u64 = 1;
 /// RFC 826 opcodes.
 pub const OP_WHO_HAS: u64 = 1;
 pub const OP_IS_AT: u64 = 2;
 
-/// The address fields are sized by hwlen/plen, so these offsets hold only for
-/// the IPv4-over-Ethernet case (hwlen 6, plen 4).
+/// The address fields are sized by `hwlen` and `plen`, so these offsets hold
+/// only for IPv4 over Ethernet (6 and 4).
 pub static FIELDS: &[FieldDesc] = &[
     FieldDesc::uint("hwtype", 0, 16, HWTYPE_ETHER).named(HWTYPES),
     FieldDesc::uint("ptype", 16, 16, ethertype::IPV4 as u64).host_named(Host::EtherTypes),

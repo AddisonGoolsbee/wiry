@@ -9,21 +9,17 @@
 
 //! Enumerated field values: the integer-to-name tables behind scapy's
 //! `ByteEnumField`, `ShortEnumField`, `BitEnumField`, `MultiEnumField` and
-//! their kin. Reading a field still yields the integer; the name is for
-//! rendering, and for accepting `ICMP(type="echo-request")`.
-//!
-//! Transcribed from scapy 2.7.0 (`scapy/data.py`, `scapy/dadict.py`,
-//! `scapy/libs/ethertypes.py`, `scapy/layers/l2.py`);
-//! see `NOTICE`.
+//! their kin. Reading a field yields the integer; the name is for rendering
+//! and for accepting `ICMP(type="echo-request")`.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// Sorted by value. Lookups binary-search, so an unsorted table misses.
+/// Must be sorted by value: lookups binary-search, so an unsorted table misses.
 pub type Table = &'static [(u64, &'static str)];
 
-/// Tables scapy reads from the host at import rather than shipping, so the
-/// names depend on the machine exactly as scapy's do.
+/// Tables scapy reads from the host at import rather than shipping, so names
+/// vary by machine exactly as scapy's do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Host {
     /// `/etc/protocols`; no fallback, so a host without it renders numbers.
@@ -396,7 +392,6 @@ mod tests {
         assert_eq!(n.value(&[5, 0], "uno"), Some(1));
     }
 
-    /// Lookups binary-search, so an unsorted table silently misses.
     #[test]
     fn every_built_in_table_is_sorted() {
         let sorted = |t: Table| t.windows(2).all(|w| w[0].0 < w[1].0);

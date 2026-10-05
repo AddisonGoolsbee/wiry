@@ -20,8 +20,7 @@ socket2 = { version = "0.6", features = ["all"], optional = true }
 mac_address = { version = "=1.1.8", optional = true }
 
 [features]
-# On by default. Nothing here is needed at build time any more — libpcap is
-# loaded when a capture is first asked for — so the only reason to turn it off
-# is to drop the three dependencies.
+# libpcap is loaded at run time, so turning this off only drops three
+# dependencies.
 default = ["live"]
 live = ["dep:wiry-pcap", "dep:socket2", "dep:mac_address"]

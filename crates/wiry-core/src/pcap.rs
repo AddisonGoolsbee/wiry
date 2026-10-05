@@ -1,5 +1,5 @@
-//! pcap savefile layout per libpcap-savefile(5): a 24-byte file header followed
-//! by 16-byte record headers.
+//! pcap savefile, libpcap-savefile(5): a 24-octet file header, then records
+//! behind 16-octet headers.
 
 use crate::proto::ProtoId;
 
@@ -112,7 +112,8 @@ pub fn parse_header(buf: &[u8]) -> Result<FileHeader, PcapError> {
     })
 }
 
-/// Borrows from the buffer; packet bytes are never copied.
+/// Borrows from the buffer, so packet bytes are never copied. Iteration ends at
+/// the first record that runs past the buffer.
 pub struct Reader<'a> {
     buf: &'a [u8],
     off: usize,
@@ -188,8 +189,8 @@ pub fn write_header(out: &mut Vec<u8>, linktype: u32, snaplen: u32, nanos: bool)
     out.extend_from_slice(&linktype.to_le_bytes());
 }
 
-/// `origlen` below the captured length would describe a frame shorter than its
-/// own bytes, so it is raised rather than written.
+/// An `origlen` below the captured length is raised to it: a frame cannot be
+/// shorter than the bytes captured from it.
 pub fn write_record(out: &mut Vec<u8>, ts_sec: u32, ts_frac: u32, data: &[u8], origlen: u32) {
     let data = &data[..data.len().min(u32::MAX as usize)];
     let caplen = data.len() as u32;
@@ -200,12 +201,12 @@ pub fn write_record(out: &mut Vec<u8>, ts_sec: u32, ts_frac: u32, data: &[u8], o
     out.extend_from_slice(data);
 }
 
-/// Splits a POSIX timestamp into the two fields a capture record carries.
-/// Anything the fields cannot hold — a negative time, one past 2106, a NaN —
-/// clamps, because a wrapped timestamp is a lie the reader cannot detect.
+/// Splits a POSIX timestamp into a record's seconds and fraction. What the
+/// fields cannot hold (negative, past 2106, NaN) clamps, because a wrapped
+/// timestamp is wrong in a way no reader can detect.
 pub fn split_time(t: f64, nanos: bool) -> (u32, u32) {
     let scale = if nanos { 1e9 } else { 1e6 };
-    // Also the NaN case, which compares false against everything.
+    // NaN has no ordering, so this catches it too.
     if t.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
         return (0, 0);
     }

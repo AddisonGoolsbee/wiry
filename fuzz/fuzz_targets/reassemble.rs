@@ -14,8 +14,7 @@ fuzz_target!(|data: &[u8]| {
     let protos = all_protos();
     let link = protos[*sel as usize % protos.len()];
 
-    // One buffer, cut into frames at a marker, so the fuzzer can build a whole
-    // fragment set out of flat input.
+    // Split at a marker so flat input can describe a whole fragment set.
     let frames: Vec<&[u8]> = body.split(|b| *b == 0xfe).take(64).collect();
 
     for f in &frames {
@@ -33,7 +32,6 @@ fuzz_target!(|data: &[u8]| {
 
     let n = frames.len();
     let pieces = frag::defragment(frames, link);
-    // Fragments collapse into one datagram, so pieces only ever get fewer.
     assert!(pieces.len() <= n, "reassembly invented pieces");
     for piece in pieces {
         assert!(

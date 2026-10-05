@@ -4,15 +4,14 @@ use wiry_core::pcap;
 /// index a read pcap file produces.
 pub type Record = (usize, u32, u32, u32, u32);
 
-/// What the caller wants after seeing a packet.
+/// Whether capture continues after a packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flow {
     Continue,
     Stop,
 }
 
-/// Owned metadata for one captured frame. Deliberately owns nothing borrowed
-/// from the backend: libpcap reuses its ring slot on the next read.
+/// Metadata for one captured frame; `ts_frac` is in microseconds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PacketMeta {
     pub ts_sec: u32,
@@ -31,9 +30,8 @@ impl<F: FnMut(&PacketMeta, &[u8]) -> Flow> PacketSink for F {
     }
 }
 
-/// Accumulates captured frames as a valid pcap file image plus the same record
-/// index a read file produces, so a live capture and a read one are the same
-/// bytes and share every bulk path.
+/// Captured frames as a valid pcap file image plus the record index a read file
+/// produces, so a live capture shares every bulk path with a read one.
 pub struct CaptureBuf {
     buf: Vec<u8>,
     index: Vec<Record>,
@@ -52,7 +50,7 @@ impl CaptureBuf {
     }
 
     pub fn push(&mut self, meta: &PacketMeta, data: &[u8]) {
-        // write_record emits a 16-byte record header before the data.
+        // Past the 16-octet record header `write_record` emits.
         let off = self.buf.len() + 16;
         pcap::write_record(&mut self.buf, meta.ts_sec, meta.ts_frac, data, meta.origlen);
         self.index.push((
