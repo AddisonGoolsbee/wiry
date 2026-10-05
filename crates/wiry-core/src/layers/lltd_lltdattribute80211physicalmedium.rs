@@ -68,7 +68,7 @@ fn bind_next(hdr: &mut [u8], p: ProtoId) {
         ProtoId::Padding => 0,
         _ => return,
     };
-    if hdr.len() >= 1 {
+    if !hdr.is_empty() {
         crate::field::write_bits(hdr, 0, 8, v);
     }
 }

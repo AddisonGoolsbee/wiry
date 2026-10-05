@@ -54,8 +54,7 @@ fn set_hlen(hdr: &mut [u8], hlen: usize) {
     let v: i64 = v_x.wrapping_add(2i64);
     let f = &FIELDS[1];
     if v >= 0 && crate::field::fits(f, v as u64) {
-        let w = crate::field::wire_uint(f, v as u64);
-        crate::field::write_bits(hdr, f.bit_off, f.bit_len, w);
+        crate::field::write_uint(hdr, f, v as u64);
     }
 }
 
@@ -74,7 +73,7 @@ fn bind_next(hdr: &mut [u8], p: ProtoId) {
         ProtoId::Padding => 0,
         _ => return,
     };
-    if hdr.len() >= 1 {
+    if !hdr.is_empty() {
         crate::field::write_bits(hdr, 0, 8, v);
     }
 }

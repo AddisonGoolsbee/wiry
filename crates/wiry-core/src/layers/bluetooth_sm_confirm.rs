@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // Derived from scapy: scapy/layers/bluetooth.py
-//   scapy 2.7.0
+//   scapy 2.8.0.post0
 //   Copyright (C) Philippe Biondi and the scapy contributors
 //
 // Changed by the wiry authors:
 //   2026-10-03 — field table, defaults, enum names and bindings of SM_Confirm converted mechanically from the field objects by dev/protogen/scapy2spec.py
 
-//! scapy/layers/bluetooth.py, class SM_Confirm (scapy 2.7.0), converted by
+//! scapy/layers/bluetooth.py, class SM_Confirm (scapy 2.8.0.post0), converted by
 //! dev/protogen/scapy2spec.py from the field objects scapy builds at run time.
 //! scapy's docstring cites no RFC for it.
 //!

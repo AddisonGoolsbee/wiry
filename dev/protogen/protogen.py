@@ -148,6 +148,87 @@ def validate_enum(f: str, fd: dict) -> None:
     fd["enum"] = dict(sorted(table.items()))
 
 
+LE_KINDS = ("uint", "flags", "mac", "bytes")
+
+
+def validate_le(f: str, fields: list[dict], where: str = "") -> list[tuple[int, int]]:
+    """`le = { at, len }`: octets [at, at + len) are one little-endian integer
+    and the field's `off` counts from its most significant bit, as if it had
+    been written big-endian in their place. Returns the groups, in bits.
+
+    Refused: a group the engine cannot hold in a u64, a field outside its own
+    group, two groups that overlap without being the same, and a big-endian
+    field inside a group, which would read the octets in the other order."""
+    groups: dict[tuple[int, int], str] = {}
+    every: set[tuple[int, int]] = set()
+
+    def alternative(fd):
+        # Fields that share octets by condition are checked against their own
+        # group only; which of them is present is the layout's business.
+        return fd.get("when") or fd.get("cond") or fd.get("overlaps")
+
+    for fd in fields:
+        le = fd.get("le")
+        kind = fd.get("kind", "uint")
+        name = fd.get("name")
+        if kind == "le_uint":
+            if le is not None:
+                raise SpecError(f"{f}: {name!r} is le_uint, which is already one group")
+            every.add((fd["off"], fd["off"] + fd["len"]))
+            if not alternative(fd):
+                groups.setdefault((fd["off"], fd["off"] + fd["len"]), name)
+            continue
+        if le is None:
+            continue
+        if kind not in LE_KINDS:
+            raise SpecError(f"{f}: {name!r} is {kind}, which cannot be little-endian")
+        if not isinstance(le, dict) or set(le) != {"at", "len"}:
+            raise SpecError(f"{f}: {name!r} le must be {{ at = <octet>, len = <octets> }}")
+        at, n = le["at"], le["len"]
+        if kind in ("mac", "bytes"):
+            if at * 8 != fd["off"] or n * 8 != fd["len"]:
+                raise SpecError(
+                    f"{f}: {name!r} is reversed as a whole, so its group must be "
+                    f"exactly its own {fd['len'] // 8} octets"
+                )
+        elif not 2 <= n <= 8:
+            raise SpecError(f"{f}: {name!r} group of {n} octets; 2 to 8 are readable")
+        lo, hi = at * 8, (at + n) * 8
+        if not (lo <= fd["off"] and fd["off"] + fd["len"] <= hi):
+            raise SpecError(f"{f}: {name!r} lies outside its group, octets {at}..{at + n}")
+        every.add((lo, hi))
+        if not alternative(fd):
+            groups.setdefault((lo, hi), name)
+    spans = sorted(groups)
+    for (a0, a1), (b0, b1) in zip(spans, spans[1:]):
+        if b0 < a1:
+            raise SpecError(
+                f"{f}: little-endian groups of {groups[(a0, a1)]!r} and "
+                f"{groups[(b0, b1)]!r} overlap"
+            )
+    for fd in fields:
+        if fd.get("le") is not None or fd.get("kind", "uint") == "le_uint":
+            continue
+        if fd.get("kind", "uint").startswith("var_") or alternative(fd):
+            continue
+        lo, hi = fd["off"], fd["off"] + fd["len"]
+        for g0, g1 in spans:
+            if lo < g1 and g0 < hi:
+                raise SpecError(
+                    f"{f}: {fd['name']!r} is big-endian inside the little-endian "
+                    f"group of {groups[(g0, g1)]!r}"
+                )
+    return sorted(every)
+
+
+def refuse_le_overlap(f: str, spans: list[tuple[int, int]], off: int, ln: int, what: str):
+    """A selector, a count or a length is read big-endian at a bit range, so
+    one inside a little-endian group would read the octets in the wrong order."""
+    for g0, g1 in spans:
+        if off < g1 and g0 < off + ln:
+            raise SpecError(f"{f}: {what} at bit {off} reads into a little-endian group")
+
+
 def validate_group(f: str, g: dict, nested: bool) -> None:
     """A repeating group: DEVIATIONS E1's escape from the flat table. Every
     refusal here is a layout the walk would read wrongly rather than fail on."""
@@ -203,6 +284,9 @@ def validate_group(f: str, g: dict, nested: bool) -> None:
                 f"{f}: group field {fd['name']!r} ends past the "
                 f"{fixed}-octet element"
             )
+    spans = validate_le(f, fields)
+    for t in g.get("terms") or []:
+        refuse_le_overlap(f, spans, t["off"], t["len"], "a length term")
     if nested and g.get("nested"):
         raise SpecError(
             f"{f}: group {g['name']!r} nests a group inside a nested one; "
@@ -227,13 +311,14 @@ def validate(s: dict) -> None:
     if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", s["id"]):
         raise SpecError(f"{f}: id {s['id']!r} must be a Rust-style CamelCase name")
 
-    fields = s.get("fields") or []
-    if not fields:
-        raise SpecError(f"{f}: a layer needs at least one field")
+    fields = s["fields"] = s.get("fields") or []
+    if not fields and s.get("header_len") != 0:
+        raise SpecError(f"{f}: a layer with no fields must have header_len = 0")
 
     hl = s.get("header_len")
     fixed_hl = hl if isinstance(hl, int) else None
     prev_end = -1
+    taken: list[tuple[int, int]] = []
     for i, fd in enumerate(fields):
         kind = fd.get("kind", "uint")
         if kind not in KINDS:
@@ -260,11 +345,16 @@ def validate(s: dict) -> None:
                     f"{f}: {fd['name']!r} names {len(names)} flags in {fd['len']} bits"
                 )
         off, ln = fd["off"], fd["len"]
-        if not fd.get("when") and not fd.get("overlaps") and off < prev_end:
+        # Bit fields counted from the least significant end are declared in an
+        # order their offsets do not follow, so any earlier field is checked.
+        exempt = fd.get("when") or fd.get("overlaps")
+        if not exempt and (off < prev_end if not ln else
+                           any(off < b and a < off + ln for a, b in taken)):
             raise SpecError(
-                f"{f}: {fd['name']!r} at bit {off} overlaps the field before it; "
+                f"{f}: {fd['name']!r} at bit {off} overlaps an earlier field; "
                 "give it a `when` condition or set overlaps = true if that is real"
             )
+        taken.append((off, off + ln))
         prev_end = max(prev_end, off + ln)
         if fixed_hl is not None and not kind.startswith("var_"):
             if off + ln > fixed_hl * 8:
@@ -273,6 +363,8 @@ def validate(s: dict) -> None:
                     f"{fixed_hl}-octet header; the flat model cannot place it. "
                     "Use header_len = \"hand\" and a hand-written hook."
                 )
+
+    spans = validate_le(f, fields)
 
     if isinstance(hl, str) and hl not in ("hand", "rest"):
         raise SpecError(f"{f}: header_len must be an integer, \"rest\" or \"hand\"")
@@ -295,6 +387,16 @@ def validate(s: dict) -> None:
         if sl.get("field") not in names:
             raise SpecError(f"{f}: set_len names no field of this layer")
         Expr(sl["expr"], fields, f"{f}: set_len", extra=("x",))
+    pl = s.get("payload_len")
+    if pl is not None:
+        if not isinstance(pl, dict) or set(pl) - {"field", "add"} or "field" not in pl:
+            raise SpecError(f"{f}: payload_len takes field and an optional add")
+        fd = next((x for x in fields if x["name"] == pl["field"]), None)
+        if fd is None or fd.get("kind", "uint") not in ("uint", "le_uint", "computed"):
+            raise SpecError(f"{f}: payload_len names no integer field of this layer")
+        if fd.get("cond") or fd.get("when"):
+            raise SpecError(f"{f}: payload_len names a conditional field")
+        fd["_payload_len"] = True
     cl = s.get("content_len")
     if isinstance(cl, str) and cl not in ("hand", "header"):
         raise SpecError(f"{f}: content_len must be \"hand\" or \"header\"")
@@ -308,6 +410,7 @@ def validate(s: dict) -> None:
     elif isinstance(nx, dict):
         if "off" not in nx or "len" not in nx:
             raise SpecError(f"{f}: [next] needs off and len")
+        refuse_le_overlap(f, spans, nx["off"], nx["len"], "[next]")
         for arm in nx.get("arms", []):
             if "value" not in arm or "proto" not in arm:
                 raise SpecError(f"{f}: every [[next.arms]] needs a value and a proto")
@@ -315,6 +418,10 @@ def validate(s: dict) -> None:
     g = s.get("group")
     if g:
         validate_group(f, g, False)
+        for key in ("count", "len"):
+            if f"{key}_off" in g:
+                refuse_le_overlap(f, spans, g[f"{key}_off"], g[f"{key}_len"],
+                                  f"the group's {key}")
         # The region has to sit inside the header, because that is the slice a
         # walk is handed; a fixed header length ends before it.
         if isinstance(hl, int) or (isinstance(hl, dict) and hl["base"] != g.get("start", 0)):
@@ -527,6 +634,10 @@ def render_field(fd: dict) -> str:
     )
     if kind == "flags" and fd.get("default"):
         expr += f".with_default({fd['default']})"
+    if fd.get("le"):
+        expr += f".little_endian({fd['le']['at']}, {fd['le']['len']})"
+    if fd.get("_payload_len") and kind != "computed":
+        expr += ".recomputed()"
     if fd.get("default_bytes"):
         b = ", ".join(str(x) for x in fd["default_bytes"])
         expr += f".defaulting_to(&[{b}])"
@@ -617,7 +728,7 @@ def render_bind_next(s: dict) -> str:
         body.append(f"        ProtoId::{a['proto']} => {a['value']},")
     body.append("        _ => return,")
     body.append("    };")
-    body.append(f"    if hdr.len() >= {need} {{")
+    body.append("    if !hdr.is_empty() {" if need == 1 else f"    if hdr.len() >= {need} {{")
     body.append(f"        crate::field::write_bits(hdr, {off}, {ln}, v);")
     body.append("    }")
     body.append("}")
@@ -671,8 +782,7 @@ def render_set_len(s: dict) -> str:
         f"    let v: i64 = {e.rs(e.tree, 'int')};",
         f"    let f = &FIELDS[{i}];",
         "    if v >= 0 && crate::field::fits(f, v as u64) {",
-        "        let w = crate::field::wire_uint(f, v as u64);",
-        "        crate::field::write_bits(hdr, f.bit_off, f.bit_len, w);",
+        "        crate::field::write_uint(hdr, f, v as u64);",
         "    }",
         "}",
     ]) + "\n"
@@ -1106,8 +1216,23 @@ def render_dispatch(specs: list[dict]) -> str:
             out.append("")
             if is_port:
                 gates.append((fname, f"{kind.upper()}_CLAIMED"))
+    by_id = {s["id"]: s for s in specs}
+    for s, p in by_layer:
+        parent = by_id.get(p["layer"])
+        if parent and "field" in p:
+            spans = validate_le(parent["_file"], parent["fields"])
+            le = p.get("le")
+            if le:
+                g = (le["at"] * 8, (le["at"] + le["len"]) * 8)
+                if g not in spans or not (g[0] <= p["off"] and p["off"] + p["len"] <= g[1]):
+                    raise SpecError(f"{s['_file']}: the {p['layer']} selector names a "
+                                    "little-endian group its parent does not have")
+                spans = [x for x in spans if x != g]
+            refuse_le_overlap(s["_file"], spans, p["off"], p["len"],
+                              f"the {p['layer']} selector")
     out += render_by_layer(by_layer)
-    places = sorted({(p["layer"], p["field"], p["off"], p["len"])
+    places = sorted({(p["layer"], tuple(p["field"]) if isinstance(p["field"], list)
+                      else (p["field"],), *selector(p))
                      for _, p in by_layer if "field" in p})
     if places:
         tests += [
@@ -1118,10 +1243,27 @@ def render_dispatch(specs: list[dict]) -> str:
             "    #[test]",
             "    fn every_parent_field_is_where_the_bindings_read_it() {",
             *[
-                f"        assert_eq!(crate::proto::field_of(ProtoId::{lay}, {rs_str(f)})"
-                f".map(|f| (f.bit_off, f.bit_len)), Some(({o}, {n})));"
-                for lay, f, o, n in places
+                f"        assert_eq!(span_of(ProtoId::{lay}, &[{', '.join(rs_str(x) for x in f)}]), "
+                f"Some(({o}, {n}, {a}, {g})));"
+                for lay, f, o, n, a, g in places
             ],
+            "    }",
+            "",
+            "    /// Adjacent fields of one byte order, as the selector they make together.",
+            "    fn span_of(p: ProtoId, names: &[&str]) -> Option<(u16, u16, u16, u8)> {",
+            "        let mut out: Option<(u16, u16, u16, u8)> = None;",
+            "        for n in names {",
+            "            let f = crate::proto::field_of(p, n)?;",
+            "            let (at, len) = if f.le_len > 1 { (f.le_at, f.le_len) } else { (0, 0) };",
+            "            out = match out {",
+            "                None => Some((f.bit_off, f.bit_len, at, len)),",
+            "                Some((o, l, a, g)) if o + l == f.bit_off && (a, g) == (at, len) => {",
+            "                    Some((o, l + f.bit_len, a, g))",
+            "                }",
+            "                _ => return None,",
+            "            };",
+            "        }",
+            "        out",
             "    }",
             "",
         ]
@@ -1166,6 +1308,12 @@ def render_dispatch(specs: list[dict]) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+def selector(p: dict) -> tuple[int, int, int, int]:
+    """A layer parent's selector as `field::read_in` takes it."""
+    le = p.get("le") or {"at": 0, "len": 0}
+    return (p["off"], p["len"], le["at"], le["len"])
+
+
 def render_by_layer(entries: list[tuple[dict, dict]]) -> list[str]:
     """Children of any layer, chosen by one of its fields. Consulted only when
     the parent's own `next` found nothing, so a hand-written parent keeps every
@@ -1182,32 +1330,33 @@ def render_by_layer(entries: list[tuple[dict, dict]]) -> list[str]:
         fn = "by_" + re.sub(r"(?<!^)([A-Z])", r"_\1", parent).lower()
         fwd.append(f"        ProtoId::{parent} => {fn}(hdr),")
         body = [f"#[inline(never)]", f"fn {fn}(hdr: &[u8]) -> Option<ProtoId> {{"]
-        keyed: dict[tuple[int, int], list[tuple[int, str]]] = {}
+        keyed: dict[tuple[int, int, int, int], list[tuple[int, str]]] = {}
         always = []
         for s, p in parents[parent]:
             if "field" not in p:
                 always.append(s["id"])
                 continue
             for v in p["values"]:
-                keyed.setdefault((p["off"], p["len"]), []).append((v, s["id"]))
+                keyed.setdefault(selector(p), []).append((v, s["id"]))
             bv = p.get("bind", p["values"][0])
             rev += [f"    if parent == ProtoId::{parent} && child == ProtoId::{s['id']} {{",
-                    f"        crate::field::write_bits(hdr, {p['off']}, {p['len']}, {bv});",
+                    f"        crate::field::write_in(hdr, {', '.join(map(str, selector(p)))}, {bv});",
                     "    }"]
-        for (off, ln), arms in sorted(keyed.items()):
+        for (off, ln, le_at, le_len), arms in sorted(keyed.items()):
             seen = {}
             for v, pid in arms:
                 if v in seen and seen[v] != pid:
                     raise SpecError(f"{parent} bit {off}: {v} binds both {seen[v]} and {pid}")
                 seen[v] = pid
-            read = f"crate::field::read_bits(hdr, {off}, {ln})"
+            read = f"crate::field::read_in(hdr, {off}, {ln}, {le_at}, {le_len})"
+            need = (le_at + le_len) * 8 if le_len > 1 else off + ln
             if len(seen) == 1:
                 (v, pid), = seen.items()
-                body.append(f"    if hdr.len() * 8 >= {off + ln} && {read} == {v} {{")
+                body.append(f"    if hdr.len() * 8 >= {need} && {read} == {v} {{")
                 body.append(f"        return Some(ProtoId::{pid});")
                 body.append("    }")
                 continue
-            body.append(f"    if hdr.len() * 8 >= {off + ln} {{")
+            body.append(f"    if hdr.len() * 8 >= {need} {{")
             body.append(f"        match {read} {{")
             for v in sorted(seen):
                 body.append(f"            {v} => return Some(ProtoId::{seen[v]}),")
@@ -1271,7 +1420,11 @@ def render_registration(specs: list[dict]) -> dict[Path, list[tuple[str, str]]]:
             acc.append(f"ProtoId::{s['id']} => &[{names}],")
     parsed = []
     groups = []
+    plen = []
     for s in sorted(specs, key=lambda s: s["num"]):
+        if s.get("payload_len"):
+            pl = s["payload_len"]
+            plen.append(f"ProtoId::{s['id']} => Some(({rs_str(pl['field'])}, {pl.get('add', 0)})),")
         if s.get("parsed_field"):
             parsed.append(f"ProtoId::{s['id']} => {rs_str(s['parsed_field'])},")
         if s.get("group"):
@@ -1290,6 +1443,7 @@ def render_registration(specs: list[dict]) -> dict[Path, list[tuple[str, str]]]:
             ("accessors", "\n".join(acc)),
             ("parsed", "\n".join(parsed)),
             ("groups", "\n".join(groups)),
+            ("payload_len", "\n".join(plen)),
         ],
         MOD_RS: [("mods", mods)],
     }

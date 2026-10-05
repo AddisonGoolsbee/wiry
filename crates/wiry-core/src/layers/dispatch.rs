@@ -263,9 +263,20 @@ pub fn by_icmpv6_type_of(p: ProtoId) -> Option<u8> {
 pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
     match parent {
         ProtoId::ATTHdr => by_a_t_t_hdr(hdr),
+        ProtoId::BTLECTRL => by_b_t_l_e_c_t_r_l(hdr),
+        ProtoId::BTLEDATA => by_b_t_l_e_d_a_t_a(hdr),
         ProtoId::Dot11Action => by_dot11_action(hdr),
+        ProtoId::HCIACLHdr => by_h_c_i_a_c_l_hdr(hdr),
+        ProtoId::HCICommandHdr => by_h_c_i_command_hdr(hdr),
+        ProtoId::HCIEventCommandComplete => by_h_c_i_event_command_complete(hdr),
+        ProtoId::HCIEventHdr => by_h_c_i_event_hdr(hdr),
         ProtoId::HCIEventLEMeta => by_h_c_i_event_l_e_meta(hdr),
+        ProtoId::HCIHdr => by_h_c_i_hdr(hdr),
+        ProtoId::HCIMonHdr => by_h_c_i_mon_hdr(hdr),
+        ProtoId::HCIMonPcapHdr => by_h_c_i_mon_pcap_hdr(hdr),
         ProtoId::HCIPHDRHdr => by_h_c_i_p_h_d_r_hdr(hdr),
+        ProtoId::L2CAPCmdHdr => by_l2_c_a_p_cmd_hdr(hdr),
+        ProtoId::L2CAPHdr => by_l2_c_a_p_hdr(hdr),
         ProtoId::MobileIP => by_mobile_i_p(hdr),
         ProtoId::NetflowRecordV1 => by_netflow_record_v1(hdr),
         ProtoId::NetflowRecordV5 => by_netflow_record_v5(hdr),
@@ -280,13 +291,14 @@ pub fn by_layer(parent: ProtoId, hdr: &[u8]) -> Option<ProtoId> {
 #[inline(never)]
 fn by_a_t_t_hdr(hdr: &[u8]) -> Option<ProtoId> {
     if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
             1 => return Some(ProtoId::ATTErrorResponse),
             2 => return Some(ProtoId::ATTExchangeMTURequest),
             3 => return Some(ProtoId::ATTExchangeMTUResponse),
             4 => return Some(ProtoId::ATTFindInformationRequest),
             6 => return Some(ProtoId::ATTFindByTypeValueRequest),
             7 => return Some(ProtoId::ATTFindByTypeValueResponse),
+            8 => return Some(ProtoId::ATTReadByTypeRequest),
             10 => return Some(ProtoId::ATTReadRequest),
             11 => return Some(ProtoId::ATTReadResponse),
             12 => return Some(ProtoId::ATTReadBlobRequest),
@@ -294,13 +306,16 @@ fn by_a_t_t_hdr(hdr: &[u8]) -> Option<ProtoId> {
             14 => return Some(ProtoId::ATTReadMultipleRequest),
             15 => return Some(ProtoId::ATTReadMultipleResponse),
             16 => return Some(ProtoId::ATTReadByGroupTypeRequest),
-            17 => return Some(ProtoId::ATTReadByGroupTypeResponse),
             18 => return Some(ProtoId::ATTWriteRequest),
+            19 => return Some(ProtoId::ATTWriteResponse),
             22 => return Some(ProtoId::ATTPrepareWriteRequest),
             23 => return Some(ProtoId::ATTPrepareWriteResponse),
             24 => return Some(ProtoId::ATTExecuteWriteRequest),
+            25 => return Some(ProtoId::ATTExecuteWriteResponse),
             27 => return Some(ProtoId::ATTHandleValueNotification),
             29 => return Some(ProtoId::ATTHandleValueIndication),
+            30 => return Some(ProtoId::ATTHandleValueConfirmation),
+            32 => return Some(ProtoId::ATTReadMultipleVariableRequest),
             82 => return Some(ProtoId::ATTWriteCommand),
             _ => {}
         }
@@ -309,9 +324,67 @@ fn by_a_t_t_hdr(hdr: &[u8]) -> Option<ProtoId> {
 }
 
 #[inline(never)]
+fn by_b_t_l_e_c_t_r_l(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
+            0 => return Some(ProtoId::LLCONNECTIONUPDATEIND),
+            1 => return Some(ProtoId::LLCHANNELMAPIND),
+            2 => return Some(ProtoId::LLTERMINATEIND),
+            3 => return Some(ProtoId::LLENCREQ),
+            4 => return Some(ProtoId::LLENCRSP),
+            5 => return Some(ProtoId::LLSTARTENCREQ),
+            6 => return Some(ProtoId::LLSTARTENCRSP),
+            7 => return Some(ProtoId::LLUNKNOWNRSP),
+            8 => return Some(ProtoId::LLFEATUREREQ),
+            9 => return Some(ProtoId::LLFEATURERSP),
+            10 => return Some(ProtoId::LLPAUSEENCREQ),
+            11 => return Some(ProtoId::LLPAUSEENCRSP),
+            12 => return Some(ProtoId::LLVERSIONIND),
+            13 => return Some(ProtoId::LLREJECTIND),
+            14 => return Some(ProtoId::LLSLAVEFEATUREREQ),
+            15 => return Some(ProtoId::LLCONNECTIONPARAMREQ),
+            16 => return Some(ProtoId::LLCONNECTIONPARAMRSP),
+            17 => return Some(ProtoId::LLREJECTEXTIND),
+            18 => return Some(ProtoId::LLPINGREQ),
+            19 => return Some(ProtoId::LLPINGRSP),
+            20 => return Some(ProtoId::LLLENGTHREQ),
+            21 => return Some(ProtoId::LLLENGTHRSP),
+            22 => return Some(ProtoId::LLPHYREQ),
+            23 => return Some(ProtoId::LLPHYRSP),
+            24 => return Some(ProtoId::LLPHYUPDATEIND),
+            25 => return Some(ProtoId::LLMINUSEDCHANNELSIND),
+            26 => return Some(ProtoId::LLCTEREQ),
+            27 => return Some(ProtoId::LLCTERSP),
+            29 => return Some(ProtoId::LLCLOCKACCURACYREQ),
+            30 => return Some(ProtoId::LLCLOCKACCURACYRSP),
+            31 => return Some(ProtoId::LLCISREQ),
+            32 => return Some(ProtoId::LLCISRSP),
+            33 => return Some(ProtoId::LLCISIND),
+            34 => return Some(ProtoId::LLCISTERMINATEIND),
+            38 => return Some(ProtoId::LLSUBRATEREQ),
+            39 => return Some(ProtoId::LLSUBRATEIND),
+            40 => return Some(ProtoId::LLCHANNELREPORTINGIND),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_b_t_l_e_d_a_t_a(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 && crate::field::read_in(hdr, 6, 2, 0, 0) == 3 {
+        return Some(ProtoId::BTLECTRL);
+    }
+    if hdr.len() * 8 >= 16 && crate::field::read_in(hdr, 6, 10, 0, 0) == 256 {
+        return Some(ProtoId::BTLEEMPTYPDU);
+    }
+    None
+}
+
+#[inline(never)]
 fn by_dot11_action(hdr: &[u8]) -> Option<ProtoId> {
     if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
             0 => return Some(ProtoId::Dot11SpectrumManagement),
             10 => return Some(ProtoId::Dot11WNM),
             _ => {}
@@ -321,11 +394,176 @@ fn by_dot11_action(hdr: &[u8]) -> Option<ProtoId> {
 }
 
 #[inline(never)]
+fn by_h_c_i_a_c_l_hdr(_hdr: &[u8]) -> Option<ProtoId> {
+    Some(ProtoId::L2CAPHdr)
+}
+
+#[inline(never)]
+fn by_h_c_i_command_hdr(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 16 {
+        match crate::field::read_in(hdr, 0, 16, 0, 2) {
+            1025 => return Some(ProtoId::HCICmdInquiry),
+            1026 => return Some(ProtoId::HCICmdInquiryCancel),
+            1027 => return Some(ProtoId::HCICmdPeriodicInquiryMode),
+            1028 => return Some(ProtoId::HCICmdExitPeiodicInquiryMode),
+            1029 => return Some(ProtoId::HCICmdCreateConnection),
+            1030 => return Some(ProtoId::HCICmdDisconnect),
+            1032 => return Some(ProtoId::HCICmdCreateConnectionCancel),
+            1033 => return Some(ProtoId::HCICmdAcceptConnectionRequest),
+            1034 => return Some(ProtoId::HCICmdRejectConnectionResponse),
+            1036 => return Some(ProtoId::HCICmdLinkKeyRequestNegativeReply),
+            1039 => return Some(ProtoId::HCICmdChangeConnectionPacketType),
+            1041 => return Some(ProtoId::HCICmdAuthenticationRequested),
+            1043 => return Some(ProtoId::HCICmdSetConnectionEncryption),
+            1047 => return Some(ProtoId::HCICmdChangeConnectionLinkKey),
+            1049 => return Some(ProtoId::HCICmdRemoteNameRequest),
+            1050 => return Some(ProtoId::HCICmdRemoteNameRequestCancel),
+            1051 => return Some(ProtoId::HCICmdReadRemoteSupportedFeatures),
+            1052 => return Some(ProtoId::HCICmdReadRemoteExtendedFeatures),
+            1067 => return Some(ProtoId::HCICmdIOCapabilityRequestReply),
+            1068 => return Some(ProtoId::HCICmdUserConfirmationRequestReply),
+            1069 => return Some(ProtoId::HCICmdUserConfirmationRequestNegativeReply),
+            1070 => return Some(ProtoId::HCICmdUserPasskeyRequestReply),
+            1071 => return Some(ProtoId::HCICmdUserPasskeyRequestNegativeReply),
+            1075 => return Some(ProtoId::HCICmdRemoteOOBDataRequestNegativeReply),
+            2049 => return Some(ProtoId::HCICmdHoldMode),
+            3073 => return Some(ProtoId::HCICmdSetEventMask),
+            3075 => return Some(ProtoId::HCICmdReset),
+            3077 => return Some(ProtoId::HCICmdSetEventFilter),
+            3091 => return Some(ProtoId::HCICmdWriteLocalName),
+            3092 => return Some(ProtoId::HCICmdReadLocalName),
+            3094 => return Some(ProtoId::HCICmdWriteConnectAcceptTimeout),
+            3180 => return Some(ProtoId::HCICmdReadLEHostSupport),
+            3181 => return Some(ProtoId::HCICmdWriteLEHostSupport),
+            4097 => return Some(ProtoId::HCICmdReadLocalVersionInformation),
+            4100 => return Some(ProtoId::HCICmdReadLocalExtendedFeatures),
+            4105 => return Some(ProtoId::HCICmdReadBDAddr),
+            5123 => return Some(ProtoId::HCICmdReadLinkQuality),
+            5125 => return Some(ProtoId::HCICmdReadRSSI),
+            6145 => return Some(ProtoId::HCICmdReadLoopbackMode),
+            6146 => return Some(ProtoId::HCICmdWriteLoopbackMode),
+            8193 => return Some(ProtoId::HCICmdLESetEventMask),
+            8194 => return Some(ProtoId::HCICmdLEReadBufferSizeV1),
+            8195 => return Some(ProtoId::HCICmdLEReadLocalSupportedFeatures),
+            8197 => return Some(ProtoId::HCICmdLESetRandomAddress),
+            8198 => return Some(ProtoId::HCICmdLESetAdvertisingParameters),
+            8201 => return Some(ProtoId::HCICmdLESetScanResponseData),
+            8202 => return Some(ProtoId::HCICmdLESetAdvertiseEnable),
+            8203 => return Some(ProtoId::HCICmdLESetScanParameters),
+            8204 => return Some(ProtoId::HCICmdLESetScanEnable),
+            8205 => return Some(ProtoId::HCICmdLECreateConnection),
+            8206 => return Some(ProtoId::HCICmdLECreateConnectionCancel),
+            8207 => return Some(ProtoId::HCICmdLEReadFilterAcceptListSize),
+            8208 => return Some(ProtoId::HCICmdLEClearFilterAcceptList),
+            8209 => return Some(ProtoId::HCICmdLEAddDeviceToFilterAcceptList),
+            8210 => return Some(ProtoId::HCICmdLERemoveDeviceFromFilterAcceptList),
+            8211 => return Some(ProtoId::HCICmdLEConnectionUpdate),
+            8214 => return Some(ProtoId::HCICmdLEReadRemoteFeatures),
+            8217 => return Some(ProtoId::HCICmdLEEnableEncryption),
+            8218 => return Some(ProtoId::HCICmdLELongTermKeyRequestReply),
+            8219 => return Some(ProtoId::HCICmdLELongTermKeyRequestNegativeReply),
+            8245 => return Some(ProtoId::HCICmdLESetAdvertisingSetRandomAddress),
+            8249 => return Some(ProtoId::HCICmdLESetExtendedAdvertiseEnable),
+            8258 => return Some(ProtoId::HCICmdLESetExtendedScanEnable),
+            8288 => return Some(ProtoId::HCICmdLEReadBufferSizeV2),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_h_c_i_event_command_complete(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 24 {
+        match crate::field::read_in(hdr, 8, 16, 1, 2) {
+            3092 => return Some(ProtoId::HCICmdCompleteReadLocalName),
+            4097 => return Some(ProtoId::HCICmdCompleteReadLocalVersionInformation),
+            4100 => return Some(ProtoId::HCICmdCompleteReadLocalExtendedFeatures),
+            4105 => return Some(ProtoId::HCICmdCompleteReadBDAddr),
+            8207 => return Some(ProtoId::HCICmdCompleteLEReadWhiteListSize),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_h_c_i_event_hdr(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
+            1 => return Some(ProtoId::HCIEventInquiryComplete),
+            3 => return Some(ProtoId::HCIEventConnectionComplete),
+            4 => return Some(ProtoId::HCIEventConnectionRequest),
+            5 => return Some(ProtoId::HCIEventDisconnectionComplete),
+            7 => return Some(ProtoId::HCIEventRemoteNameRequestComplete),
+            8 => return Some(ProtoId::HCIEventEncryptionChange),
+            11 => return Some(ProtoId::HCIEventReadRemoteSupportedFeaturesComplete),
+            12 => return Some(ProtoId::HCIEventReadRemoteVersionInformationComplete),
+            14 => return Some(ProtoId::HCIEventCommandComplete),
+            15 => return Some(ProtoId::HCIEventCommandStatus),
+            23 => return Some(ProtoId::HCIEventLinkKeyRequest),
+            35 => return Some(ProtoId::HCIEventReadRemoteExtendedFeaturesComplete),
+            50 => return Some(ProtoId::HCIEventIOCapabilityResponse),
+            61 => return Some(ProtoId::HCIEventRemoteHostSupportedFeaturesNotification),
+            62 => return Some(ProtoId::HCIEventLEMeta),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
 fn by_h_c_i_event_l_e_meta(hdr: &[u8]) -> Option<ProtoId> {
     if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
+            1 => return Some(ProtoId::HCILEMetaConnectionComplete),
             3 => return Some(ProtoId::HCILEMetaConnectionUpdateComplete),
+            4 => return Some(ProtoId::HCILEMetaLEReadRemoteFeaturesComplete),
             5 => return Some(ProtoId::HCILEMetaLongTermKeyRequest),
+            10 => return Some(ProtoId::HCILEMetaEnhancedConnectionComplete),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_h_c_i_hdr(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
+            1 => return Some(ProtoId::HCICommandHdr),
+            2 => return Some(ProtoId::HCIACLHdr),
+            4 => return Some(ProtoId::HCIEventHdr),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_h_c_i_mon_hdr(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 16 {
+        match crate::field::read_in(hdr, 0, 16, 0, 2) {
+            0 => return Some(ProtoId::HCIMonNewIndex),
+            2 => return Some(ProtoId::HCICommandHdr),
+            3 => return Some(ProtoId::HCIEventHdr),
+            5 => return Some(ProtoId::HCIACLHdr),
+            10 => return Some(ProtoId::HCIMonIndexInfo),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_h_c_i_mon_pcap_hdr(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 32 {
+        match crate::field::read_in(hdr, 16, 16, 0, 0) {
+            0 => return Some(ProtoId::HCIMonNewIndex),
+            2 => return Some(ProtoId::HCICommandHdr),
+            3 => return Some(ProtoId::HCIEventHdr),
+            5 => return Some(ProtoId::HCIACLHdr),
+            10 => return Some(ProtoId::HCIMonIndexInfo),
             _ => {}
         }
     }
@@ -338,9 +576,59 @@ fn by_h_c_i_p_h_d_r_hdr(_hdr: &[u8]) -> Option<ProtoId> {
 }
 
 #[inline(never)]
+fn by_l2_c_a_p_cmd_hdr(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 8 {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
+            1 => return Some(ProtoId::L2CAPCmdRej),
+            2 => return Some(ProtoId::L2CAPConnReq),
+            3 => return Some(ProtoId::L2CAPConnResp),
+            4 => return Some(ProtoId::L2CAPConfReq),
+            5 => return Some(ProtoId::L2CAPConfResp),
+            6 => return Some(ProtoId::L2CAPDisconnReq),
+            7 => return Some(ProtoId::L2CAPDisconnResp),
+            8 => return Some(ProtoId::L2CAPEchoReq),
+            9 => return Some(ProtoId::L2CAPEchoResp),
+            10 => return Some(ProtoId::L2CAPInfoReq),
+            11 => return Some(ProtoId::L2CAPInfoResp),
+            12 => return Some(ProtoId::L2CAPCreateChannelRequest),
+            13 => return Some(ProtoId::L2CAPCreateChannelResponse),
+            14 => return Some(ProtoId::L2CAPMoveChannelRequest),
+            15 => return Some(ProtoId::L2CAPMoveChannelResponse),
+            16 => return Some(ProtoId::L2CAPMoveChannelConfirmationRequest),
+            17 => return Some(ProtoId::L2CAPMoveChannelConfirmationResponse),
+            18 => return Some(ProtoId::L2CAPConnectionParameterUpdateRequest),
+            19 => return Some(ProtoId::L2CAPConnectionParameterUpdateResponse),
+            20 => return Some(ProtoId::L2CAPLECreditBasedConnectionRequest),
+            21 => return Some(ProtoId::L2CAPLECreditBasedConnectionResponse),
+            22 => return Some(ProtoId::L2CAPFlowControlCreditInd),
+            23 => return Some(ProtoId::L2CAPCreditBasedConnectionRequest),
+            24 => return Some(ProtoId::L2CAPCreditBasedConnectionResponse),
+            25 => return Some(ProtoId::L2CAPCreditBasedReconfigureRequest),
+            26 => return Some(ProtoId::L2CAPCreditBasedReconfigureResponse),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
+fn by_l2_c_a_p_hdr(hdr: &[u8]) -> Option<ProtoId> {
+    if hdr.len() * 8 >= 32 {
+        match crate::field::read_in(hdr, 16, 16, 2, 2) {
+            1 => return Some(ProtoId::L2CAPCmdHdr),
+            4 => return Some(ProtoId::ATTHdr),
+            5 => return Some(ProtoId::L2CAPCmdHdr),
+            6 => return Some(ProtoId::SMHdr),
+            _ => {}
+        }
+    }
+    None
+}
+
+#[inline(never)]
 fn by_mobile_i_p(hdr: &[u8]) -> Option<ProtoId> {
     if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
             1 => return Some(ProtoId::MobileIPRRQ),
             3 => return Some(ProtoId::MobileIPRRP),
             4 => return Some(ProtoId::MobileIPTunnelData),
@@ -367,7 +655,7 @@ fn by_netflow_v5(_hdr: &[u8]) -> Option<ProtoId> {
 
 #[inline(never)]
 fn by_ppp(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 16 && crate::field::read_bits(hdr, 0, 16) == 49185 {
+    if hdr.len() * 8 >= 16 && crate::field::read_in(hdr, 0, 16, 0, 0) == 49185 {
         return Some(ProtoId::PPPLCP);
     }
     None
@@ -375,7 +663,7 @@ fn by_ppp(hdr: &[u8]) -> Option<ProtoId> {
 
 #[inline(never)]
 fn by_pppoe_disc(hdr: &[u8]) -> Option<ProtoId> {
-    if hdr.len() * 8 >= 8 && crate::field::read_bits(hdr, 4, 4) == 1 {
+    if hdr.len() * 8 >= 8 && crate::field::read_in(hdr, 4, 4, 0, 0) == 1 {
         return Some(ProtoId::PPPoEDTags);
     }
     None
@@ -384,7 +672,7 @@ fn by_pppoe_disc(hdr: &[u8]) -> Option<ProtoId> {
 #[inline(never)]
 fn by_s_m_hdr(hdr: &[u8]) -> Option<ProtoId> {
     if hdr.len() * 8 >= 8 {
-        match crate::field::read_bits(hdr, 0, 8) {
+        match crate::field::read_in(hdr, 0, 8, 0, 0) {
             1 => return Some(ProtoId::SMPairingRequest),
             2 => return Some(ProtoId::SMPairingResponse),
             3 => return Some(ProtoId::SMConfirm),
@@ -393,10 +681,12 @@ fn by_s_m_hdr(hdr: &[u8]) -> Option<ProtoId> {
             6 => return Some(ProtoId::SMEncryptionInformation),
             7 => return Some(ProtoId::SMMasterIdentification),
             8 => return Some(ProtoId::SMIdentityInformation),
+            9 => return Some(ProtoId::SMIdentityAddressInformation),
             10 => return Some(ProtoId::SMSigningInformation),
             11 => return Some(ProtoId::SMSecurityRequest),
             12 => return Some(ProtoId::SMPublicKey),
             13 => return Some(ProtoId::SMDHKeyCheck),
+            14 => return Some(ProtoId::SMKeypressNotification),
             _ => {}
         }
     }
@@ -406,130 +696,674 @@ fn by_s_m_hdr(hdr: &[u8]) -> Option<ProtoId> {
 #[inline]
 pub fn bind_layer(hdr: &mut [u8], parent: ProtoId, child: ProtoId) {
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTErrorResponse {
-        crate::field::write_bits(hdr, 0, 8, 1);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 1);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTExchangeMTURequest {
-        crate::field::write_bits(hdr, 0, 8, 2);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 2);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTExchangeMTUResponse {
-        crate::field::write_bits(hdr, 0, 8, 3);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 3);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTExecuteWriteRequest {
-        crate::field::write_bits(hdr, 0, 8, 24);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 24);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTExecuteWriteResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 25);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindByTypeValueRequest {
-        crate::field::write_bits(hdr, 0, 8, 6);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 6);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindByTypeValueResponse {
-        crate::field::write_bits(hdr, 0, 8, 7);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 7);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTFindInformationRequest {
-        crate::field::write_bits(hdr, 0, 8, 4);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTHandleValueConfirmation {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 30);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTHandleValueIndication {
-        crate::field::write_bits(hdr, 0, 8, 29);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 29);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTHandleValueNotification {
-        crate::field::write_bits(hdr, 0, 8, 27);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 27);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTPrepareWriteRequest {
-        crate::field::write_bits(hdr, 0, 8, 22);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 22);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTPrepareWriteResponse {
-        crate::field::write_bits(hdr, 0, 8, 23);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 23);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadBlobRequest {
-        crate::field::write_bits(hdr, 0, 8, 12);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 12);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadBlobResponse {
-        crate::field::write_bits(hdr, 0, 8, 13);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 13);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByGroupTypeRequest {
-        crate::field::write_bits(hdr, 0, 8, 16);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 16);
     }
-    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByGroupTypeResponse {
-        crate::field::write_bits(hdr, 0, 8, 17);
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadByTypeRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 8);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadMultipleRequest {
-        crate::field::write_bits(hdr, 0, 8, 14);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 14);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadMultipleResponse {
-        crate::field::write_bits(hdr, 0, 8, 15);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 15);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadMultipleVariableRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 32);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadRequest {
-        crate::field::write_bits(hdr, 0, 8, 10);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 10);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTReadResponse {
-        crate::field::write_bits(hdr, 0, 8, 11);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 11);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTWriteCommand {
-        crate::field::write_bits(hdr, 0, 8, 82);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 82);
     }
     if parent == ProtoId::ATTHdr && child == ProtoId::ATTWriteRequest {
-        crate::field::write_bits(hdr, 0, 8, 18);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 18);
+    }
+    if parent == ProtoId::ATTHdr && child == ProtoId::ATTWriteResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 19);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCHANNELMAPIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 1);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCHANNELREPORTINGIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 40);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCISIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 33);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCISREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 31);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCISRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 32);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCISTERMINATEIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 34);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCLOCKACCURACYREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 29);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCLOCKACCURACYRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 30);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCONNECTIONPARAMREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 15);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCONNECTIONPARAMRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 16);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCONNECTIONUPDATEIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 0);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCTEREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 26);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLCTERSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 27);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLENCREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 3);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLENCRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLFEATUREREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 8);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLFEATURERSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 9);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLLENGTHREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 20);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLLENGTHRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 21);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLMINUSEDCHANNELSIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 25);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLPAUSEENCREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 10);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLPAUSEENCRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 11);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLPHYREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 22);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLPHYRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 23);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLPHYUPDATEIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 24);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLPINGREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 18);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLPINGRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 19);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLREJECTEXTIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 17);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLREJECTIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 13);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLSLAVEFEATUREREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 14);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLSTARTENCREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 5);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLSTARTENCRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 6);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLSUBRATEIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 39);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLSUBRATEREQ {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 38);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLTERMINATEIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 2);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLUNKNOWNRSP {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 7);
+    }
+    if parent == ProtoId::BTLECTRL && child == ProtoId::LLVERSIONIND {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 12);
+    }
+    if parent == ProtoId::BTLEDATA && child == ProtoId::BTLECTRL {
+        crate::field::write_in(hdr, 6, 2, 0, 0, 3);
+    }
+    if parent == ProtoId::BTLEDATA && child == ProtoId::BTLEEMPTYPDU {
+        crate::field::write_in(hdr, 6, 10, 0, 0, 256);
     }
     if parent == ProtoId::Dot11Action && child == ProtoId::Dot11SpectrumManagement {
-        crate::field::write_bits(hdr, 0, 8, 0);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 0);
     }
     if parent == ProtoId::Dot11Action && child == ProtoId::Dot11WNM {
-        crate::field::write_bits(hdr, 0, 8, 10);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 10);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdAcceptConnectionRequest {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1033);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdAuthenticationRequested {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1041);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdChangeConnectionLinkKey {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1047);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdChangeConnectionPacketType {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1039);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdCreateConnection {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1029);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdCreateConnectionCancel {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1032);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdDisconnect {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1030);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdExitPeiodicInquiryMode {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1028);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdHoldMode {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 2049);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdInquiry {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1025);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdInquiryCancel {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1026);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdIOCapabilityRequestReply {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1067);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLEAddDeviceToFilterAcceptList {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8209);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLEClearFilterAcceptList {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8208);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLEConnectionUpdate {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8211);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLECreateConnection {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8205);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLECreateConnectionCancel {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8206);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLEEnableEncryption {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8217);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLELongTermKeyRequestNegativeReply
+    {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8219);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLELongTermKeyRequestReply {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8218);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLEReadBufferSizeV1 {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8194);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLEReadBufferSizeV2 {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8288);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLEReadFilterAcceptListSize {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8207);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLEReadLocalSupportedFeatures {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8195);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLEReadRemoteFeatures {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8214);
+    }
+    if parent == ProtoId::HCICommandHdr
+        && child == ProtoId::HCICmdLERemoveDeviceFromFilterAcceptList
+    {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8210);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetAdvertiseEnable {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8202);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetAdvertisingParameters {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8198);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetAdvertisingSetRandomAddress
+    {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8245);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetEventMask {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8193);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetExtendedAdvertiseEnable {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8249);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetExtendedScanEnable {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8258);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetRandomAddress {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8197);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetScanEnable {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8204);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetScanParameters {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8203);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLESetScanResponseData {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 8201);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdLinkKeyRequestNegativeReply {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1036);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdPeriodicInquiryMode {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1027);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadBDAddr {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 4105);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadLEHostSupport {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 3180);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadLinkQuality {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 5123);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadLocalExtendedFeatures {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 4100);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadLocalName {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 3092);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadLocalVersionInformation {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 4097);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadLoopbackMode {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 6145);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadRemoteExtendedFeatures {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1052);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadRemoteSupportedFeatures {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1051);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReadRSSI {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 5125);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdRejectConnectionResponse {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1034);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdRemoteNameRequest {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1049);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdRemoteNameRequestCancel {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1050);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdRemoteOOBDataRequestNegativeReply
+    {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1075);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdReset {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 3075);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdSetConnectionEncryption {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1043);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdSetEventFilter {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 3077);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdSetEventMask {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 3073);
+    }
+    if parent == ProtoId::HCICommandHdr
+        && child == ProtoId::HCICmdUserConfirmationRequestNegativeReply
+    {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1069);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdUserConfirmationRequestReply {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1068);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdUserPasskeyRequestNegativeReply {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1071);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdUserPasskeyRequestReply {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 1070);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdWriteConnectAcceptTimeout {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 3094);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdWriteLEHostSupport {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 3181);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdWriteLocalName {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 3091);
+    }
+    if parent == ProtoId::HCICommandHdr && child == ProtoId::HCICmdWriteLoopbackMode {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 6146);
+    }
+    if parent == ProtoId::HCIEventCommandComplete
+        && child == ProtoId::HCICmdCompleteLEReadWhiteListSize
+    {
+        crate::field::write_in(hdr, 8, 16, 1, 2, 8207);
+    }
+    if parent == ProtoId::HCIEventCommandComplete && child == ProtoId::HCICmdCompleteReadBDAddr {
+        crate::field::write_in(hdr, 8, 16, 1, 2, 4105);
+    }
+    if parent == ProtoId::HCIEventCommandComplete
+        && child == ProtoId::HCICmdCompleteReadLocalExtendedFeatures
+    {
+        crate::field::write_in(hdr, 8, 16, 1, 2, 4100);
+    }
+    if parent == ProtoId::HCIEventCommandComplete && child == ProtoId::HCICmdCompleteReadLocalName {
+        crate::field::write_in(hdr, 8, 16, 1, 2, 3092);
+    }
+    if parent == ProtoId::HCIEventCommandComplete
+        && child == ProtoId::HCICmdCompleteReadLocalVersionInformation
+    {
+        crate::field::write_in(hdr, 8, 16, 1, 2, 4097);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventCommandComplete {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 14);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventCommandStatus {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 15);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventConnectionComplete {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 3);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventConnectionRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventDisconnectionComplete {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 5);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventEncryptionChange {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 8);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventInquiryComplete {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 1);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventIOCapabilityResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 50);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventLEMeta {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 62);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventLinkKeyRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 23);
+    }
+    if parent == ProtoId::HCIEventHdr
+        && child == ProtoId::HCIEventReadRemoteExtendedFeaturesComplete
+    {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 35);
+    }
+    if parent == ProtoId::HCIEventHdr
+        && child == ProtoId::HCIEventReadRemoteSupportedFeaturesComplete
+    {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 11);
+    }
+    if parent == ProtoId::HCIEventHdr
+        && child == ProtoId::HCIEventReadRemoteVersionInformationComplete
+    {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 12);
+    }
+    if parent == ProtoId::HCIEventHdr
+        && child == ProtoId::HCIEventRemoteHostSupportedFeaturesNotification
+    {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 61);
+    }
+    if parent == ProtoId::HCIEventHdr && child == ProtoId::HCIEventRemoteNameRequestComplete {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 7);
+    }
+    if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaConnectionComplete {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 1);
     }
     if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaConnectionUpdateComplete {
-        crate::field::write_bits(hdr, 0, 8, 3);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 3);
+    }
+    if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaEnhancedConnectionComplete {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 10);
+    }
+    if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaLEReadRemoteFeaturesComplete
+    {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
     }
     if parent == ProtoId::HCIEventLEMeta && child == ProtoId::HCILEMetaLongTermKeyRequest {
-        crate::field::write_bits(hdr, 0, 8, 5);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 5);
+    }
+    if parent == ProtoId::HCIHdr && child == ProtoId::HCIACLHdr {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 2);
+    }
+    if parent == ProtoId::HCIHdr && child == ProtoId::HCICommandHdr {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 1);
+    }
+    if parent == ProtoId::HCIHdr && child == ProtoId::HCIEventHdr {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
+    }
+    if parent == ProtoId::HCIMonHdr && child == ProtoId::HCIACLHdr {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 5);
+    }
+    if parent == ProtoId::HCIMonHdr && child == ProtoId::HCICommandHdr {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 2);
+    }
+    if parent == ProtoId::HCIMonHdr && child == ProtoId::HCIEventHdr {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 3);
+    }
+    if parent == ProtoId::HCIMonHdr && child == ProtoId::HCIMonIndexInfo {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 10);
+    }
+    if parent == ProtoId::HCIMonHdr && child == ProtoId::HCIMonNewIndex {
+        crate::field::write_in(hdr, 0, 16, 0, 2, 0);
+    }
+    if parent == ProtoId::HCIMonPcapHdr && child == ProtoId::HCIACLHdr {
+        crate::field::write_in(hdr, 16, 16, 0, 0, 5);
+    }
+    if parent == ProtoId::HCIMonPcapHdr && child == ProtoId::HCICommandHdr {
+        crate::field::write_in(hdr, 16, 16, 0, 0, 2);
+    }
+    if parent == ProtoId::HCIMonPcapHdr && child == ProtoId::HCIEventHdr {
+        crate::field::write_in(hdr, 16, 16, 0, 0, 3);
+    }
+    if parent == ProtoId::HCIMonPcapHdr && child == ProtoId::HCIMonIndexInfo {
+        crate::field::write_in(hdr, 16, 16, 0, 0, 10);
+    }
+    if parent == ProtoId::HCIMonPcapHdr && child == ProtoId::HCIMonNewIndex {
+        crate::field::write_in(hdr, 16, 16, 0, 0, 0);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPCmdRej {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 1);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPConfReq {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPConfResp {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 5);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPConnectionParameterUpdateRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 18);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPConnectionParameterUpdateResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 19);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPConnReq {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 2);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPConnResp {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 3);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPCreateChannelRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 12);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPCreateChannelResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 13);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPCreditBasedConnectionRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 23);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPCreditBasedConnectionResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 24);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPCreditBasedReconfigureRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 25);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPCreditBasedReconfigureResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 26);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPDisconnReq {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 6);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPDisconnResp {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 7);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPEchoReq {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 8);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPEchoResp {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 9);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPFlowControlCreditInd {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 22);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPInfoReq {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 10);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPInfoResp {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 11);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPLECreditBasedConnectionRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 20);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPLECreditBasedConnectionResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 21);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPMoveChannelConfirmationRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 16);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPMoveChannelConfirmationResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 17);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPMoveChannelRequest {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 14);
+    }
+    if parent == ProtoId::L2CAPCmdHdr && child == ProtoId::L2CAPMoveChannelResponse {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 15);
+    }
+    if parent == ProtoId::L2CAPHdr && child == ProtoId::ATTHdr {
+        crate::field::write_in(hdr, 16, 16, 2, 2, 4);
+    }
+    if parent == ProtoId::L2CAPHdr && child == ProtoId::L2CAPCmdHdr {
+        crate::field::write_in(hdr, 16, 16, 2, 2, 5);
+    }
+    if parent == ProtoId::L2CAPHdr && child == ProtoId::SMHdr {
+        crate::field::write_in(hdr, 16, 16, 2, 2, 6);
     }
     if parent == ProtoId::MobileIP && child == ProtoId::MobileIPRRP {
-        crate::field::write_bits(hdr, 0, 8, 3);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 3);
     }
     if parent == ProtoId::MobileIP && child == ProtoId::MobileIPRRQ {
-        crate::field::write_bits(hdr, 0, 8, 1);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 1);
     }
     if parent == ProtoId::MobileIP && child == ProtoId::MobileIPTunnelData {
-        crate::field::write_bits(hdr, 0, 8, 4);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
     }
     if parent == ProtoId::Ppp && child == ProtoId::PPPLCP {
-        crate::field::write_bits(hdr, 0, 16, 49185);
+        crate::field::write_in(hdr, 0, 16, 0, 0, 49185);
     }
     if parent == ProtoId::PppoeDisc && child == ProtoId::PPPoEDTags {
-        crate::field::write_bits(hdr, 4, 4, 1);
+        crate::field::write_in(hdr, 4, 4, 0, 0, 1);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMConfirm {
-        crate::field::write_bits(hdr, 0, 8, 3);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 3);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMDHKeyCheck {
-        crate::field::write_bits(hdr, 0, 8, 13);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 13);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMEncryptionInformation {
-        crate::field::write_bits(hdr, 0, 8, 6);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 6);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMFailed {
-        crate::field::write_bits(hdr, 0, 8, 5);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 5);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMIdentityAddressInformation {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 9);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMIdentityInformation {
-        crate::field::write_bits(hdr, 0, 8, 8);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 8);
+    }
+    if parent == ProtoId::SMHdr && child == ProtoId::SMKeypressNotification {
+        crate::field::write_in(hdr, 0, 8, 0, 0, 14);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMMasterIdentification {
-        crate::field::write_bits(hdr, 0, 8, 7);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 7);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMPairingRequest {
-        crate::field::write_bits(hdr, 0, 8, 1);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 1);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMPairingResponse {
-        crate::field::write_bits(hdr, 0, 8, 2);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 2);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMPublicKey {
-        crate::field::write_bits(hdr, 0, 8, 12);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 12);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMRandom {
-        crate::field::write_bits(hdr, 0, 8, 4);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 4);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMSecurityRequest {
-        crate::field::write_bits(hdr, 0, 8, 11);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 11);
     }
     if parent == ProtoId::SMHdr && child == ProtoId::SMSigningInformation {
-        crate::field::write_bits(hdr, 0, 8, 10);
+        crate::field::write_in(hdr, 0, 8, 0, 0, 10);
     }
 }
 
@@ -581,36 +1415,66 @@ mod tests {
     /// wrong bits.
     #[test]
     fn every_parent_field_is_where_the_bindings_read_it() {
+        assert_eq!(span_of(ProtoId::ATTHdr, &["opcode"]), Some((0, 8, 0, 0)));
+        assert_eq!(span_of(ProtoId::BTLECTRL, &["opcode"]), Some((0, 8, 0, 0)));
+        assert_eq!(span_of(ProtoId::BTLEDATA, &["LLID"]), Some((6, 2, 0, 0)));
         assert_eq!(
-            crate::proto::field_of(ProtoId::ATTHdr, "opcode").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
+            span_of(ProtoId::BTLEDATA, &["LLID", "len"]),
+            Some((6, 10, 0, 0))
         );
         assert_eq!(
-            crate::proto::field_of(ProtoId::Dot11Action, "category")
-                .map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
+            span_of(ProtoId::Dot11Action, &["category"]),
+            Some((0, 8, 0, 0))
         );
         assert_eq!(
-            crate::proto::field_of(ProtoId::HCIEventLEMeta, "event")
-                .map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
+            span_of(ProtoId::HCICommandHdr, &["ogf", "ocf"]),
+            Some((0, 16, 0, 2))
         );
         assert_eq!(
-            crate::proto::field_of(ProtoId::MobileIP, "type").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
+            span_of(ProtoId::HCIEventCommandComplete, &["opcode"]),
+            Some((8, 16, 1, 2))
+        );
+        assert_eq!(span_of(ProtoId::HCIEventHdr, &["code"]), Some((0, 8, 0, 0)));
+        assert_eq!(
+            span_of(ProtoId::HCIEventLEMeta, &["event"]),
+            Some((0, 8, 0, 0))
+        );
+        assert_eq!(span_of(ProtoId::HCIHdr, &["type"]), Some((0, 8, 0, 0)));
+        assert_eq!(
+            span_of(ProtoId::HCIMonHdr, &["opcode"]),
+            Some((0, 16, 0, 2))
         );
         assert_eq!(
-            crate::proto::field_of(ProtoId::Ppp, "proto").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 16))
+            span_of(ProtoId::HCIMonPcapHdr, &["opcode"]),
+            Some((16, 16, 0, 0))
         );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::PppoeDisc, "type").map(|f| (f.bit_off, f.bit_len)),
-            Some((4, 4))
-        );
-        assert_eq!(
-            crate::proto::field_of(ProtoId::SMHdr, "sm_command").map(|f| (f.bit_off, f.bit_len)),
-            Some((0, 8))
-        );
+        assert_eq!(span_of(ProtoId::L2CAPCmdHdr, &["code"]), Some((0, 8, 0, 0)));
+        assert_eq!(span_of(ProtoId::L2CAPHdr, &["cid"]), Some((16, 16, 2, 2)));
+        assert_eq!(span_of(ProtoId::MobileIP, &["type"]), Some((0, 8, 0, 0)));
+        assert_eq!(span_of(ProtoId::Ppp, &["proto"]), Some((0, 16, 0, 0)));
+        assert_eq!(span_of(ProtoId::PppoeDisc, &["type"]), Some((4, 4, 0, 0)));
+        assert_eq!(span_of(ProtoId::SMHdr, &["sm_command"]), Some((0, 8, 0, 0)));
+    }
+
+    /// Adjacent fields of one byte order, as the selector they make together.
+    fn span_of(p: ProtoId, names: &[&str]) -> Option<(u16, u16, u16, u8)> {
+        let mut out: Option<(u16, u16, u16, u8)> = None;
+        for n in names {
+            let f = crate::proto::field_of(p, n)?;
+            let (at, len) = if f.le_len > 1 {
+                (f.le_at, f.le_len)
+            } else {
+                (0, 0)
+            };
+            out = match out {
+                None => Some((f.bit_off, f.bit_len, at, len)),
+                Some((o, l, a, g)) if o + l == f.bit_off && (a, g) == (at, len) => {
+                    Some((o, l + f.bit_len, a, g))
+                }
+                _ => return None,
+            };
+        }
+        out
     }
 
     /// The reverse map is what stacking a layer writes, so a port it

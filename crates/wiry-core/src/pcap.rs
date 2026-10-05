@@ -24,6 +24,8 @@ pub mod linktype {
     pub const IPV4: u32 = 228;
     pub const IPV6: u32 = 229;
     pub const LINUX_SLL2: u32 = 276;
+    /// HCI packets behind a one-octet H4 packet type.
+    pub const BLUETOOTH_HCI_H4: u32 = 187;
 }
 
 pub fn link_to_proto(lt: u32) -> ProtoId {
@@ -38,6 +40,7 @@ pub fn link_to_proto(lt: u32) -> ProtoId {
         linktype::IPV6 => ProtoId::Ipv6,
         linktype::IEEE802_11 => ProtoId::Dot11,
         linktype::IEEE802_11_RADIO => ProtoId::RadioTap,
+        linktype::BLUETOOTH_HCI_H4 => ProtoId::HCIHdr,
         _ => ProtoId::Raw,
     }
 }

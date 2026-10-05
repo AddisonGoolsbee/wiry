@@ -53,8 +53,7 @@ fn set_hlen(hdr: &mut [u8], hlen: usize) {
     let v: i64 = v_x;
     let f = &FIELDS[1];
     if v >= 0 && crate::field::fits(f, v as u64) {
-        let w = crate::field::wire_uint(f, v as u64);
-        crate::field::write_bits(hdr, f.bit_off, f.bit_len, w);
+        crate::field::write_uint(hdr, f, v as u64);
     }
 }
 

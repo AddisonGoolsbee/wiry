@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // Derived from scapy: scapy/layers/bluetooth.py
-//   scapy 2.7.0
+//   scapy 2.8.0.post0
 //   Copyright (C) Philippe Biondi and the scapy contributors
 //
 // Changed by the wiry authors:
 //   2026-10-03 — field table, defaults, enum names and bindings of HCI_Hdr converted mechanically from the field objects by dev/protogen/scapy2spec.py
 
-//! scapy/layers/bluetooth.py, class HCI_Hdr (scapy 2.7.0), converted by
+//! scapy/layers/bluetooth.py, class HCI_Hdr (scapy 2.8.0.post0), converted by
 //! dev/protogen/scapy2spec.py from the field objects scapy builds at run time.
 //! scapy's docstring cites no RFC for it.
 //!
@@ -15,7 +15,7 @@
 //! come from the sources cited above; edit the spec, not this file.
 
 use crate::field::FieldDesc;
-use crate::proto::{Next, ProtoDesc, ProtoId};
+use crate::proto::{ProtoDesc, ProtoId};
 
 // protogen:hand begin
 // protogen:hand end
@@ -35,17 +35,13 @@ fn header_len(_: &[u8]) -> usize {
     1
 }
 
-fn next(_: &[u8]) -> Next {
-    Next::Proto(ProtoId::Raw)
-}
-
 pub static DESC: ProtoDesc = ProtoDesc {
     id: ProtoId::HCIHdr,
     name: "HCI_Hdr",
     fields: FIELDS,
     min_len: 1,
     header_len,
-    next,
+    next: crate::proto::next_raw,
     build_len: 1,
     parse_options: None,
     opt_table: None,
