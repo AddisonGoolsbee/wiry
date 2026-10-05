@@ -1,14 +1,13 @@
 //! Shared assertions: dissection does not panic, it terminates, and no span
-//! points outside the buffer it came from. wiry-core's
-//! `tests/robustness.rs` keeps a deterministic copy of these; the two must
-//! stay in step.
+//! points outside its buffer. wiry-core's `tests/robustness.rs` keeps a
+//! deterministic copy, and the two must stay in step.
 
 use wiry_core::packet::Packet;
 use wiry_core::proto::{self, ProtoId};
 use wiry_core::{parse, render, show};
 
-/// Every built-in layer, derived from the registry rather than re-listed. As a
-/// hand-kept copy this list had silently fallen three layers behind.
+/// Every built-in layer, read from the registry so a new layer is fuzzed
+/// without anyone remembering to list it.
 pub fn all_protos() -> Vec<ProtoId> {
     proto::builtins().collect()
 }
@@ -41,10 +40,9 @@ pub fn exercise(pkt: &mut Packet) {
             let v = pkt.get_desc(i, f);
             let _ = show::render_value(&v);
             let _ = v.as_uint();
-            // A lookup by name answers with the field this header carries, so
-            // compare only when that resolves back to this one: a false
-            // condition, or another field sharing the name under a disjoint
-            // condition (ICMP), both give a different answer.
+            // A name lookup returns whichever field is active in this header,
+            // which is not `f` when `f`'s condition is false or another field
+            // shares its name under a disjoint condition (ICMP).
             if pkt
                 .active_field(i, f.name)
                 .is_some_and(|a| std::ptr::eq(a, f))
@@ -67,9 +65,9 @@ pub fn exercise(pkt: &mut Packet) {
 /// exactly as the Python facade sends them.
 const WRITE_STRS: [&str; 4] = ["1.2.3.4", "00:11:22:33:44:55", "::1", "SA"];
 
-/// The write half of the engine carries the same never-panic contract as the
-/// read half, and only a write pass tests it. Runs on a copy, after the read
-/// assertions have seen the input pristine.
+/// The write half carries the same never-panic contract as the read half, and
+/// a read-only pass leaves it unfuzzed. Works on copies, so the read assertions
+/// see the input pristine.
 pub fn exercise_writes(pkt: &Packet) {
     for i in 0..pkt.layers().len() {
         let proto = pkt.layers()[i].proto;

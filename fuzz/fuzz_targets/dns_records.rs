@@ -9,18 +9,17 @@ use wiry_core::proto::ProtoId;
 fuzz_target!(|data: &[u8]| {
     let start = Instant::now();
     let r = dns::parse_records(data);
-    // Name compression lets the input point anywhere in the message, so
-    // returning at all is the defence against a decompression bomb.
+    // Compression pointers can aim anywhere in the message, so returning in
+    // bounded time is the defence against a decompression bomb.
     assert!(
         start.elapsed().as_secs() < 2,
         "parse_records took too long on {} bytes",
         data.len()
     );
 
-    // Record count is the wrong quantity: 65,535 two-octet pointers stay under
-    // the input size while decoding hundreds of MB. Owned bytes are the only
-    // quantity the message has no other bound on, and a type bit map or a
-    // signature is as unbounded as a name.
+    // Record count is the wrong bound: 65,535 two-octet pointers fit in the
+    // input yet decode to hundreds of MB. Owned bytes are bounded by nothing
+    // else, and a type bit map or a signature is as unbounded as a name.
     let names: usize = r.qd.iter().map(|q| q.qname.len()).sum::<usize>()
         + r.an
             .iter()
@@ -43,8 +42,8 @@ fuzz_target!(|data: &[u8]| {
         let _ = rr.edns();
     }
 
-    // RFC 1035 §4.2.2 framing: the header the fields are read from, the length
-    // recomputed over it, and the whole write half of the engine.
+    // Under TCP, RFC 1035 §4.2.2 adds a length prefix, which the write half
+    // must recompute.
     let mut tcp = vec![0x00, 0x35, 0x00, 0x35, 0, 0, 0, 1, 0, 0, 0, 0];
     tcp.extend_from_slice(&[0x50, 0x10, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00]);
     tcp.extend_from_slice(data);

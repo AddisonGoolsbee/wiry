@@ -5,13 +5,10 @@ use wiry_core::packet::Packet;
 use wiry_core::stream;
 use wiry_fuzz::all_protos;
 
-// Stream reassembly buffers what a sender chooses to send, in an order the
-// sender chooses, so an unbounded allocation, a panic on a length field or a
-// hang on a crafted overlap is a denial of service on untrusted captures.
-//
-// The write half is exercised too: `reframe` splices reassembled octets back
-// into a frame's own headers and rewrites its length fields, and a read-only
-// target would leave all of that unfuzzed.
+// The sender chooses what stream reassembly buffers and in what order, so an
+// unbounded allocation, a panic on a length field or a hang on a crafted
+// overlap is a denial of service on untrusted captures. `reframe` is exercised
+// too: it rewrites length fields, which a read-only target leaves unfuzzed.
 fuzz_target!(|data: &[u8]| {
     let Some((sel, body)) = data.split_first() else {
         return;
@@ -23,8 +20,8 @@ fuzz_target!(|data: &[u8]| {
     let input: usize = frames.iter().map(|f| f.len()).sum();
 
     let streams = stream::reassemble(frames.iter().copied(), link);
-    // Nothing stands in for octets that never arrived, so what comes out can
-    // never be more than what went in.
+    // Nothing stands in for octets that never arrived, so output never exceeds
+    // input.
     let out: usize = streams
         .iter()
         .flat_map(|s| s.halves.iter())
