@@ -157,7 +157,7 @@ impl GroupDesc {
 
     /// True where an element is one field and carries nothing nested, so each
     /// element contributes its own value rather than a wrapper.
-    fn is_scalar_list(&self) -> bool {
+    pub fn is_scalar_list(&self) -> bool {
         self.fields.len() == 1 && self.nested.is_none()
     }
 

@@ -186,7 +186,7 @@ def test_the_ospf_type_octet_chooses_the_body_layer():
     pkt = OSPF_Hdr(bytes(hello) + body)
     assert pkt.haslayer(OSPF_Hello)
     assert not pkt.haslayer(OSPF_LSAck)
-    assert pkt[OSPF_Hello].neighbors == [("neighbor", "0.0.0.0")]
+    assert pkt[OSPF_Hello].neighbors == ["0.0.0.0"]
 
 
 def test_an_ospf_update_reads_each_lsa_at_its_own_length():
@@ -277,9 +277,9 @@ def test_a_scalar_list_takes_bare_values():
     """A list of addresses is how these are written, not a list of pairs."""
     built = OSPF_Hdr(len=52) / OSPF_Hello(neighbors=["10.0.0.2", "10.0.0.3"])
     back = OSPF_Hdr(bytes(built))[OSPF_Hello]
-    assert back.neighbors == [("neighbor", "10.0.0.2"), ("neighbor", "10.0.0.3")]
+    assert back.neighbors == ["10.0.0.2", "10.0.0.3"]
     assert VRRP(bytes(VRRP(addrlist=["10.0.0.1"])))[VRRP].ipcount == 1
-    assert RTP(bytes(RTP(sync=[7, 9])))[RTP].sync == [("id", 7), ("id", 9)]
+    assert RTP(bytes(RTP(sync=[7, 9])))[RTP].sync == [7, 9]
 
 
 def test_a_group_starting_past_the_fixed_header_pays_for_the_gap():
@@ -290,7 +290,7 @@ def test_a_group_starting_past_the_fixed_header_pays_for_the_gap():
     assert len(raw) == 28 + 32
     back = ICMPv6MLQuery(raw)[ICMPv6MLQuery]
     assert back.sources_number == 2
-    assert back.sources == [("src", "::1"), ("src", "::2")]
+    assert back.sources == ["::1", "::2"]
 
 
 def test_a_group_at_octet_zero_builds_nothing_of_its_own():

@@ -196,6 +196,9 @@ _FLAG_FIELDS: set[str] = set()
 # and BER layers answer under their own name rather than "options".
 _PARSED_FIELD: dict[str, str] = {}
 
+# Layers whose parsed list holds bare values, as a scapy FieldListField does.
+_SCALAR_GROUP: set[str] = set()
+
 
 def _bits_from(text: str, names: Sequence[str]) -> int:
     """Parse a flag string into its bits.
@@ -534,6 +537,8 @@ class _LayerView:
         if field == _PARSED_FIELD.get(self._name, "options"):
             parsed = rust.options(self._idx)
             if parsed is not None:
+                if self._name in _SCALAR_GROUP:
+                    return [v for _, v in parsed]
                 return [_group_item(x) for x in parsed]
         if field in ("qd", "an", "ns", "ar"):
             recs = rust.dns_records(self._idx)
@@ -1939,6 +1944,8 @@ for _n in _b.known_layers():
         __all__.append(_n)
     _FLAG_FIELDS.update(f for f in _b.layer_fields(_n) if _b.flag_names(_n, f))
     _PARSED_FIELD[_n] = _b.parsed_field(_n)
+    if _b.scalar_group(_n):
+        _SCALAR_GROUP.add(_n)
 
 
 def known_layers() -> list[str]:

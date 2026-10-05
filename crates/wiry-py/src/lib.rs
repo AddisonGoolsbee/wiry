@@ -2156,6 +2156,13 @@ fn parsed_field(name: &str) -> PyResult<&'static str> {
     Ok(proto::parsed_field_name(proto_by_name(name)?))
 }
 
+/// Whether the parsed list is of bare values (scapy's `FieldListField`)
+/// rather than of records, so Python hands out the values themselves.
+#[pyfunction]
+fn scalar_group(name: &str) -> PyResult<bool> {
+    Ok(proto::group_of(proto_by_name(name)?).is_some_and(|g| g.is_scalar_list()))
+}
+
 #[pyfunction]
 fn layer_fields(name: &str) -> PyResult<Vec<&'static str>> {
     let id = proto_by_name(name)?;
@@ -2404,6 +2411,7 @@ fn _wiry(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(layer_fields, m)?)?;
     m.add_function(wrap_pyfunction!(column_fields, m)?)?;
     m.add_function(wrap_pyfunction!(parsed_field, m)?)?;
+    m.add_function(wrap_pyfunction!(scalar_group, m)?)?;
     m.add_function(wrap_pyfunction!(flag_names, m)?)?;
     m.add_function(wrap_pyfunction!(enum_names, m)?)?;
     m.add_function(wrap_pyfunction!(scaled_fields, m)?)?;
